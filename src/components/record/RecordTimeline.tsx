@@ -91,15 +91,13 @@ function RecordRow({ entry }: { entry: RecordEntry }) {
           <p className="text-ink-muted mt-2 max-w-prose text-sm leading-relaxed">{entry.detail}</p>
         )}
 
-        {/* On narrow screens the mark and value wrap under the title rather
-            than squeezing a third column into 375px. */}
-        <div className="mt-3 flex flex-wrap items-center gap-3 sm:hidden">
-          <EntryValue entry={entry} placement={placement} />
-          <VerificationMark state={entry.verification} />
-        </div>
       </div>
 
-      <div className="hidden items-center gap-4 justify-self-end sm:flex">
+      {/* Rendered once and repositioned by the grid, rather than duplicated per
+          breakpoint with one copy hidden. A `sm:hidden` twin is still in the
+          accessibility tree, so every entry would be announced twice. Below
+          `sm` this wraps under the title; from `sm` up it is the third column. */}
+      <div className="col-start-2 mt-3 flex flex-wrap items-center gap-3 sm:col-start-3 sm:row-start-1 sm:mt-0 sm:flex-nowrap sm:gap-4 sm:justify-self-end">
         <EntryValue entry={entry} placement={placement} />
         <VerificationMark state={entry.verification} />
       </div>

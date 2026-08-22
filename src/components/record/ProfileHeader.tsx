@@ -1,7 +1,7 @@
 import Image from "next/image";
 
 import type { Membership, Organization, Profile } from "@/lib/database.types";
-import { levelLabel } from "@/lib/format";
+import { levelLabel, sportLabel } from "@/lib/format";
 
 type MembershipWithOrg = Membership & { organizations: Organization | null };
 
@@ -42,7 +42,7 @@ export function ProfileHeader({
           <IdentityLine
             parts={[
               level,
-              profile.primary_sport?.replace(/_/g, " "),
+              sportLabel(profile.primary_sport),
               profile.grad_year ? `Class of ${profile.grad_year}` : null,
               current?.organizations?.name ?? null,
             ]}
@@ -108,7 +108,7 @@ function IdentityLine({ parts }: { parts: (string | null | undefined)[] }) {
               ·
             </span>
           )}
-          <span className="capitalize">{part}</span>
+          <span>{part}</span>
         </span>
       ))}
     </p>

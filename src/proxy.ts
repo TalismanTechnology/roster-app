@@ -1,6 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { isSupabaseConfigured } from "@/lib/supabase/config";
+
 /**
  * Runs before every matched request.
  *
@@ -35,10 +37,17 @@ const APP_ROUTES = [
   "verify",
   "invite",
   "api",
+  "preview",
 ];
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
+
+  // Before Supabase is wired up, do not gate anything — the auth call would
+  // stall on an unresolvable hostname and every route would appear to hang.
+  if (!isSupabaseConfigured()) {
+    return response;
+  }
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
