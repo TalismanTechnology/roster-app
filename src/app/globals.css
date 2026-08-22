@@ -1,26 +1,191 @@
 @import "tailwindcss";
 
+/* ===========================================================================
+   Roster design tokens
+
+   Direction: editorial print. The record is a document before it is a feed,
+   so the system is built from ink, paper, and hairline rules rather than
+   cards floating on gray. Colour is reserved for meaning — verification state
+   and the single primary action — never decoration.
+   =========================================================================== */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Surfaces. Warm off-white rather than pure white: on an OLED phone in a gym
+     lobby, #fff glares and the record stops reading like a document. */
+  --paper: oklch(98.2% 0.004 85);
+  --paper-raised: oklch(100% 0 0);
+  --paper-sunken: oklch(95.8% 0.005 85);
+
+  /* Ink. The 11% base is #0b0b0a from the Roster wordmark. */
+  --ink: oklch(11% 0.003 85);
+  --ink-muted: oklch(44% 0.006 85);
+  --ink-subtle: oklch(62% 0.006 85);
+
+  /* Hairlines. Two weights only: a whisper for internal divisions, a firmer
+     one for section boundaries. */
+  --rule: oklch(89% 0.004 85);
+  --rule-strong: oklch(78% 0.005 85);
+
+  /* Semantic state. Verification is the product's core signal, so it gets a
+     real colour — a deep forest that reads as "confirmed by an authority"
+     rather than the consumer-blue checkmark everyone already discounts. */
+  --state-verified: oklch(45% 0.085 155);
+  --state-verified-bg: oklch(95% 0.025 155);
+  --state-pending: oklch(58% 0.09 75);
+  --state-pending-bg: oklch(96% 0.03 75);
+  --state-disputed: oklch(55% 0.15 30);
+  --state-disputed-bg: oklch(95% 0.03 30);
+
+  --focus: oklch(45% 0.085 155);
+
+  /* Type scale. Fluid at the display end where the range matters, fixed for
+     UI text where predictability matters more. */
+  --text-micro: 0.6875rem;  /* 11px — labels, small caps only */
+  --text-sm: 0.8125rem;     /* 13px */
+  --text-base: 0.9375rem;   /* 15px */
+  --text-lg: 1.0625rem;     /* 17px */
+  --text-display-sm: clamp(1.5rem, 1.2rem + 1.2vw, 2rem);
+  --text-display: clamp(2rem, 1.4rem + 2.8vw, 3.5rem);
+  --text-display-lg: clamp(2.75rem, 1.5rem + 5.5vw, 6rem);
+
+  /* Spacing rhythm: a 4px base, with named steps for the two that carry
+     structural meaning. */
+  --space-gutter: clamp(1.25rem, 0.75rem + 2vw, 3rem);
+  --space-section: clamp(3rem, 2rem + 4vw, 6rem);
+
+  --duration-fast: 140ms;
+  --duration-normal: 240ms;
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
+/* Dark mode is a genuine second design, not an inversion: the ink lifts to a
+   warm off-white, surfaces stay near-black but separate by luminance, and the
+   state colours are desaturated so they don't glow. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --paper: oklch(13% 0.004 85);
+    --paper-raised: oklch(17% 0.005 85);
+    --paper-sunken: oklch(10% 0.004 85);
+
+    --ink: oklch(95% 0.004 85);
+    --ink-muted: oklch(71% 0.006 85);
+    --ink-subtle: oklch(55% 0.006 85);
+
+    --rule: oklch(26% 0.005 85);
+    --rule-strong: oklch(38% 0.006 85);
+
+    --state-verified: oklch(78% 0.13 155);
+    --state-verified-bg: oklch(26% 0.05 155);
+    --state-pending: oklch(80% 0.11 75);
+    --state-pending-bg: oklch(26% 0.04 75);
+    --state-disputed: oklch(72% 0.15 30);
+    --state-disputed-bg: oklch(26% 0.05 30);
+
+    --focus: oklch(78% 0.13 155);
   }
 }
 
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-raised: var(--paper-raised);
+  --color-paper-sunken: var(--paper-sunken);
+
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-subtle: var(--ink-subtle);
+
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+
+  --color-verified: var(--state-verified);
+  --color-verified-bg: var(--state-verified-bg);
+  --color-pending: var(--state-pending);
+  --color-pending-bg: var(--state-pending-bg);
+  --color-disputed: var(--state-disputed);
+  --color-disputed-bg: var(--state-disputed-bg);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-instrument), ui-serif, Georgia, serif;
+
+  --text-micro: var(--text-micro);
+  --text-display-sm: var(--text-display-sm);
+  --text-display: var(--text-display);
+  --text-display-lg: var(--text-display-lg);
+}
+
+/* ===========================================================================
+   Base
+   =========================================================================== */
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  font-size: var(--text-base);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Every measurement on Roster — 10.42, 6-08.25, 2:14:03 — sits in a column
+   next to another measurement. Proportional figures make those columns ragged,
+   so tabular is the default and only prose opts out. */
+:where(time, [data-numeric]) {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+::selection {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* A single visible focus treatment, never removed. */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ===========================================================================
+   Utilities
+   =========================================================================== */
+
+/* The editorial label: small caps, wide tracking, used for section eyebrows
+   and state chips. Defined once so tracking stays consistent everywhere. */
+@utility label {
+  font-size: var(--text-micro);
+  font-weight: 500;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+@utility rule-t {
+  border-top: 1px solid var(--rule);
+}
+
+/* Screen-reader-only text, for the labels that carry meaning colour alone
+   would otherwise convey. */
+@utility sr-only-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border-width: 0;
 }

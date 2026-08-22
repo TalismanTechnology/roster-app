@@ -1,69 +1,118 @@
-import Image from "next/image";
+import Link from "next/link";
 
-export default function Home() {
+import { FeedPost, type FeedPostData } from "@/components/feed/FeedPost";
+import { createClient, getCurrentUser } from "@/lib/supabase/server";
+
+/**
+ * The app entry point.
+ *
+ * Signed in, this is the feed. Signed out, it is a gate — the marketing site
+ * at myroster.us does the selling, so this page only needs to get an existing
+ * member in and point everyone else at the application form.
+ */
+export default async function HomePage() {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return <SignedOutGate />;
+  }
+
+  const supabase = await createClient();
+
+  // RLS already restricts posts to profiles the viewer can see, but that
+  // includes every members-only profile on the network. The feed additionally
+  // narrows to people they actually follow, plus themselves.
+  const { data: following } = await supabase
+    .from("follows")
+    .select("following_id")
+    .eq("follower_id", user.id)
+    .not("accepted_at", "is", null);
+
+  const authorIds = [user.id, ...(following ?? []).map((row) => row.following_id)];
+
+  const { data: posts } = await supabase
+    .from("posts")
+    .select(
+      `id, body, created_at, like_count, comment_count,
+       profiles!posts_author_id_fkey (handle, display_name, avatar_url),
+       achievements (title, value_display, unit, achieved_on, verification, kind)`,
+    )
+    .in("author_id", authorIds)
+    .is("removed_at", null)
+    .order("created_at", { ascending: false })
+    .limit(50)
+    .returns<FeedPostData[]>();
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+    <main className="mx-auto w-full max-w-2xl px-(--space-gutter) py-(--space-section)">
+      <header className="border-rule-strong flex items-baseline justify-between border-b pb-3">
+        <h1 className="label text-ink">The feed</h1>
+        <Link
+          href="/record"
+          className="label text-ink-muted hover:text-ink cursor-pointer transition-colors duration-(--duration-fast)"
+        >
+          Add to record →
+        </Link>
+      </header>
+
+      {posts && posts.length > 0 ? (
+        <ol>
+          {posts.map((post) => (
+            <FeedPost key={post.id} post={post} />
+          ))}
+        </ol>
+      ) : (
+        <EmptyFeed />
+      )}
+    </main>
+  );
+}
+
+function EmptyFeed() {
+  return (
+    <div className="py-16 text-center">
+      <p className="font-display text-display-sm">Quiet in here.</p>
+      <p className="text-ink-muted mx-auto mt-3 max-w-sm text-sm leading-relaxed">
+        Follow athletes who compete where you do, and their moments show up here.
+      </p>
+      <Link
+        href="/search"
+        className="label text-ink decoration-rule-strong hover:decoration-ink mt-6 inline-block cursor-pointer underline underline-offset-[6px] transition-colors duration-(--duration-fast)"
+      >
+        Find athletes →
+      </Link>
     </div>
+  );
+}
+
+function SignedOutGate() {
+  return (
+    <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-(--space-gutter) py-(--space-section)">
+      <p className="label text-ink-subtle">Roster</p>
+
+      <h1 className="font-display text-display mt-4 leading-[0.95] tracking-tight text-balance">
+        Where athletes build their name.
+      </h1>
+
+      <p className="text-ink-muted mt-5 leading-relaxed">
+        The private network for serious athletes. Membership is limited.
+      </p>
+
+      <div className="mt-10 flex flex-col gap-3">
+        <Link
+          href="/sign-in"
+          className="bg-ink text-paper hover:bg-ink-muted flex h-12 cursor-pointer items-center justify-center rounded-[2px] text-sm font-medium transition-colors duration-(--duration-fast)"
+        >
+          Sign in
+        </Link>
+
+        <Link
+          href="/request-access"
+          className="border-rule-strong text-ink hover:border-ink flex h-12 cursor-pointer items-center justify-center rounded-[2px] border text-sm font-medium transition-colors duration-(--duration-fast)"
+        >
+          Request early access
+        </Link>
+      </div>
+    </main>
   );
 }
