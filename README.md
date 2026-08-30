@@ -1,32 +1,36 @@
 # Roster
 
-The private network for serious athletes. An athlete's accomplishments become
-one verifiable record they can send to a recruiter — and a feed where that
-record earns recognition.
+A digital resume for athletes. Every PR, result, award, and clip of film —
+verified by coaches — at one link a recruiter can open without an account.
+Think Hudl's profile page, taken seriously: the record is verifiable, the
+academics are on it, and the coach a recruiter would call is listed.
 
 Marketing site: [myroster.us](https://myroster.us)
 
-## Why this stack
+## The product in one loop
 
-The build decision was between forking an existing open-source social network
-and assembling one. Forking lost, for a specific reason: the federated options
-(Mastodon, Misskey, Pixelfed, Lemmy) are all built on ActivityPub, which means
-public, portable, unverifiable identity. Roster is private, invite-only, and
-verified — the exact inverse. Adopting one would have meant months spent
-removing its central premise.
+1. An athlete signs up and claims `roster.us/<handle>`.
+2. They build the resume: record entries, film links, academics, references.
+3. A coach verifies entries; the verified count is the resume's credibility.
+4. Recruiters find athletes at `/search` — by sport, level, class year,
+   state — or open the link the athlete sent them. No recruiter account needed.
 
-What actually needed inheriting was the boring, hard infrastructure: auth,
-media handling, session management, realtime. Supabase provides those as mature
-open source. The parts that make Roster worth using — the record, verification,
-the recruiter surface — do not exist in any project you could fork, so they get
-written either way.
+Visibility is the athlete's call: **public** (listed in search, indexable),
+**unlisted** (anyone with the link, findable by no one), or **private**.
+Coach contact details additionally require the resume to be public and the
+athlete to be open to recruiting.
 
-- **Next.js 16** (App Router, Turbopack) + **React 19**
-- **Supabase** — Postgres, auth, storage, realtime
-- **Tailwind CSS 4** with design tokens in `src/app/globals.css`
+## Stack
 
-> Next.js 16 renamed `middleware.ts` to `proxy.ts`. Session refresh and route
-> gating live in `src/proxy.ts`.
+- **Next.js 16** (App Router, Turbopack) + **React 19** — Server Components
+  and Server Actions throughout; the public pages ship almost no client JS.
+- **Supabase** — Postgres, auth, storage. All authorization is row-level
+  security in the database, not application code.
+- **Tailwind CSS 4** with design tokens in `src/app/globals.css`.
+
+> Next.js 16 renamed `middleware.ts` to `proxy.ts`. Session refresh and the
+> (small) authenticated surface live in `src/proxy.ts` — the site is public by
+> default and only `/resume`, `/settings`, and `/onboarding` require a session.
 
 ## Getting started
 
@@ -39,18 +43,21 @@ cp .env.example .env.local     # fill in your Supabase project values
 npm run dev
 ```
 
+Without Supabase credentials the app still runs: `/preview` renders the full
+resume against fixtures, and nothing gates.
+
 Apply the migrations to your Supabase project in order — the SQL editor works,
 or link the CLI and `supabase db push`:
 
 ```
 supabase/migrations/
 ├── 0001_foundation.sql   extensions, enums, sports reference data
-├── 0002_identity.sql     profiles, organizations, memberships, invites
+├── 0002_identity.sql     profiles, reserved handles, organizations
 ├── 0003_record.sql       achievements, evidence, verifications  ← the product
-├── 0004_social.sql       follows, posts, likes, comments
-├── 0005_signals.sql      profile views, recruiter lists, notifications
+├── 0004_film.sql         film clips, coach references
+├── 0005_signals.sql      profile views, recruiter lists
 ├── 0006_security.sql     every RLS policy, in one auditable file
-└── 0007_triggers.sql     counters, verification sync, notification fan-out
+└── 0007_triggers.sql     counters, film-URL parsing, athlete search
 ```
 
 Then regenerate types so the client matches the database:
@@ -59,53 +66,36 @@ Then regenerate types so the client matches the database:
 npm run db:types      # requires a linked Supabase project
 ```
 
-## Testing the schema
-
-The security model is the product's foundation, so it has real tests — 25
-behavioral checks covering visibility, verification authority, counter
-integrity, and invite redemption. They run against a throwaway Postgres
-cluster; no Docker and no Supabase CLI required.
+## Schema tests
 
 ```bash
-npm run test:schema
+npm run test:schema   # needs a local PostgreSQL install (brew install postgresql@16)
 ```
 
-The suite is verified to fail: breaking the private-profile rule in
-`0006_security.sql` makes it exit non-zero rather than passing quietly.
+Spins up a throwaway Postgres, applies every migration, and runs the
+behavioral suite in `supabase/tests/schema_test.sql` — 28 checks that exercise
+RLS as real roles: unlisted resumes open by link but stay out of search,
+evidence stays private, athletes can't verify themselves, reserved handles are
+refused, anonymous views count.
 
-## Architecture notes
+## Where things live
 
-**Visibility has exactly one definition.** `can_view_profile()` in
-`0006_security.sql` decides who can see a profile; achievements, posts,
-memberships, and media all defer to it. Changing the privacy model means
-changing one function, not auditing twenty policies.
-
-**Verification is separate from the claim.** `achievements.verification` is a
-cached copy of the newest row in `verifications`, kept current by trigger. The
-audit trail stays authoritative, so "who vouched for this, when, and on what
-basis" is answerable years later — which is the entire basis of Roster's
-credibility. An athlete cannot verify their own record; the policy enforces it.
-
-**Evidence is not public.** A recruiter sees the verified mark. The screenshot
-behind it is visible only to the athlete, their coaches, and staff.
-
-**The record is one table, not five.** A PR, an award, and a commitment share
-almost all their columns, and the most-read query in the app is "this athlete's
-entries, newest first". Splitting by kind would make that a five-way UNION.
-
-## Routing
-
-`/[handle]` is an athlete's record and is reachable without an account — RLS,
-not the proxy, decides whether any row comes back. Any new top-level route
-**must** be added to `APP_ROUTES` in `src/proxy.ts`, or it will be interpreted
-as a handle.
-
-## Not built yet
-
-- Auth flows (`/sign-in`, `/sign-up`, invite redemption UI)
-- Record editor — creating and editing achievements
-- Recruiter search and saved lists
-- Media upload pipeline
-- Brand deals. Deliberately deferred: it needs real contract, payment, and
-  FTC-disclosure modelling, and guessing at that shape before the recruiter
-  side has usage would guess wrong.
+```
+src/
+├── proxy.ts                    session refresh + the authenticated surface
+├── app/
+│   ├── [handle]/               the public resume
+│   ├── search/                 discovery (filters live in the URL)
+│   ├── resume/                 the athlete's editor
+│   ├── sign-in|sign-up|onboarding|auth/
+│   └── preview/                fixtures, no database
+├── components/
+│   ├── record/                 public resume rendering
+│   ├── editor/                 editor sections
+│   ├── auth/                   auth + onboarding forms
+│   └── ui/                     form primitives
+└── lib/
+    ├── actions/                every Server Action (auth.ts, resume.ts)
+    ├── handles.ts              reserved-handle mirror of migration 0002
+    └── supabase/               client factories
+```

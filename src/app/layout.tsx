@@ -29,21 +29,19 @@ const instrument = Instrument_Serif({
 
 export const metadata: Metadata = {
   title: {
-    default: "Roster — Where Athletes Build Their Name",
+    default: "Roster — The Athlete's Resume",
     template: "%s · Roster",
   },
   description:
-    "The private network for serious athletes. Build one credible record of what you have earned, and become discoverable for what comes next.",
+    "A digital resume for athletes: every PR, result, award, and clip of film, verified by your coaches, at one link a recruiter can open without an account.",
   openGraph: {
     siteName: "Roster",
     type: "website",
   },
-  robots: {
-    // The network is private. Individual profiles set to public visibility
-    // opt themselves back in via their own route metadata.
-    index: false,
-    follow: false,
-  },
+  // The site is public and meant to be found. Routes that shouldn't be
+  // indexed — auth, the editor, unlisted and private resumes — each say so in
+  // their own metadata, which is the safer direction for a mistake to fail:
+  // a forgotten override leaves a page findable, not an athlete invisible.
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -54,11 +54,17 @@ create type verifier_kind as enum (
   'integration'     -- automated import from a results provider
 );
 
--- Visibility model for a private network with shareable recruiter links.
+-- Visibility model for a resume. A recruiter is the audience, and recruiters
+-- do not make accounts to read one, so the default is genuinely public.
+--
+-- `unlisted` is not a weaker `private`: it is "reachable by anyone holding the
+-- link, absent from search and search engines". That distinction is enforced in
+-- two different places — RLS lets an unlisted resume load, and the discovery
+-- query filters to `public` — because they answer different questions.
 create type profile_visibility as enum (
-  'private',   -- only the athlete and accepted followers
-  'members',   -- any signed-in Roster member (default)
-  'public'     -- shareable to recruiters without an account
+  'private',   -- only the athlete
+  'unlisted',  -- anyone with the link; excluded from search and indexing
+  'public'     -- listed, indexable, findable (default)
 );
 
 create type org_kind as enum ('school', 'club', 'team', 'league', 'governing_body');

@@ -105,20 +105,27 @@ export function entryContext(entry: RecordEntry): string {
     .join(" · ");
 }
 
-/** "2h", "3d", "Mar 14" — feed timestamps, terse near, absolute far. */
-export function relativeTime(iso: string, now: Date = new Date()): string {
-  const then = new Date(iso);
-  const seconds = Math.floor((now.getTime() - then.getTime()) / 1000);
+/**
+ * 170cm → 5'7". Recruiters in US sports read height in feet and inches;
+ * storing metric keeps the column sortable and this converts at the edge.
+ */
+export function heightLabel(heightCm: number | null): string | null {
+  if (heightCm === null) return null;
 
-  if (seconds < 60) return "now";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-  if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h`;
-  if (seconds < 604_800) return `${Math.floor(seconds / 86_400)}d`;
+  const totalInches = Math.round(heightCm / 2.54);
+  const feet = Math.floor(totalInches / 12);
+  const inches = totalInches % 12;
 
-  const sameYear = then.getFullYear() === now.getFullYear();
-  return then.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    ...(sameYear ? {} : { year: "numeric" }),
-  });
+  return `${feet}'${inches}"`;
 }
+
+/** 59kg → 130 lbs, same reasoning as height. */
+export function weightLabel(weightKg: number | null): string | null {
+  if (weightKg === null) return null;
+
+  return `${Math.round(weightKg * 2.20462)} lbs`;
+}
+
+/** Select options for forms, in the order an athlete climbs them. */
+export const LEVEL_OPTIONS = Object.entries(LEVEL_LABELS) as [AthleteLevel, string][];
+export const KIND_OPTIONS = Object.entries(KIND_LABELS) as [AchievementKind, string][];

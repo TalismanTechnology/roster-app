@@ -1,30 +1,23 @@
 import Image from "next/image";
 
-import type { Membership, Organization, Profile } from "@/lib/database.types";
-import { levelLabel, sportLabel } from "@/lib/format";
-
-type MembershipWithOrg = Membership & { organizations: Organization | null };
+import type { Profile } from "@/lib/database.types";
+import { heightLabel, levelLabel, sportLabel, weightLabel } from "@/lib/format";
 
 /**
- * The masthead of an athlete's record.
+ * The masthead of an athlete's resume.
  *
- * Reads top-down as name → what they do → where → proof links, because that is
- * the order a recruiter needs it in. The stat strip sits directly under the
+ * Reads top-down as name → what they do → vitals → proof links, because that
+ * is the order a recruiter needs it in. The stat strip sits directly under the
  * name so the two things a coach checks first — level and class year — are
  * above the fold on a phone.
  */
 export function ProfileHeader({
   profile,
-  memberships,
   stats,
 }: {
   profile: Profile;
-  memberships: MembershipWithOrg[];
-  stats: { verified: number; total: number; followers: number };
+  stats: { verified: number; total: number; film: number };
 }) {
-  const current = memberships.find((m) => m.is_current);
-  const level = levelLabel(profile.level);
-
   return (
     <header className="border-rule-strong border-b pb-(--space-gutter)">
       <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:gap-8">
@@ -37,14 +30,27 @@ export function ProfileHeader({
 
           <p className="text-ink-subtle label mt-3">@{profile.handle}</p>
 
-          {/* The identity line: level · sport · class. Separators are rendered
-              rather than typed so an absent segment leaves no orphan dot. */}
-          <IdentityLine
+          {/* The identity line: level · sport · class · school. Separators are
+              rendered rather than typed so an absent segment leaves no orphan dot. */}
+          <MetaLine
+            className="text-ink mt-4 text-lg"
             parts={[
-              level,
+              levelLabel(profile.level),
               sportLabel(profile.primary_sport),
               profile.grad_year ? `Class of ${profile.grad_year}` : null,
-              current?.organizations?.name ?? null,
+              profile.school,
+            ]}
+          />
+
+          {/* The vitals line: what the roster sheet would say. */}
+          <MetaLine
+            className="text-ink-muted mt-1.5 text-sm"
+            parts={[
+              profile.positions.length > 0 ? profile.positions.join(" / ") : null,
+              heightLabel(profile.height_cm),
+              weightLabel(profile.weight_kg),
+              profile.jersey ? `#${profile.jersey}` : null,
+              profile.location,
             ]}
           />
 
@@ -76,7 +82,7 @@ function Avatar({ profile }: { profile: Profile }) {
   }
 
   // Monogram fallback. Never an emoji or a stock silhouette — a blank-looking
-  // record undercuts the premium the whole product is selling.
+  // resume undercuts the premium the whole product is selling.
   const initials = profile.display_name
     .split(/\s+/)
     .slice(0, 2)
@@ -94,13 +100,19 @@ function Avatar({ profile }: { profile: Profile }) {
   );
 }
 
-function IdentityLine({ parts }: { parts: (string | null | undefined)[] }) {
+function MetaLine({
+  parts,
+  className,
+}: {
+  parts: (string | null | undefined)[];
+  className: string;
+}) {
   const present = parts.filter((part): part is string => Boolean(part));
 
   if (present.length === 0) return null;
 
   return (
-    <p className="text-ink mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-lg">
+    <p className={`flex flex-wrap items-center gap-x-2 gap-y-1 ${className}`}>
       {present.map((part, index) => (
         <span key={part} className="flex items-center gap-2">
           {index > 0 && (
@@ -115,11 +127,11 @@ function IdentityLine({ parts }: { parts: (string | null | undefined)[] }) {
   );
 }
 
-function StatStrip({ stats }: { stats: { verified: number; total: number; followers: number } }) {
+function StatStrip({ stats }: { stats: { verified: number; total: number; film: number } }) {
   const items = [
     { label: "Verified", value: stats.verified },
     { label: "Entries", value: stats.total },
-    { label: "Followers", value: stats.followers },
+    { label: "Film", value: stats.film },
   ];
 
   return (
@@ -139,17 +151,22 @@ function StatStrip({ stats }: { stats: { verified: number; total: number; follow
 function ProofLinks({ profile }: { profile: Profile }) {
   const links = [
     profile.results_url && { label: "Results", href: profile.results_url },
-    profile.hudl_url && { label: "Film", href: profile.hudl_url },
+    profile.hudl_url && { label: "Hudl", href: profile.hudl_url },
     profile.instagram && {
       label: "Instagram",
       href: `https://instagram.com/${profile.instagram.replace(/^@/, "")}`,
     },
+    profile.contact_email &&
+      profile.is_recruitable && {
+        label: "Contact",
+        href: `mailto:${profile.contact_email}`,
+      },
   ].filter((link): link is { label: string; href: string } => Boolean(link));
 
   if (links.length === 0) return null;
 
   return (
-    <nav aria-label="External profiles" className="mt-6 flex flex-wrap gap-x-6 gap-y-2">
+    <nav aria-label="Contact and external profiles" className="mt-6 flex flex-wrap gap-x-6 gap-y-2">
       {links.map((link) => (
         <a
           key={link.label}

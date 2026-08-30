@@ -7,38 +7,25 @@ import { isSupabaseConfigured } from "@/lib/supabase/config";
  * Runs before every matched request.
  *
  * Named `proxy` rather than `middleware`: Next.js 16 renamed the convention.
- * The old `middleware.ts` filename still works but is deprecated.
  *
  * Two jobs:
  *   1. Refresh the Supabase session so Server Components never render against
  *      an expired token.
- *   2. Gate the private network — Roster is invite-only, so unauthenticated
- *      traffic reaches only the public surface.
- */
-
-/** Paths reachable without a session. Everything else requires sign-in. */
-const PUBLIC_PATHS = ["/", "/sign-in", "/sign-up", "/request-access", "/auth"];
-
-/**
- * Top-level app routes. Anything else with a single segment is a handle, and
- * `/[handle]` resolves an athlete's record.
+ *   2. Gate the handful of routes that belong to the signed-in athlete.
  *
- * This list is what keeps `/settings` from being read as an athlete named
- * "settings", so a new top-level route must be added here as it is created —
- * otherwise it silently becomes a profile lookup. The corresponding guard on
- * the other side is a reserved-handle check at sign-up.
+ * The gating inverted with the pivot. Roster was a private network where every
+ * route needed a session; it is now a public resume site, where a recruiter
+ * with no account is the primary audience. So the default is open, and only
+ * the athlete's own surfaces — the editor, settings, onboarding — redirect to
+ * sign-in.
+ *
+ * Single-segment paths that are not reserved routes resolve as handles:
+ * `/avareyes` is a resume. `src/lib/handles.ts` holds the reserved list, and
+ * the database refuses those handles at sign-up, so the two cannot collide.
  */
-const APP_ROUTES = [
-  "feed",
-  "search",
-  "notifications",
-  "settings",
-  "record",
-  "verify",
-  "invite",
-  "api",
-  "preview",
-];
+
+/** Routes that require a session. Everything else is public. */
+const PROTECTED_PATHS = ["/resume", "/settings", "/onboarding"];
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -81,7 +68,7 @@ export async function proxy(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
-  if (!user && !isPublic(pathname)) {
+  if (!user && isProtected(pathname)) {
     const signIn = request.nextUrl.clone();
     signIn.pathname = "/sign-in";
     // Preserve where they were headed so sign-in can return them there.
@@ -93,17 +80,8 @@ export async function proxy(request: NextRequest) {
   return response;
 }
 
-function isPublic(pathname: string): boolean {
-  if (PUBLIC_PATHS.includes(pathname)) return true;
-  if (PUBLIC_PATHS.some((p) => p !== "/" && pathname.startsWith(`${p}/`))) return true;
-
-  // A single-segment path that is not a reserved app route is an athlete's
-  // record. Let it through unauthenticated: profiles set to `public` are meant
-  // to be shareable to recruiters who have no account, and RLS — not this
-  // proxy — decides whether any row actually comes back.
-  const segments = pathname.split("/").filter(Boolean);
-
-  return segments.length === 1 && !APP_ROUTES.includes(segments[0]);
+function isProtected(pathname: string): boolean {
+  return PROTECTED_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
 export const config = {

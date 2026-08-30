@@ -1,5 +1,4 @@
-import type { Membership, Organization, Profile, RecordEntry } from "@/lib/database.types";
-import type { FeedPostData } from "@/components/feed/FeedPost";
+import type { CoachContact, FilmClip, Profile, RecordEntry } from "@/lib/database.types";
 
 /**
  * Fixture data for `/preview`.
@@ -27,48 +26,32 @@ export const previewProfile: Profile = {
   grad_year: 2027,
   height_cm: 170,
   weight_kg: 59,
+  positions: ["400m", "4x400 anchor"],
+  jersey: "7",
+  region: "MI",
+  school: "East Kentwood High School",
+  gpa: 3.9,
+  sat_score: 1340,
+  act_score: null,
+  ncaa_id: "2701834556",
+  contact_email: "ava.reyes.track@example.com",
+  phone: null,
+  is_recruitable: true,
   instagram: "avareyes.track",
   x_handle: null,
   hudl_url: "https://www.hudl.com/profile/example",
   results_url: "https://www.athletic.net/athlete/example",
+  entry_count: 8,
+  verified_count: 6,
   identity_verified_at: "2026-03-02T00:00:00Z",
   suspended_at: null,
   created_at: "2026-01-14T00:00:00Z",
   updated_at: "2026-08-01T00:00:00Z",
 };
 
-const eastKentwood: Organization = {
-  id: "org-ek",
-  slug: "east-kentwood",
-  name: "East Kentwood High School",
-  kind: "school",
-  level: "high_school",
-  logo_url: null,
-  city: "Kentwood",
-  region: "MI",
-  country: "US",
-  claimed_by: null,
-  created_at: "2026-01-01T00:00:00Z",
-  updated_at: "2026-01-01T00:00:00Z",
-};
-
-export const previewMemberships: (Membership & { organizations: Organization | null })[] = [
-  {
-    id: "m-1",
-    profile_id: previewProfile.id,
-    org_id: eastKentwood.id,
-    role: "captain",
-    sport: "track_field",
-    jersey: null,
-    started_on: "2024-08-15",
-    ended_on: null,
-    is_current: true,
-    created_at: "2024-08-15T00:00:00Z",
-    organizations: eastKentwood,
-  },
-];
-
-function entry(partial: Partial<RecordEntry> & Pick<RecordEntry, "id" | "kind" | "title" | "achieved_on">): RecordEntry {
+function entry(
+  partial: Partial<RecordEntry> & Pick<RecordEntry, "id" | "kind" | "title" | "achieved_on">,
+): RecordEntry {
   return {
     profile_id: previewProfile.id,
     detail: null,
@@ -186,58 +169,79 @@ export const previewEntries: RecordEntry[] = [
   }),
 ];
 
-export const previewPosts: FeedPostData[] = [
+function clip(
+  partial: Partial<FilmClip> & Pick<FilmClip, "id" | "title" | "url">,
+): FilmClip {
+  return {
+    profile_id: previewProfile.id,
+    provider: null,
+    external_id: null,
+    thumbnail_url: null,
+    season: null,
+    sport: "track_field",
+    duration_s: null,
+    is_featured: false,
+    position: 0,
+    created_at: "2026-06-01T00:00:00Z",
+    updated_at: "2026-06-01T00:00:00Z",
+    ...partial,
+  };
+}
+
+export const previewFilm: FilmClip[] = [
+  clip({
+    id: "f-1",
+    title: "2026 outdoor season — race highlights",
+    url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    provider: "youtube",
+    external_id: "dQw4w9WgXcQ",
+    season: "2026",
+    is_featured: true,
+  }),
+  clip({
+    id: "f-2",
+    title: "D1 State Final — 400m, lane 5",
+    url: "https://www.hudl.com/video/example",
+    provider: "hudl",
+    season: "2026",
+    position: 1,
+  }),
+  clip({
+    id: "f-3",
+    title: "Indoor 400m PB — MITS Championship",
+    url: "https://vimeo.com/76979871",
+    provider: "vimeo",
+    external_id: "76979871",
+    season: "2026 indoor",
+    position: 2,
+  }),
+];
+
+export const previewCoaches: CoachContact[] = [
   {
-    id: "p-1",
-    body: "Two years chasing this one. Six tenths off the school record now.",
-    created_at: new Date(Date.now() - 3 * 3600_000).toISOString(),
-    like_count: 47,
-    comment_count: 6,
-    profiles: {
-      handle: "avareyes",
-      display_name: "Ava Reyes",
-      avatar_url: null,
-    },
-    achievements: {
-      title: "400m Personal Best",
-      value_display: "53.94",
-      unit: "s",
-      achieved_on: "2026-05-30",
-      verification: "verified",
-      kind: "personal_record",
-    },
+    id: "c-1",
+    profile_id: previewProfile.id,
+    name: "Marcus Kim",
+    role: "Head Coach, Track & Field",
+    org_id: null,
+    org_name: "East Kentwood High School",
+    email: "mkim@example.org",
+    phone: "(616) 555-0142",
+    is_visible: true,
+    position: 0,
+    created_at: "2026-02-01T00:00:00Z",
   },
   {
-    id: "p-2",
-    body: "Relay squad ran 3:52.11 last night. School record had stood since 2009.",
-    created_at: new Date(Date.now() - 4 * 86_400_000).toISOString(),
-    like_count: 112,
-    comment_count: 19,
-    profiles: {
-      handle: "dmalone",
-      display_name: "Devon Malone",
-      avatar_url: null,
-    },
-    achievements: null,
-  },
-  {
-    id: "p-3",
-    body: null,
-    created_at: new Date(Date.now() - 9 * 86_400_000).toISOString(),
-    like_count: 28,
-    comment_count: 3,
-    profiles: {
-      handle: "jhartley",
-      display_name: "Jordan Hartley",
-      avatar_url: null,
-    },
-    achievements: {
-      title: "Committed — University of Michigan",
-      value_display: null,
-      unit: null,
-      achieved_on: "2026-08-12",
-      verification: "verified",
-      kind: "commitment",
-    },
+    id: "c-2",
+    profile_id: previewProfile.id,
+    name: "Dana Whitfield",
+    role: "Sprints Coach",
+    org_id: null,
+    org_name: "Grand Rapids Flight TC",
+    email: null,
+    phone: "(616) 555-0177",
+    is_visible: true,
+    position: 1,
+    created_at: "2026-02-01T00:00:00Z",
   },
 ];

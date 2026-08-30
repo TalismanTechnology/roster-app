@@ -1,13 +1,19 @@
 -- Roster · 0006 · Security
 --
 -- Every row-level policy in the product lives in this file. Keeping them
--- together means the answer to "who can see an athlete's record" is auditable
+-- together means the answer to "who can see an athlete's resume" is auditable
 -- in one read, instead of reconstructed from six migrations.
 --
+-- The model inverted with the pivot. Roster was a private network where the
+-- default answer was "no" and a follow edge was the key; it is now a resume
+-- that is worthless if a recruiter without an account cannot open it. So the
+-- default answer is "yes", and the interesting cases are the two ways an
+-- athlete opts out — `private` and `unlisted` — plus the material that is
+-- never public at any visibility: evidence, contact details, view logs.
+--
 -- The helpers are SECURITY DEFINER so a policy can consult another table
--- without re-entering that table's own policies. Without it, a policy on
--- `profiles` that reads `follows` (whose policy reads `profiles`) recurses
--- forever. `search_path` is pinned on each to defeat search_path hijacking.
+-- without re-entering that table's own policies. `search_path` is pinned on
+-- each to defeat search_path hijacking.
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -26,24 +32,13 @@ as $$
   );
 $$;
 
--- Does the current user have an accepted follow of `target`?
-create or replace function follows_profile(target uuid)
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select exists (
-    select 1 from follows
-     where follower_id = auth.uid()
-       and following_id = target
-       and accepted_at is not null
-  );
-$$;
-
--- The single source of truth for profile visibility. Every other table defers
+-- The single source of truth for resume visibility. Every other table defers
 -- to this, so the privacy model has exactly one definition.
+--
+-- `unlisted` reads as visible here on purpose: it means "not listed", and the
+-- listing is done by the discovery query in 0007, which filters to `public`.
+-- Encoding it as a weaker `private` would break the shareable link that is the
+-- entire point of the setting.
 create or replace function can_view_profile(target uuid)
 returns boolean
 language sql
@@ -57,11 +52,7 @@ as $$
     when is_staff() then true
     else coalesce(
       (
-        select case p.visibility
-          when 'public'  then true
-          when 'members' then auth.uid() is not null
-          when 'private' then follows_profile(target)
-        end
+        select p.visibility in ('public', 'unlisted')
         from profiles p
         where p.id = target and p.suspended_at is null
       ),
@@ -70,24 +61,8 @@ as $$
   end;
 $$;
 
--- Can the current user see this post? Posts inherit their author's visibility.
-create or replace function can_view_post(target_post uuid)
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select exists (
-    select 1 from posts p
-     where p.id = target_post
-       and p.removed_at is null
-       and can_view_profile(p.author_id)
-  );
-$$;
-
 -- Is the current user a coach or staff member at any org where `target` is a
--- current athlete? Gates coach endorsements and verification authority.
+-- current athlete? Gates verification authority and access to evidence.
 create or replace function coaches_athlete(target uuid)
 returns boolean
 language sql
@@ -117,24 +92,20 @@ $$;
 
 alter table sports                 enable row level security;
 alter table sport_events           enable row level security;
+alter table reserved_handles       enable row level security;
 alter table profiles               enable row level security;
 alter table organizations          enable row level security;
 alter table memberships            enable row level security;
-alter table invites                enable row level security;
 alter table access_requests        enable row level security;
 alter table achievements           enable row level security;
 alter table achievement_evidence   enable row level security;
 alter table verifications          enable row level security;
 alter table coach_endorsements     enable row level security;
-alter table follows                enable row level security;
-alter table posts                  enable row level security;
-alter table post_media             enable row level security;
-alter table likes                  enable row level security;
-alter table comments               enable row level security;
+alter table film_clips             enable row level security;
+alter table coach_contacts         enable row level security;
 alter table profile_views          enable row level security;
 alter table recruiter_lists        enable row level security;
 alter table recruiter_list_members enable row level security;
-alter table notifications          enable row level security;
 
 -- ---------------------------------------------------------------------------
 -- Reference data — readable by all, written by staff
@@ -150,6 +121,12 @@ create policy sport_events_write  on sport_events for all
 
 create policy organizations_select on organizations for select using (true);
 create policy organizations_write  on organizations for all
+  using (is_staff()) with check (is_staff());
+
+-- Readable so sign-up can tell someone their handle is taken before they
+-- submit, rather than after.
+create policy reserved_handles_select on reserved_handles for select using (true);
+create policy reserved_handles_write  on reserved_handles for all
   using (is_staff()) with check (is_staff());
 
 -- ---------------------------------------------------------------------------
@@ -189,7 +166,7 @@ create policy achievements_write_own on achievements
   for all using (profile_id = auth.uid()) with check (profile_id = auth.uid());
 
 -- Evidence is visible to the athlete, their coaches, and staff — not to the
--- general audience of the record. A recruiter sees the verified badge; the
+-- general audience of the resume. A recruiter sees the verified badge; the
 -- underlying screenshot is reviewer material.
 create policy achievement_evidence_select on achievement_evidence
   for select using (
@@ -243,71 +220,55 @@ create policy coach_endorsements_write on coach_endorsements
     endorser_id = auth.uid() and coaches_athlete(profile_id)
   );
 
--- The athlete may hide an endorsement from their record but not edit its text.
+-- The athlete may hide an endorsement from their resume but not edit its text.
 create policy coach_endorsements_hide on coach_endorsements
   for update using (profile_id = auth.uid()) with check (profile_id = auth.uid());
 
 -- ---------------------------------------------------------------------------
--- Social graph
+-- Film
 -- ---------------------------------------------------------------------------
 
-create policy follows_select on follows
+create policy film_clips_select on film_clips
+  for select using (can_view_profile(profile_id));
+
+create policy film_clips_write_own on film_clips
+  for all using (profile_id = auth.uid()) with check (profile_id = auth.uid());
+
+-- ---------------------------------------------------------------------------
+-- Coach contacts
+--
+-- The strictest read on the resume, and the one worth being careful about: a
+-- phone number for a minor's coach. Three conditions, all required — the
+-- athlete marked it visible, the athlete is open to being recruited, and the
+-- resume is public rather than merely unlisted. An unlisted resume is a link
+-- an athlete hands out; it should not carry someone else's phone number to
+-- whoever that link gets forwarded to.
+-- ---------------------------------------------------------------------------
+
+create policy coach_contacts_select on coach_contacts
   for select using (
-    follower_id = auth.uid()
-    or following_id = auth.uid()
-    or (can_view_profile(follower_id) and can_view_profile(following_id))
+    profile_id = auth.uid()
+    or is_staff()
+    or (
+      is_visible
+      and exists (
+        select 1 from profiles p
+         where p.id = profile_id
+           and p.visibility = 'public'
+           and p.is_recruitable
+           and p.suspended_at is null
+      )
+    )
   );
 
-create policy follows_insert_self on follows
-  for insert with check (follower_id = auth.uid());
-
-create policy follows_delete_self on follows
-  for delete using (follower_id = auth.uid() or following_id = auth.uid());
-
--- Accepting a pending request is the target's call, not the follower's.
-create policy follows_accept on follows
-  for update using (following_id = auth.uid()) with check (following_id = auth.uid());
-
--- ---------------------------------------------------------------------------
--- Feed
--- ---------------------------------------------------------------------------
-
-create policy posts_select on posts
-  for select using (removed_at is null and can_view_profile(author_id));
-
-create policy posts_write_own on posts
-  for all using (author_id = auth.uid()) with check (author_id = auth.uid());
-
-create policy post_media_select on post_media
-  for select using (can_view_post(post_id));
-
-create policy post_media_write_own on post_media
-  for all using (
-    exists (select 1 from posts p where p.id = post_id and p.author_id = auth.uid())
-  )
-  with check (
-    exists (select 1 from posts p where p.id = post_id and p.author_id = auth.uid())
-  );
-
-create policy likes_select on likes
-  for select using (can_view_post(post_id));
-
-create policy likes_write_own on likes
-  for all using (profile_id = auth.uid())
-  with check (profile_id = auth.uid() and can_view_post(post_id));
-
-create policy comments_select on comments
-  for select using (removed_at is null and can_view_post(post_id));
-
-create policy comments_write_own on comments
-  for all using (author_id = auth.uid())
-  with check (author_id = auth.uid() and can_view_post(post_id));
+create policy coach_contacts_write_own on coach_contacts
+  for all using (profile_id = auth.uid()) with check (profile_id = auth.uid());
 
 -- ---------------------------------------------------------------------------
 -- Signals
 -- ---------------------------------------------------------------------------
 
--- An athlete sees who viewed their record. A viewer sees only their own rows.
+-- An athlete sees who viewed their resume. A viewer sees only their own rows.
 -- Writes go through record_profile_view() so a viewer cannot forge traffic.
 create policy profile_views_select on profile_views
   for select using (profile_id = auth.uid() or viewer_id = auth.uid());
@@ -326,25 +287,9 @@ create policy recruiter_list_members_own on recruiter_list_members
     and can_view_profile(profile_id)
   );
 
--- Notifications are created by triggers (which run as definer), never by
--- clients. Hence select and update-own-read-state only.
-create policy notifications_select_own on notifications
-  for select using (profile_id = auth.uid());
-
-create policy notifications_mark_read on notifications
-  for update using (profile_id = auth.uid()) with check (profile_id = auth.uid());
-
 -- ---------------------------------------------------------------------------
--- Invites and access requests
+-- Access requests
 -- ---------------------------------------------------------------------------
-
--- You can see codes you issued. Redemption goes through redeem_invite() so a
--- code is never enumerable through the API.
-create policy invites_select_own on invites
-  for select using (issued_by = auth.uid() or is_staff());
-
-create policy invites_insert_staff on invites
-  for insert with check (is_staff());
 
 -- Write-only to the public: anyone may apply, only staff may read the list.
 create policy access_requests_insert_anon on access_requests
@@ -360,34 +305,14 @@ create policy access_requests_update_staff on access_requests
 -- Callable functions
 -- ---------------------------------------------------------------------------
 
--- Consume an invite code atomically. The conditional UPDATE is the lock: two
--- concurrent redemptions of a single-use code cannot both report success.
-create or replace function redeem_invite(invite_code text)
-returns boolean
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  claimed integer;
-begin
-  if auth.uid() is null then
-    raise exception 'authentication required';
-  end if;
-
-  update invites
-     set used_count = used_count + 1
-   where code = invite_code
-     and used_count < max_uses
-     and (expires_at is null or expires_at > now());
-
-  get diagnostics claimed = row_count;
-  return claimed = 1;
-end;
-$$;
-
--- Record a profile view. Definer so the counter cannot be written directly,
--- and self-views are ignored so the number stays meaningful.
+-- Record a resume view. Definer so the counter cannot be written directly, and
+-- self-views are ignored so the number stays meaningful.
+--
+-- Anonymous views count. That is the change from the private-network version:
+-- most recruiters reading a resume are not signed in, and a view counter that
+-- ignored them would under-report the exact traffic the athlete cares about.
+-- The viewer column stays null for those, so "14 views" is honest while "who"
+-- is only ever answerable for signed-in viewers.
 create or replace function record_profile_view(target uuid)
 returns void
 language plpgsql
@@ -395,7 +320,7 @@ security definer
 set search_path = public
 as $$
 begin
-  if auth.uid() is null or auth.uid() = target then
+  if auth.uid() = target then
     return;
   end if;
 
@@ -403,14 +328,17 @@ begin
     return;
   end if;
 
+  -- Must match profile_views_daily_idx in 0005 expression-for-expression.
   insert into profile_views (profile_id, viewer_id, viewed_on, view_count)
   values (target, auth.uid(), current_date, 1)
-  on conflict (profile_id, viewer_id, viewed_on)
+  on conflict (
+    profile_id,
+    coalesce(viewer_id, '00000000-0000-0000-0000-000000000000'::uuid),
+    viewed_on
+  )
   do update set view_count = profile_views.view_count + 1;
 end;
 $$;
 
-revoke all on function redeem_invite(text)       from public;
 revoke all on function record_profile_view(uuid) from public;
-grant execute on function redeem_invite(text)       to authenticated;
-grant execute on function record_profile_view(uuid) to authenticated;
+grant execute on function record_profile_view(uuid) to anon, authenticated;

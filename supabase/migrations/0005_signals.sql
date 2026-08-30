@@ -1,28 +1,46 @@
 -- Roster · 0005 · Recognition signals
 --
 -- The feedback loop that makes the record worth maintaining: who looked at it,
--- who saved you, and what you should know about.
+-- and who saved you. Without these, keeping a resume current is a chore with
+-- no evidence it is working.
 --
 -- Brand-deal tables are deliberately absent. That surface needs real contract,
 -- payment, and disclosure modelling, and building it speculatively now would
 -- guess wrong. It lands once the recruiter side has actual usage to learn from.
 
 -- ---------------------------------------------------------------------------
--- profile_views — "your record was viewed 14 times this week"
+-- profile_views — "your resume was viewed 14 times this week"
 --
--- One row per viewer per day rather than per pageview: the athlete-facing
--- number should mean "distinct people", and daily grain keeps the table from
--- growing without bound while still supporting a weekly trend line.
+-- One row per viewer per day rather than per pageview: daily grain keeps the
+-- table from growing without bound while still supporting a weekly trend line.
+--
+-- `viewer_id` is null for the signed-out recruiter, who is the majority of the
+-- audience for a resume. Those collapse into one row per day per profile via
+-- the nil-UUID sentinel below, so the honest reading of this table is "views,
+-- of which the identified ones have a viewer_id" — not "distinct people".
+--
+-- Cascade rather than `set null` on the viewer: were a deleted account's rows
+-- to fall back to null they would collide with that day's anonymous row and
+-- the delete would fail on a unique violation.
 -- ---------------------------------------------------------------------------
 
 create table profile_views (
   profile_id uuid not null references profiles(id) on delete cascade,
-  viewer_id  uuid references profiles(id) on delete set null,
+  viewer_id  uuid references profiles(id) on delete cascade,
   viewed_on  date not null default current_date,
-  view_count integer not null default 1,
-
-  primary key (profile_id, viewer_id, viewed_on)
+  view_count integer not null default 1
 );
+
+-- A partial index cannot serve ON CONFLICT for both cases, and a primary key
+-- cannot contain a nullable column, so the daily-uniqueness rule is an
+-- expression index. `record_profile_view()` in 0006 spells this expression
+-- exactly; changing one without the other silently breaks the upsert.
+create unique index profile_views_daily_idx
+  on profile_views (
+    profile_id,
+    coalesce(viewer_id, '00000000-0000-0000-0000-000000000000'::uuid),
+    viewed_on
+  );
 
 create index profile_views_recent_idx
   on profile_views (profile_id, viewed_on desc);
@@ -58,30 +76,11 @@ create table recruiter_list_members (
 create index recruiter_list_members_profile_idx
   on recruiter_list_members (profile_id);
 
--- ---------------------------------------------------------------------------
--- notifications
---
--- `actor_id` is nullable so system notifications (a verification decision, an
--- access grant) use the same inbox as social ones.
--- ---------------------------------------------------------------------------
-
-create table notifications (
-  id         uuid primary key default gen_random_uuid(),
-  profile_id uuid not null references profiles(id) on delete cascade,
-  kind       text not null,   -- 'follow', 'like', 'comment', 'verified', 'endorsed', 'viewed'
-  actor_id   uuid references profiles(id) on delete cascade,
-  post_id    uuid references posts(id) on delete cascade,
-  achievement_id uuid references achievements(id) on delete cascade,
-  body       text,
-  read_at    timestamptz,
-  created_at timestamptz not null default now()
-);
-
--- The unread badge, and the inbox itself.
-create index notifications_unread_idx
-  on notifications (profile_id, created_at desc) where read_at is null;
-create index notifications_inbox_idx
-  on notifications (profile_id, created_at desc);
+-- A notifications table stood here. It went out with the feed: every event it
+-- carried was a like, a comment, or a follow. The two things worth telling an
+-- athlete now — someone viewed your resume, a coach verified an entry — are
+-- both already queryable from the tables above, and an inbox with two senders
+-- is a page nobody opens twice.
 
 -- ---------------------------------------------------------------------------
 -- record_view — the athlete's record, assembled for rendering
