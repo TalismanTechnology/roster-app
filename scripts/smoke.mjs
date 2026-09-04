@@ -129,12 +129,37 @@ await step("editor shows the live preview and creates a verification link", asyn
   await shot("editor-request");
 });
 
+await step("the athlete cannot verify their own entry", async () => {
+  await page.goto(`${base}${globalThis.__verifyPath}`, { waitUntil: "networkidle" });
+  await expectText("can’t verify itself");
+});
+
 await step("sign out clears the session", async () => {
   await page.goto(`${base}/resume`, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: /sign out/i }).click();
   await page.waitForURL(/\/$/, { timeout: 15_000 });
   await page.goto(`${base}/resume`, { waitUntil: "networkidle" });
   if (!page.url().includes("/sign-in")) throw new Error("still signed in");
+});
+
+await step("a coach verifies by link with no account; the mark and name appear", async () => {
+  await context.clearCookies();
+  await page.goto(`${base}${globalThis.__verifyPath}`, { waitUntil: "networkidle" });
+  await expectText("says this happened");
+  await shot("verify");
+  await page.getByLabel("Note", { exact: false }).fill("Timed it myself at the spring combine.");
+  await page.getByRole("button", { name: /yes, i verify/i }).click();
+  await page.getByText("Verified. Thank you.").waitFor({ timeout: 20_000 });
+  await shot("verify-done");
+  // Single use: a revisit shows the answered state, never the form.
+  await page.goto(`${base}${globalThis.__verifyPath}`, { waitUntil: "networkidle" });
+  await expectText("Each link works once.");
+  if (await page.getByRole("button", { name: /yes, i verify/i }).isVisible().catch(() => false)) {
+    throw new Error("form still offered after answering");
+  }
+  // The public resume now carries the coach's name on the entry.
+  await page.goto(`${base}/jordanreyes`, { waitUntil: "networkidle" });
+  await expectText("Verified by Tom Bradley");
 });
 
 await step("sign up → three-step onboarding → editor", async () => {

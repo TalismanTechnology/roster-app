@@ -121,7 +121,7 @@ Each milestone ends with the **verification protocol** (§5) and a commit.
 - [x] **M4 · Public resume (1:30)** — `/[handle]` + `/preview` on shared `record/*` components; gating, metadata, print CSS. `feat(resume): the public resume on the dark identity`
 - [x] **M5 · Editor (1:30)** — `/resume` with rail, forms, live preview, share bar, requests inbox. `feat(editor): resume editor with live preview`
 - [x] **M6 · Search (0:45)** — filters, results, empty state, pagination, add-to-list. `feat(search): discovery with URL-backed filters`
-- [ ] **M7 · Verification (1:00)** — request from editor → `/verify/[token]` → mark applied → inbox. `feat(verify): coach verification by link`
+- [x] **M7 · Verification (1:00)** — request from editor → `/verify/[token]` → mark applied → inbox. `feat(verify): coach verification by link`
 - [ ] **M8 · Settings + lists (0:30)** — `/settings`, `/lists`. `feat(account): settings and recruiter lists`
 - [ ] **M9 · Perfect (1:00)** — every route shot at 320/375/768/1024/1440 via `scripts/shots.mjs`; overflow = 0; a11y pass (labels, focus order, contrast ≥ 4.5, reduced motion); perf pass (image dims, lazy, bundle report); copy pass (sentence case, no lorem, no shouting); empty/error/loading states everywhere. `polish: cross-breakpoint, accessibility, and performance pass`
 - [ ] **M10 · E2E + report (0:30)** — `scripts/e2e.mjs`: sign up → onboarding → add entry → add film → publish → search finds → request verification → coach verifies → mark visible → recruiter lists. README updated (local mode, scripts). `docs/OVERNIGHT-REPORT.md`: what shipped, screenshots, known gaps, what needs Supabase. `test(e2e): full loop against the local adapter` / `docs: overnight report`
