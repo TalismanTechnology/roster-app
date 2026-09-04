@@ -120,7 +120,7 @@ Each milestone ends with the **verification protocol** (§5) and a commit.
 - [x] **M3 · Onboarding (0:45)** — three-step flow with live handle check. `feat(onboarding): three-step claim flow`
 - [x] **M4 · Public resume (1:30)** — `/[handle]` + `/preview` on shared `record/*` components; gating, metadata, print CSS. `feat(resume): the public resume on the dark identity`
 - [x] **M5 · Editor (1:30)** — `/resume` with rail, forms, live preview, share bar, requests inbox. `feat(editor): resume editor with live preview`
-- [ ] **M6 · Search (0:45)** — filters, results, empty state, pagination, add-to-list. `feat(search): discovery with URL-backed filters`
+- [x] **M6 · Search (0:45)** — filters, results, empty state, pagination, add-to-list. `feat(search): discovery with URL-backed filters`
 - [ ] **M7 · Verification (1:00)** — request from editor → `/verify/[token]` → mark applied → inbox. `feat(verify): coach verification by link`
 - [ ] **M8 · Settings + lists (0:30)** — `/settings`, `/lists`. `feat(account): settings and recruiter lists`
 - [ ] **M9 · Perfect (1:00)** — every route shot at 320/375/768/1024/1440 via `scripts/shots.mjs`; overflow = 0; a11y pass (labels, focus order, contrast ≥ 4.5, reduced motion); perf pass (image dims, lazy, bundle report); copy pass (sentence case, no lorem, no shouting); empty/error/loading states everywhere. `polish: cross-breakpoint, accessibility, and performance pass`
