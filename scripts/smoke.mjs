@@ -107,31 +107,54 @@ await step("sign out clears the session", async () => {
   if (!page.url().includes("/sign-in")) throw new Error("still signed in");
 });
 
-await step("sign up → onboarding → editor", async () => {
+const shotsDir = process.argv.find((a) => a.startsWith("--shots="))?.split("=")[1];
+const shot = async (name) => {
+  if (shotsDir) await page.screenshot({ path: `${shotsDir}/${name}.png` });
+};
+
+await step("sign up → three-step onboarding → editor", async () => {
   await page.goto(`${base}/sign-up`, { waitUntil: "networkidle" });
   await page.getByLabel("Email").fill(`smoke-${stamp}@roster.local`);
   await page.getByLabel("Password").fill("password123");
   await page.getByRole("button", { name: /create account/i }).click();
   await page.waitForURL(/\/onboarding$/, { timeout: 15_000 });
+
+  // 01 — a taken handle is refused live, a free one is confirmed live.
+  const handle = page.getByLabel("Handle", { exact: false });
+  await handle.fill("jordanreyes");
+  await page.getByText("That handle is taken.").waitFor({ timeout: 10_000 });
+  await handle.fill(`smoke_${stamp}`);
+  await page.getByText("is yours.").waitFor({ timeout: 10_000 });
+  await shot("onboarding-01");
+  await page.getByRole("button", { name: /continue/i }).click();
+
+  // 02 — identity
   await page.getByLabel("Your name").fill("Smoke Tester");
-  await page.getByLabel("Handle", { exact: false }).fill(`smoke_${stamp}`);
+  await page.getByLabel("Class of").fill("2028");
+  await shot("onboarding-02");
+  await page.getByRole("button", { name: /continue/i }).click();
+
+  // 03 — visibility, then submit
+  // The radio input is visually hidden; click the label like a person would.
+  await page.getByText("Unlisted", { exact: true }).click();
+  await shot("onboarding-03");
   await page.getByRole("button", { name: /create my resume/i }).click();
   await page.waitForURL(/\/resume$/, { timeout: 15_000 });
   await expectText("Smoke Tester");
+  await expectText("Unlisted");
 });
 
-await step("reserved handle is refused at onboarding", async () => {
+await step("reserved handle is refused before submit", async () => {
   await context.clearCookies();
   await page.goto(`${base}/sign-up`, { waitUntil: "networkidle" });
   await page.getByLabel("Email").fill(`smoke2-${stamp}@roster.local`);
   await page.getByLabel("Password").fill("password123");
   await page.getByRole("button", { name: /create account/i }).click();
   await page.waitForURL(/\/onboarding$/, { timeout: 15_000 });
-  await page.getByLabel("Your name").fill("Reserved Tester");
   await page.getByLabel("Handle", { exact: false }).fill("settings");
-  await page.getByRole("button", { name: /create my resume/i }).click();
-  await page.waitForTimeout(800);
-  await expectText("reserved");
+  await page.getByText("Some words are reserved.").waitFor({ timeout: 10_000 });
+  const isDisabled = await page.getByRole("button", { name: /continue/i }).isDisabled();
+  if (!isDisabled) throw new Error("Continue should be disabled for a reserved handle");
 });
 
 await browser.close();

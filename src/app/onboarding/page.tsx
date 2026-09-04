@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
+import { AuthLayout } from "@/components/auth/AuthLayout";
 import { OnboardingForm } from "@/components/auth/OnboardingForm";
 import { getRepository } from "@/lib/data";
 import { getCurrentUser } from "@/lib/data/auth";
@@ -11,9 +12,10 @@ export const metadata: Metadata = {
 };
 
 /**
- * The one screen between an account and a resume. Asks only for what the
- * resume cannot exist without — name, handle, level — because every extra
- * field here is a place to abandon; the rest is filled in from the editor.
+ * The screens between an account and a resume. Three steps, each asking
+ * only for what the resume cannot exist without — handle, name, who may
+ * see it — because every extra field here is a place to abandon; the rest
+ * is filled in from the editor.
  */
 export default async function OnboardingPage() {
   const user = await getCurrentUser();
@@ -23,16 +25,8 @@ export default async function OnboardingPage() {
   if (await repo.getProfileById(user.id)) redirect("/resume");
 
   return (
-    <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-(--space-gutter) py-(--space-section)">
-      <p className="label text-ink-subtle">Almost there</p>
-
-      <h1 className="font-display text-display mt-4 leading-[0.95] tracking-tight">
-        Claim your page
-      </h1>
-
-      <div className="sheet mt-10 p-6 sm:p-8">
-        <OnboardingForm />
-      </div>
-    </main>
+    <AuthLayout label="Almost there" title="Claim your page." image="03">
+      <OnboardingForm />
+    </AuthLayout>
   );
 }
