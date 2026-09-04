@@ -104,6 +104,13 @@ and lands in the editor; a reserved handle is refused before submit.
   a Server Component (runtime error, invisible to the typecheck).
 - A film grid's implicit track sized itself to a no-wrap title and pushed
   the page 100 px wide at 320.
+- **Found by the post-build code review:** the local adapter returned a
+  coach's name, role, and organisation (with contact details redacted) on
+  unlisted or non-recruitable resumes, where Postgres's
+  `coach_contacts_select` returns no row at all. That was a dev/prod parity
+  break and a coach-identity disclosure on a link an athlete hands out.
+  Local mode now returns nothing, exactly like RLS; the unit test asserts
+  both the non-recruitable and the unlisted case.
 
 ## Known gaps
 

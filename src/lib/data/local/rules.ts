@@ -44,7 +44,9 @@ export function isListed(profile: Profile): boolean {
 /**
  * `coach_contacts_select`. Three conditions, all required: the contact is
  * marked visible, the athlete is open to recruiting, and the resume is
- * public rather than merely unlisted.
+ * public rather than merely unlisted. When it fails the row does not exist
+ * for the viewer — not even the coach's name. Postgres returns zero rows,
+ * and so must this.
  */
 export function canSeeCoachContact(
   contact: CoachContact,
@@ -60,11 +62,6 @@ export function canSeeCoachContact(
     athlete.is_recruitable &&
     athlete.suspended_at === null
   );
-}
-
-/** What a viewer gets when they may see the reference but not reach it. */
-export function redactCoach(contact: CoachContact): CoachContact {
-  return { ...contact, email: null, phone: null };
 }
 
 /**

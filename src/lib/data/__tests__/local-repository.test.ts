@@ -57,13 +57,19 @@ describe("visibility", () => {
     assert.ok(coaches.length > 0);
     assert.ok(coaches[0].email); // recruitable → visible
 
+    // Not recruitable → the rows do not exist for a viewer, name included
+    // (coach_contacts_select returns nothing; so must the local adapter).
     await repo.updateProfile(jordan.id, { is_recruitable: false });
-    const redacted = await repo.listCoaches(jordan.id, null);
-    assert.equal(redacted[0].email, null);
-    assert.equal(redacted[0].name, coaches[0].name); // the reference itself still shows
+    assert.equal((await repo.listCoaches(jordan.id, null)).length, 0);
     const own = await repo.listCoaches(jordan.id, jordan.id);
     assert.ok(own[0].email); // owner always sees
     await repo.updateProfile(jordan.id, { is_recruitable: true });
+
+    // Unlisted is a link the athlete hands out; it must not carry a coach's
+    // identity to whoever it gets forwarded to.
+    await repo.updateProfile(jordan.id, { visibility: "unlisted" });
+    assert.equal((await repo.listCoaches(jordan.id, null)).length, 0);
+    await repo.updateProfile(jordan.id, { visibility: "public" });
   });
 });
 

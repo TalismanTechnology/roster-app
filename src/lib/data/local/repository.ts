@@ -19,7 +19,7 @@ import {
 } from "../types";
 import { parseFilmUrl } from "./film";
 import { hashPassword, verifyPassword } from "./password";
-import { canRespondToRequest, canSeeCoachContact, canViewProfile, redactCoach } from "./rules";
+import { canRespondToRequest, canSeeCoachContact, canViewProfile } from "./rules";
 import { searchProfiles } from "./search";
 import { mutate, readDb, type AchievementRow, type Db, type RecruiterListRow } from "./store";
 
@@ -298,11 +298,12 @@ export class LocalRepository implements Repository {
     if (!athlete) return [];
     const viewer = viewerId ? db.profiles.find((p) => p.id === viewerId) : null;
 
+    // coach_contacts_select: a row the viewer may not see is absent, not
+    // redacted — the coach's name is as protected as their phone number.
     return db.coach_contacts
       .filter((c) => c.profile_id === profileId)
       .sort((a, b) => a.position - b.position || a.created_at.localeCompare(b.created_at))
-      .filter((c) => c.is_visible || athlete.id === viewerId)
-      .map((c) => (canSeeCoachContact(c, athlete, viewerId, viewer) ? c : redactCoach(c)));
+      .filter((c) => canSeeCoachContact(c, athlete, viewerId, viewer));
   }
 
   async addCoach(profileId: string, input: NewCoach): Promise<CoachContact> {

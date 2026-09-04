@@ -254,7 +254,10 @@ export function AcademicsSection({ profile }: { profile: Profile }) {
 
 export function ReferencesSection({ coaches, isOwner }: { coaches: CoachContact[]; isOwner: boolean }) {
   if (coaches.length === 0) return null;
-  const isRedacted = !isOwner && coaches.every((c) => !c.email && !c.phone);
+  // Rows arrive only when the viewer may see them (or is the owner); an
+  // owner whose resume isn't public + recruitable is told what a recruiter
+  // gets instead.
+  const isOwnerOnly = isOwner && coaches.every((c) => !c.email && !c.phone);
 
   return (
     <div>
@@ -281,9 +284,9 @@ export function ReferencesSection({ coaches, isOwner }: { coaches: CoachContact[
           </li>
         ))}
       </ol>
-      {isRedacted && (
+      {isOwnerOnly && (
         <p className="label mt-3 text-ink-muted">
-          Contact details are shared with recruiters when this resume is public and the athlete is open to recruiting.
+          References appear to recruiters only while this resume is public and you&rsquo;re open to recruiting.
         </p>
       )}
     </div>
