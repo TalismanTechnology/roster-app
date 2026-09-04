@@ -43,6 +43,8 @@ export default async function ResumeEditorPage() {
 
   // Signed in but no profile yet: onboarding was abandoned partway.
   if (!profile) redirect("/onboarding");
+  // A recruiter has no resume to edit; their workspace is their lists.
+  if (profile.account_kind === "recruiter") redirect("/lists");
 
   const [entries, film, coaches, publicCoaches, requests, weekViews] = await Promise.all([
     repo.listEntries(profile.id),

@@ -6,6 +6,18 @@ import { useEffect, useState } from "react";
 import { signOut } from "@/lib/actions/auth";
 import { ArrowUpRight } from "@/components/ui/marks";
 
+/** Where the one filled button goes: an athlete to their resume, a
+ *  recruiter to their lists, anyone unfinished to onboarding. */
+function primaryHref(user: NonNullable<HeaderUser>): string {
+  if (!user.handle) return "/onboarding";
+  return user.accountKind === "recruiter" ? "/lists" : "/resume";
+}
+
+function primaryLabel(user: NonNullable<HeaderUser>): string {
+  if (!user.handle) return "Finish setup";
+  return user.accountKind === "recruiter" ? "Your lists" : "Your resume";
+}
+
 export type HeaderUser = {
   email: string;
   handle: string | null;
@@ -58,26 +70,26 @@ export function SiteHeader({ user, variant = "app" }: Props) {
 
           {user ? (
             <>
-              {user.accountKind === "recruiter" && (
+              {user.handle && (
                 <Link href="/lists" className="hidden rounded-full px-3.5 py-1.5 text-sm text-ink-muted transition-colors hover:text-ink sm:inline">
                   Lists
                 </Link>
               )}
-              <Link
-                href={user.handle ? "/resume" : "/onboarding"}
-                className={`group inline-flex items-center gap-1.5 rounded-full border px-4 py-1.5 text-sm font-bold text-ink backdrop-blur-md transition-colors hover:border-ink hover:bg-ink hover:text-paper ${glass}`}
-              >
-                {user.handle ? "Your resume" : "Finish setup"}
-                <ArrowUpRight className="!size-3.5 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+              <Link href="/settings" className="hidden rounded-full px-3.5 py-1.5 text-sm text-ink-muted transition-colors hover:text-ink sm:inline">
+                Settings
               </Link>
-              <form action={signOut}>
-                <button
-                  type="submit"
-                  className="hidden cursor-pointer rounded-full px-3.5 py-1.5 text-sm text-ink-muted transition-colors hover:text-ink sm:inline"
-                >
+              <form action={signOut} className="hidden sm:block">
+                <button type="submit" className="cursor-pointer rounded-full px-3.5 py-1.5 text-sm text-ink-muted transition-colors hover:text-ink">
                   Sign out
                 </button>
               </form>
+              <Link
+                href={primaryHref(user)}
+                className={`group inline-flex items-center gap-1.5 rounded-full border px-4 py-1.5 text-sm font-bold text-ink backdrop-blur-md transition-colors hover:border-ink hover:bg-ink hover:text-paper ${glass}`}
+              >
+                {primaryLabel(user)}
+                <ArrowUpRight className="!size-3.5 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+              </Link>
             </>
           ) : (
             <>

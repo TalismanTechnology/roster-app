@@ -162,6 +162,51 @@ await step("a coach verifies by link with no account; the mark and name appear",
   await expectText("Verified by Tom Bradley");
 });
 
+await step("a recruiter manages lists: create, save from search, open, remove", async () => {
+  await context.clearCookies();
+  await page.goto(`${base}/sign-in`, { waitUntil: "networkidle" });
+  await page.getByLabel("Email").fill("recruiter@roster.local");
+  await page.getByLabel("Password").fill("roster-demo");
+  await page.getByRole("button", { name: /sign in/i }).click();
+  // A recruiter lands on their lists, not the athlete editor.
+  await page.waitForURL(/\/lists$/, { timeout: 15_000 });
+  await expectText("Class of 2027 receivers");
+  const listName = `Smoke list ${stamp}`;
+  await page.locator('input[name="name"]').fill(listName);
+  await page.getByRole("button", { name: /create list/i }).click();
+  await page.getByRole("link", { name: listName }).waitFor({ timeout: 15_000 });
+  await shot("lists");
+
+  // Save Nina from search into the new list, then see her on the list page.
+  await page.goto(`${base}/search?sport=soccer`, { waitUntil: "networkidle" });
+  const row = page.locator("li").filter({ hasText: "Nina Kowalczyk" }).first();
+  await row.getByRole("combobox", { name: "List" }).selectOption({ label: listName });
+  await row.getByRole("button", { name: /^save$/i }).click();
+  await row.getByText(`In ${listName}`).waitFor({ timeout: 15_000 });
+
+  await page.goto(`${base}/lists`, { waitUntil: "networkidle" });
+  await page.getByRole("link", { name: listName }).click();
+  await page.waitForURL(/\/lists\/[^/]+$/, { timeout: 15_000 });
+  await expectText("Nina Kowalczyk");
+  await shot("list");
+  await page.getByRole("button", { name: /^remove$/i }).first().click();
+  await page.getByText("Nobody here yet").waitFor({ timeout: 15_000 });
+});
+
+await step("settings: wrong current password is refused, sign out works", async () => {
+  await page.goto(`${base}/settings`, { waitUntil: "networkidle" });
+  await expectText("recruiter@roster.local");
+  await shot("settings");
+  await page.locator('input[name="current"]').fill("not-the-password");
+  await page.locator('input[name="next"]').fill("password123");
+  await page.locator('input[name="confirm"]').fill("password123");
+  await page.getByRole("button", { name: /update password/i }).click();
+  await page.getByText("did not match").waitFor({ timeout: 15_000 });
+  // Header and the Session section both offer it; use the page's own.
+  await page.locator("main").getByRole("button", { name: /sign out/i }).click();
+  await page.waitForURL(/\/$/, { timeout: 15_000 });
+});
+
 await step("sign up → three-step onboarding → editor", async () => {
   await page.goto(`${base}/sign-up`, { waitUntil: "networkidle" });
   await page.getByLabel("Email").fill(`smoke-${stamp}@roster.local`);
