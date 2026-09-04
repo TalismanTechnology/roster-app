@@ -10,8 +10,8 @@ import {
 } from "@/components/editor/ProfileSections";
 import { CoachSection, FilmSection, RecordSection } from "@/components/editor/RecordSections";
 import { signOut } from "@/lib/actions/auth";
-import type { CoachContact, FilmClip, Profile, RecordEntry } from "@/lib/database.types";
-import { createClient, getCurrentUser } from "@/lib/supabase/server";
+import { getRepository } from "@/lib/data";
+import { getCurrentUser } from "@/lib/data/auth";
 
 export const metadata: Metadata = {
   title: "Edit your resume",
@@ -28,41 +28,16 @@ export default async function ResumeEditorPage() {
   const user = await getCurrentUser();
   if (!user) redirect("/sign-in");
 
-  const supabase = await createClient();
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .maybeSingle<Profile>();
+  const repo = await getRepository();
+  const profile = await repo.getProfileById(user.id);
 
   // Signed in but no profile yet: onboarding was abandoned partway.
   if (!profile) redirect("/onboarding");
 
-  const [entriesResult, filmResult, coachesResult] = await Promise.all([
-    supabase
-      .from("record_entries")
-      .select("*")
-      .eq("profile_id", user.id)
-      .order("achieved_on", { ascending: false })
-      .returns<RecordEntry[]>(),
-
-    supabase
-      .from("film_clips")
-      .select("*")
-      .eq("profile_id", user.id)
-      .order("is_featured", { ascending: false })
-      .order("position")
-      .order("created_at")
-      .returns<FilmClip[]>(),
-
-    supabase
-      .from("coach_contacts")
-      .select("*")
-      .eq("profile_id", user.id)
-      .order("position")
-      .order("created_at")
-      .returns<CoachContact[]>(),
+  const [entries, film, coaches] = await Promise.all([
+    repo.listEntries(profile.id),
+    repo.listFilm(profile.id),
+    repo.listCoaches(profile.id, user.id),
   ]);
 
   return (
@@ -101,10 +76,10 @@ export default async function ResumeEditorPage() {
 
       <div className="flex flex-col gap-5">
         <IdentitySection profile={profile} />
-        <RecordSection entries={entriesResult.data ?? []} />
-        <FilmSection clips={filmResult.data ?? []} />
+        <RecordSection entries={entries} />
+        <FilmSection clips={film} />
         <AcademicsSection profile={profile} />
-        <CoachSection coaches={coachesResult.data ?? []} />
+        <CoachSection coaches={coaches} />
         <ContactSection profile={profile} />
         <VisibilitySection profile={profile} />
       </div>

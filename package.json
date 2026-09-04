@@ -9,7 +9,9 @@
     "typecheck": "tsc --noEmit",
     "shots": "node scripts/shots.mjs",
     "test:schema": "./supabase/tests/run.sh",
-    "db:types": "supabase gen types typescript --linked > src/lib/database.types.ts"
+    "db:types": "supabase gen types typescript --linked > src/lib/database.types.ts",
+    "test": "tsx --test src/lib/data/__tests__/*.test.ts",
+    "seed": "tsx scripts/seed.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",
@@ -27,6 +29,7 @@
     "playwright-core": "^1.62.1",
     "supabase": "^2.115.0",
     "tailwindcss": "^4",
+    "tsx": "^4.23.13",
     "typescript": "^5"
   }
 }

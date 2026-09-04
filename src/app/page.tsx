@@ -2,9 +2,9 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { AppShell, SideCard } from "@/components/shell/AppShell";
+import { getRepository } from "@/lib/data";
+import { getCurrentUser } from "@/lib/data/auth";
 import type { Profile } from "@/lib/database.types";
-import { createClient, getCurrentUser } from "@/lib/supabase/server";
-import { isSupabaseConfigured } from "@/lib/supabase/config";
 
 /**
  * The app entry point.
@@ -16,31 +16,18 @@ import { isSupabaseConfigured } from "@/lib/supabase/config";
  * and the public page.
  */
 export default async function HomePage() {
-  const user = isSupabaseConfigured() ? await getCurrentUser() : null;
+  const user = await getCurrentUser();
 
   if (!user) {
     return <Landing />;
   }
 
-  const supabase = await createClient();
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .maybeSingle<Profile>();
+  const repo = await getRepository();
+  const profile = await repo.getProfileById(user.id);
 
   if (!profile) redirect("/onboarding");
 
-  const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
-
-  const { data: views } = await supabase
-    .from("profile_views")
-    .select("view_count")
-    .eq("profile_id", profile.id)
-    .gte("viewed_on", weekAgo);
-
-  const weekViews = (views ?? []).reduce((sum, row) => sum + row.view_count, 0);
+  const weekViews = await repo.weeklyViews(profile.id);
 
   return <Dashboard profile={profile} weekViews={weekViews} />;
 }

@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 
 import { AuthForm } from "@/components/auth/AuthForm";
 import { signIn } from "@/lib/actions/auth";
-import { getCurrentUser } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/data/auth";
 
 export const metadata: Metadata = {
   title: "Sign in",

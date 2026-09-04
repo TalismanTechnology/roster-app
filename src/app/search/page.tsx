@@ -5,9 +5,8 @@ import { VerifiedSeal } from "@/components/record/VerificationMark";
 import { AppShell, SideCard } from "@/components/shell/AppShell";
 import { SearchIcon } from "@/components/shell/icons";
 import type { AthleteLevel, Profile } from "@/lib/database.types";
+import { getRepository } from "@/lib/data";
 import { LEVEL_OPTIONS, levelLabel, sportLabel } from "@/lib/format";
-import { createClient } from "@/lib/supabase/server";
-import { isSupabaseConfigured } from "@/lib/supabase/config";
 
 export const metadata: Metadata = {
   title: "Find athletes",
@@ -110,23 +109,18 @@ type Filters = {
 async function runSearch(
   filters: Omit<Filters, "level"> & { level: AthleteLevel | null; page: number },
 ): Promise<Profile[] | null> {
-  if (!isSupabaseConfigured()) return null;
+  const repo = await getRepository();
 
-  const supabase = await createClient();
-
-  const { data } = await supabase.rpc("search_athletes", {
+  return repo.searchAthletes({
     q: filters.q,
     sport: filters.sport,
-    levels: filters.level ? [filters.level] : null,
-    grad_years: filters.gradYear ? [filters.gradYear] : null,
-    regions: filters.region ? [filters.region.toUpperCase()] : null,
-    athlete_positions: null,
-    verified_only: filters.verifiedOnly,
-    page_size: PAGE_SIZE,
-    page_offset: (filters.page - 1) * PAGE_SIZE,
+    level: filters.level,
+    gradYear: filters.gradYear,
+    region: filters.region,
+    verifiedOnly: filters.verifiedOnly,
+    page: filters.page,
+    pageSize: PAGE_SIZE,
   });
-
-  return data ?? [];
 }
 
 function SearchForm({ defaults }: { defaults: Filters }) {

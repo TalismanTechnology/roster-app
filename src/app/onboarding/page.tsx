@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import { OnboardingForm } from "@/components/auth/OnboardingForm";
-import { createClient, getCurrentUser } from "@/lib/supabase/server";
+import { getRepository } from "@/lib/data";
+import { getCurrentUser } from "@/lib/data/auth";
 
 export const metadata: Metadata = {
   title: "Set up your resume",
@@ -18,14 +19,8 @@ export default async function OnboardingPage() {
   const user = await getCurrentUser();
   if (!user) redirect("/sign-in");
 
-  const supabase = await createClient();
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  if (profile) redirect("/resume");
+  const repo = await getRepository();
+  if (await repo.getProfileById(user.id)) redirect("/resume");
 
   return (
     <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-(--space-gutter) py-(--space-section)">
