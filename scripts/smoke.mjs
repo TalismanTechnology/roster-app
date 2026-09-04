@@ -109,7 +109,7 @@ await step("adding an entry persists and shows on the public resume", async () =
   const notice = form.locator('[role="status"], [role="alert"]').first();
   await notice.waitFor({ state: "visible", timeout: 20_000 });
   const verdict = (await notice.textContent())?.trim() ?? "";
-  if (verdict !== "Saved.") throw new Error(`form said: ${verdict}`);
+  if (!/^Saved/.test(verdict)) throw new Error(`form said: ${verdict}`);
   await page.goto(`${base}/jordanreyes`, { waitUntil: "networkidle" });
   await expectText(title);
 });

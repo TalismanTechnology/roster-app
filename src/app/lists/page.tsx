@@ -72,7 +72,7 @@ export default async function ListsPage() {
           <h2 id="new-list" className="font-display text-display-sm">
             New list
           </h2>
-          <div className="mt-5">
+          <div className="panel mt-5" style={{ padding: "clamp(1.25rem, 2.5vw, 2rem)" }}>
             <CreateListForm />
           </div>
         </section>

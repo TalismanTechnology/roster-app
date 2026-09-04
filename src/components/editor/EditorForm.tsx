@@ -29,11 +29,11 @@ export function EditorForm({
   const [state, formAction] = useActionState(action, IDLE);
 
   return (
-    <form action={formAction} className="flex flex-col gap-5">
+    <form action={formAction} className="flex flex-col gap-6">
       {children}
 
-      <div className="flex items-center gap-4">
-        <SubmitButton className={compact ? "btn-outline min-h-9 px-4 text-sm" : undefined}>{submitLabel}</SubmitButton>
+      <div className={`flex flex-wrap items-center gap-4 ${compact ? "" : "border-t border-rule pt-5"}`}>
+        <SubmitButton className={compact ? "btn-row" : "btn-primary"}>{submitLabel}</SubmitButton>
         <FormNotice ok={state.ok} error={state.error} />
       </div>
     </form>

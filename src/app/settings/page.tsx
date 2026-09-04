@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { DeleteForm, EmailForm, PasswordForm } from "@/components/account/AccountForms";
-import { EditorSection, VisibilitySection } from "@/components/editor/ProfileSections";
+import { EditorSection, Panel, VisibilitySection } from "@/components/editor/ProfileSections";
 import { Site } from "@/components/shell/Site";
 import { Corner, CORNER } from "@/components/ui/marks";
 import { signOut } from "@/lib/actions/auth";
@@ -52,27 +52,35 @@ export default async function SettingsPage() {
           </p>
         </header>
 
-        <EditorSection id="email" title="Email">
-          <EmailForm email={user.email} />
-        </EditorSection>
+        <div className="flex flex-col gap-12">
+          <EditorSection id="email" title="Email">
+            <Panel>
+              <EmailForm email={user.email} />
+            </Panel>
+          </EditorSection>
 
-        <EditorSection id="password" title="Password">
-          <PasswordForm />
-        </EditorSection>
+          <EditorSection id="password" title="Password">
+            <Panel>
+              <PasswordForm />
+            </Panel>
+          </EditorSection>
 
-        {profile && isAthlete && <VisibilitySection profile={profile} />}
+          {profile && isAthlete && <VisibilitySection profile={profile} />}
 
-        <EditorSection id="session" title="Session">
-          <form action={signOut}>
-            <button type="submit" className="btn-outline">
-              Sign out
-            </button>
-          </form>
-        </EditorSection>
+          <EditorSection id="session" title="Session">
+            <form action={signOut}>
+              <button type="submit" className="btn-outline">
+                Sign out
+              </button>
+            </form>
+          </EditorSection>
 
-        <EditorSection id="delete" title="Delete account" lede="This removes your account and everything you've added. If you only want to hide your resume, set it to private instead.">
-          <DeleteForm confirmWith={profile?.handle ?? user.email} />
-        </EditorSection>
+          <EditorSection id="delete" title="Delete account" lede="This removes your account and everything you've added. If you only want to hide your resume, set it to private instead.">
+            <Panel>
+              <DeleteForm confirmWith={profile?.handle ?? user.email} />
+            </Panel>
+          </EditorSection>
+        </div>
       </main>
     </Site>
   );

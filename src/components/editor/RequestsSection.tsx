@@ -32,11 +32,13 @@ export function RequestsSection({
       lede="A verified entry carries the name of the coach who confirmed it. Requests expire after 30 days."
     >
       {live.length === 0 ? (
-        <p className="border-y border-rule py-6 text-sm text-ink-muted">
-          No requests yet. Open an entry above and choose <span className="text-ink">Request verification</span>.
-        </p>
+        <div className="panel">
+          <p className="text-ink-muted" style={{ padding: "var(--feature-pad)" }}>
+            No requests yet. Open the Record section, choose an entry, and press <span className="font-bold text-ink">Request verification</span>.
+          </p>
+        </div>
       ) : (
-        <ol className="border-t border-rule">
+        <ol className="panel divide-y divide-rule">
           {live.map((r) => {
             const entry = entryById.get(r.achievement_id);
             const coach = coachById.get(r.coach_contact_id);
@@ -44,23 +46,23 @@ export function RequestsSection({
             // entry's own verification states one-to-one.
             const state: VerificationState = r.status === "pending" ? "submitted" : r.status === "verified" ? "verified" : "disputed";
             return (
-              <li key={r.id} className="flex flex-wrap items-start gap-x-6 gap-y-3 border-b border-rule py-4">
-                <div className="min-w-0 flex-1">
-                  <p className="font-bold">{entry?.title ?? "Entry removed"}</p>
-                  <p className="label mt-0.5 text-ink-muted">
+              <li key={r.id} className="flex flex-wrap items-start gap-x-6 gap-y-3" style={{ padding: "var(--feature-pad)" }}>
+                <div className="min-w-0 flex-1 basis-56">
+                  <p className="text-lg font-bold">{entry?.title ?? "Entry removed"}</p>
+                  <p className="mt-0.5 text-sm text-ink-muted">
                     To {coach?.name ?? "a coach"} · sent {fullDate(r.created_at.slice(0, 10))}
                     {r.responded_at && ` · answered ${fullDate(r.responded_at.slice(0, 10))}`}
                   </p>
-                  {r.note && <p className="mt-2 max-w-prose text-sm italic text-ink-muted">“{r.note}”</p>}
+                  {r.note && <p className="mt-2 max-w-prose italic text-ink-muted">“{r.note}”</p>}
                   {r.verifier_name && r.status !== "pending" && (
-                    <p className="label mt-1 text-ink-muted">
+                    <p className="mt-1 text-sm text-ink-muted">
                       — {r.verifier_name}
                       {r.verifier_role ? `, ${r.verifier_role}` : ""}
                     </p>
                   )}
                 </div>
                 <div className="flex items-center gap-3">
-                  {r.status === "pending" && <CopyButton value={`/verify/${r.token}`} label="Copy link" />}
+                  {r.status === "pending" && <CopyButton value={`/verify/${r.token}`} label="Copy link" className="btn-row" />}
                   <VerificationMark state={state} />
                 </div>
               </li>

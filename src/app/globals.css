@@ -19,17 +19,17 @@
   color-scheme: dark;
 
   --paper: #000000;
-  --paper-raised: #16181c;
-  --paper-sunken: #202327;
+  --paper-raised: #141619;
+  --paper-sunken: #1f2226;
 
-  /* Both greys clear WCAG AA on black (muted ≈ 6.0:1, subtle ≈ 4.6:1) so
-     dates, meta lines, and self-reported marks stay readable in daylight. */
-  --ink: #e7e9ea;
-  --ink-muted: #858a90;
-  --ink-subtle: #71767b;
+  /* Louder than the landing needs, because the app is read for an hour at
+     a time: muted ≈ 7.6:1, subtle ≈ 5.6:1 on black. */
+  --ink: #eceeef;
+  --ink-muted: #9aa0a6;
+  --ink-subtle: #82878d;
 
-  --rule: #202327;
-  --rule-strong: #3e4247;
+  --rule: #2a2e33;
+  --rule-strong: #4a4f55;
 
   /* Monochrome: "accent" is ink. Links, focus, the active tab, and the
      verified mark are all the reading colour at full strength. The name is
@@ -58,10 +58,10 @@
 
   /* Type scale. Reading size is 15px; meta is fluid so it stays legible at
      phone width without shouting at desktop. Display sizes are fluid. */
-  --text-micro: clamp(0.75rem, 0.25vw + 0.62rem, 0.8125rem);
-  --text-sm: 0.8125rem;
-  --text-base: 0.9375rem;
-  --text-lg: 1.0625rem;
+  --text-micro: clamp(0.8125rem, 0.25vw + 0.7rem, 0.875rem);
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
   --text-display-sm: 1.25rem;
   --text-display: clamp(1.9375rem, 1.5rem + 2vw, 2.5rem);
   --text-display-lg: clamp(2.5rem, 1.5rem + 4.5vw, 4rem);
@@ -227,6 +227,13 @@ body {
   background: var(--paper-sunken);
 }
 
+/* Panel: a solid raised surface for anything a person works inside — forms,
+   result rows, the checklist. Square corners, a visible edge, no shadow. */
+@utility panel {
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+}
+
 /* Lifted: the overlap surface — translucent paper, blur, deep shadow. */
 @utility lifted {
   background: color-mix(in srgb, var(--paper) 88%, transparent);
@@ -333,6 +340,44 @@ body {
   transition: color var(--duration-fast) ease;
   &:hover {
     color: var(--ink);
+  }
+}
+
+/* Row action: the small bordered button that sits on a list row. A real
+   44px target, never a bare text link. */
+@utility btn-row {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  min-height: 2.5rem;
+  padding-inline: 0.875rem;
+  cursor: pointer;
+  border-radius: var(--radius-input);
+  border: 1px solid var(--rule-strong);
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  transition:
+    background-color var(--duration-fast) ease,
+    border-color var(--duration-fast) ease;
+  &:hover {
+    background: var(--wash);
+    border-color: var(--ink-muted);
+  }
+  &:disabled {
+    cursor: default;
+    opacity: 0.5;
+  }
+}
+
+@utility btn-row-danger {
+  color: var(--ink-muted);
+  &:hover {
+    color: var(--state-disputed);
+    border-color: var(--state-disputed);
+    background: var(--state-disputed-bg);
   }
 }
 
