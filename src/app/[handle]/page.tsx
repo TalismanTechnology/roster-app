@@ -2,13 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { ProfileHeader } from "@/components/record/ProfileHeader";
-import { RecordTimeline } from "@/components/record/RecordTimeline";
-import {
-  AcademicsStrip,
-  FilmStrip,
-  ReferenceList,
-} from "@/components/record/ResumeSections";
+import { ResumeFrame } from "@/components/record/ResumeFrame";
 import type { CoachContact, FilmClip, Profile, RecordEntry } from "@/lib/database.types";
 import { levelLabel, sportLabel } from "@/lib/format";
 import { createClient, getCurrentUser } from "@/lib/supabase/server";
@@ -110,24 +104,17 @@ export default async function ResumePage({ params }: PageProps<"/[handle]">) {
   void supabase.rpc("record_profile_view", { target: profile.id });
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-(--space-gutter) py-(--space-section)">
+    // See the note in /preview: above `lg` the height must be definite, so
+    // `flex-1` is scoped below that breakpoint.
+    <main className="flex flex-col max-lg:flex-1 lg:h-dvh lg:overflow-hidden">
       {isOwner && <OwnerBar visibility={profile.visibility} />}
 
-      <ProfileHeader
+      <ResumeFrame
         profile={profile}
-        stats={{
-          verified: profile.verified_count,
-          total: profile.entry_count,
-          film: film.length,
-        }}
+        entries={entries}
+        film={film}
+        coaches={profile.is_recruitable ? coaches : []}
       />
-
-      <div className="mt-(--space-section) flex flex-col gap-(--space-section)">
-        <FilmStrip clips={film} />
-        <RecordTimeline entries={entries} />
-        <AcademicsStrip profile={profile} />
-        {profile.is_recruitable && <ReferenceList coaches={coaches} />}
-      </div>
     </main>
   );
 }
@@ -142,7 +129,7 @@ function OwnerBar({ visibility }: { visibility: Profile["visibility"] }) {
         : "Private — only you can see this.";
 
   return (
-    <div className="border-rule bg-paper-sunken mb-8 flex flex-wrap items-baseline justify-between gap-3 border p-4">
+    <div className="border-rule bg-paper-sunken flex shrink-0 flex-wrap items-baseline justify-between gap-3 border-b px-(--space-gutter) py-2.5">
       <p className="text-ink-muted text-sm">{note}</p>
       <Link
         href="/resume"

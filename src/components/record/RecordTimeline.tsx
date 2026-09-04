@@ -9,6 +9,10 @@ import { VerificationMark } from "./VerificationMark";
  * Laid out as a ruled document rather than a stack of cards: a recruiter scans
  * this the way they scan a results sheet — down the date column, across to the
  * mark. Cards would put a box around every line and destroy that column.
+ *
+ * The entries an athlete pinned lead, under a heading. Everything else follows
+ * without one — inside the Record tab, a subhead reading "Record" would only
+ * repeat the tab that was just clicked.
  */
 export function RecordTimeline({ entries }: { entries: RecordEntry[] }) {
   if (entries.length === 0) {
@@ -19,7 +23,7 @@ export function RecordTimeline({ entries }: { entries: RecordEntry[] }) {
   const timeline = entries.filter((entry) => !entry.is_pinned);
 
   return (
-    <div className="flex flex-col gap-(--space-section)">
+    <div className="mx-auto flex max-w-3xl flex-col gap-12">
       {pinned.length > 0 && (
         <RecordSection title="Selected" count={pinned.length}>
           {pinned.map((entry) => (
@@ -28,13 +32,20 @@ export function RecordTimeline({ entries }: { entries: RecordEntry[] }) {
         </RecordSection>
       )}
 
-      {timeline.length > 0 && (
-        <RecordSection title="The record" count={timeline.length}>
-          {timeline.map((entry) => (
-            <RecordRow key={entry.id} entry={entry} />
-          ))}
-        </RecordSection>
-      )}
+      {timeline.length > 0 &&
+        (pinned.length > 0 ? (
+          <RecordSection title="Everything else" count={timeline.length}>
+            {timeline.map((entry) => (
+              <RecordRow key={entry.id} entry={entry} />
+            ))}
+          </RecordSection>
+        ) : (
+          <ol className="border-rule border-t">
+            {timeline.map((entry) => (
+              <RecordRow key={entry.id} entry={entry} />
+            ))}
+          </ol>
+        ))}
     </div>
   );
 }
