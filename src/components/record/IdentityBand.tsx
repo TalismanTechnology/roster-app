@@ -102,7 +102,7 @@ export function IdentityBand({
               ))}
             </dl>
 
-            <div className="flex flex-wrap items-center gap-2 border-t border-rule pt-4">
+            <div className="print-hidden flex flex-wrap items-center gap-2 border-t border-rule pt-4">
               {isContactable && (
                 <a href={`mailto:${profile.contact_email}`} className="btn-primary min-h-9 px-4 text-sm">
                   Contact

@@ -64,7 +64,7 @@ export function SiteHeader({ user, variant = "app" }: Props) {
         </Link>
 
         <nav aria-label="Main navigation" className="pointer-events-auto flex items-center gap-1">
-          <Link href="/search" className="rounded-full px-3.5 py-1.5 text-sm text-ink-muted transition-colors hover:text-ink">
+          <Link href="/search" className="hidden whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm text-ink-muted transition-colors hover:text-ink sm:inline">
             Find athletes
           </Link>
 
@@ -85,7 +85,7 @@ export function SiteHeader({ user, variant = "app" }: Props) {
               </form>
               <Link
                 href={primaryHref(user)}
-                className={`group inline-flex items-center gap-1.5 rounded-full border px-4 py-1.5 text-sm font-bold text-ink backdrop-blur-md transition-colors hover:border-ink hover:bg-ink hover:text-paper ${glass}`}
+                className={`group inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-4 py-1.5 text-sm font-bold text-ink backdrop-blur-md transition-colors hover:border-ink hover:bg-ink hover:text-paper ${glass}`}
               >
                 {primaryLabel(user)}
                 <ArrowUpRight className="!size-3.5 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
@@ -98,7 +98,7 @@ export function SiteHeader({ user, variant = "app" }: Props) {
               </Link>
               <Link
                 href="/sign-up"
-                className={`group inline-flex items-center gap-1.5 rounded-full border px-4 py-1.5 text-sm font-bold text-ink backdrop-blur-md transition-colors hover:border-ink hover:bg-ink hover:text-paper ${glass}`}
+                className={`group inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-4 py-1.5 text-sm font-bold text-ink backdrop-blur-md transition-colors hover:border-ink hover:bg-ink hover:text-paper ${glass}`}
               >
                 Create your resume
                 <ArrowUpRight className="!size-3.5 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />

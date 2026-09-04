@@ -11,7 +11,9 @@
     "test:schema": "./supabase/tests/run.sh",
     "db:types": "supabase gen types typescript --linked > src/lib/database.types.ts",
     "test": "tsx --test src/lib/data/__tests__/*.test.ts",
-    "seed": "tsx scripts/seed.ts"
+    "seed": "tsx scripts/seed.ts",
+    "e2e": "node scripts/smoke.mjs",
+    "audit": "node scripts/audit.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",

@@ -132,7 +132,7 @@ export function RecordList({ entries, isOwner }: { entries: RecordEntry[]; isOwn
                 )}
               </div>
 
-              <div className="flex items-center gap-2.5 pt-0.5">
+              <div className="flex max-w-[45%] items-center justify-end gap-2.5 pt-0.5 text-right">
                 <span className="font-display text-xl tracking-tight" data-numeric>
                   <EntryValue entry={e} />
                 </span>
@@ -169,13 +169,15 @@ export function FilmSection({ clips }: { clips: FilmClip[] }) {
   const featured = clips.find((c) => c.is_featured) ?? clips[0];
   const rest = clips.filter((c) => c.id !== featured.id);
 
+  // min-w-0 on both grid children: a truncated (no-wrap) title otherwise
+  // sets the implicit track to its full width and overflows the page.
   return (
     <div className="grid gap-6 @3xl:grid-cols-12">
-      <div className="@3xl:col-span-8">
+      <div className="min-w-0 @3xl:col-span-8">
         <FilmPlayer clip={featured} />
       </div>
       {rest.length > 0 && (
-        <ol className="flex flex-col divide-y divide-rule border-y border-rule @3xl:col-span-4 @3xl:border-t-0">
+        <ol className="flex min-w-0 flex-col divide-y divide-rule border-y border-rule @3xl:col-span-4 @3xl:border-t-0">
           {rest.map((clip) => {
             const poster = posterFor(clip);
             return (

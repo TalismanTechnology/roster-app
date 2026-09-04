@@ -24,9 +24,7 @@ import { buildSeed } from "./seed";
  * read, and delete. Writes go to a temp file and rename into place so a
  * crash mid-write never leaves a half-written database.
  *
- * Reads are cached by mtime. Next's dev server keeps several module
- * instances alive (pages, actions, the proxy), and the mtime check is what
- * keeps them agreeing without a shared process.
+ * Reads are never cached — see `readDb` for why.
  */
 
 export type LocalUser = {
@@ -120,8 +118,6 @@ function dbFile(): string {
   return path.join(dataDir(), "roster.json");
 }
 
-let cache: { file: string; mtimeMs: number; db: Db } | null = null;
-
 function ensureExists(): void {
   const file = dbFile();
   if (fs.existsSync(file)) return;
@@ -130,19 +126,19 @@ function ensureExists(): void {
   writeDb(buildSeed());
 }
 
-/** The current database. Treat the result as read-only — use `mutate` to change it. */
+/**
+ * The current database, parsed fresh on every call. Treat the result as
+ * read-only — use `mutate` to change it.
+ *
+ * There is deliberately no in-memory cache. Next's dev server keeps several
+ * module instances alive (pages, actions, the proxy), each with its own
+ * module state, so any cache here would need cross-instance invalidation to
+ * be trustworthy. Parsing a few hundred kilobytes of JSON costs about a
+ * millisecond; that is cheaper than being clever.
+ */
 export function readDb(): Db {
   ensureExists();
-  const file = dbFile();
-  const { mtimeMs } = fs.statSync(file);
-
-  if (cache && cache.file === file && cache.mtimeMs === mtimeMs) {
-    return cache.db;
-  }
-
-  const db = JSON.parse(fs.readFileSync(file, "utf8")) as Db;
-  cache = { file, mtimeMs, db };
-  return db;
+  return JSON.parse(fs.readFileSync(dbFile(), "utf8")) as Db;
 }
 
 export function writeDb(db: Db): void {
@@ -151,7 +147,6 @@ export function writeDb(db: Db): void {
 
   fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
   fs.renameSync(tmp, file);
-  cache = null;
 }
 
 /**
@@ -170,5 +165,4 @@ export function mutate<T>(change: (db: Db) => T): T {
 export function resetDb(): void {
   const file = dbFile();
   if (fs.existsSync(file)) fs.rmSync(file);
-  cache = null;
 }

@@ -78,7 +78,7 @@ export async function ResumeDemo() {
               {entries.map((e) => (
                 <li key={e.id} className="flex items-baseline justify-between gap-6 py-2.5">
                   <span className="text-sm">{e.title}</span>
-                  <span className={`font-display flex items-center gap-2 whitespace-nowrap ${e.verification === "verified" ? "" : "text-ink-muted"}`} data-numeric>
+                  <span className={`font-display flex max-w-[55%] items-center justify-end gap-2 text-right ${e.verification === "verified" ? "" : "text-ink-muted"}`} data-numeric>
                     {valueOf(e)}
                     {e.verification === "verified" ? <Verified /> : <Unverified />}
                   </span>

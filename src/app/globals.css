@@ -22,9 +22,11 @@
   --paper-raised: #16181c;
   --paper-sunken: #202327;
 
+  /* Both greys clear WCAG AA on black (muted ≈ 6.0:1, subtle ≈ 4.6:1) so
+     dates, meta lines, and self-reported marks stay readable in daylight. */
   --ink: #e7e9ea;
-  --ink-muted: #71767b;
-  --ink-subtle: #5b6167;
+  --ink-muted: #858a90;
+  --ink-subtle: #71767b;
 
   --rule: #202327;
   --rule-strong: #3e4247;
@@ -431,6 +433,19 @@ body {
   }
 }
 
+/* The route loading indicator: one ink segment sliding along a hairline. */
+.loading-bar {
+  animation: slide 1.2s var(--ease-out-expo) infinite;
+}
+@keyframes slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .reveal {
     opacity: 1;
@@ -466,6 +481,11 @@ body {
   }
   .print-hidden {
     display: none !important;
+  }
+  .lifted {
+    box-shadow: none;
+    backdrop-filter: none;
+    background: #fff;
   }
   .reveal {
     opacity: 1;

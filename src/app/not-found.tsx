@@ -2,16 +2,22 @@ import Link from "next/link";
 
 import { Button } from "@/components/ui/Button";
 import { Corner, CORNER } from "@/components/ui/marks";
-import { Site } from "@/components/shell/Site";
+import { SiteFooter } from "@/components/shell/SiteFooter";
+import { SiteHeader } from "@/components/shell/SiteHeader";
 
 /**
  * Shared by unknown routes and by resumes the viewer may not see. The copy
  * is deliberately the same for both: a private resume must be
  * indistinguishable from a handle that was never claimed.
+ *
+ * Rendered without reading the session on purpose: a not-found page that
+ * touches cookies becomes dynamic, and Next then streams it with a 200
+ * instead of the 404 a crawler (and the privacy model) depends on.
  */
 export default function NotFound() {
   return (
-    <Site>
+    <>
+      <SiteHeader user={null} />
       <main
         className="flex min-h-[70svh] flex-col justify-center"
         style={{ paddingInline: "var(--pad-x)", paddingBlock: "var(--section-py)" }}
@@ -34,6 +40,7 @@ export default function NotFound() {
           </Link>
         </div>
       </main>
-    </Site>
+      <SiteFooter />
+    </>
   );
 }

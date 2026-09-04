@@ -32,9 +32,14 @@ const shot = async (name) => {
   if (shotsDir) await page.screenshot({ path: `${shotsDir}/${name}.png` });
 };
 
-const expectText = async (text) => {
-  const found = await page.getByText(text, { exact: false }).first().isVisible().catch(() => false);
-  if (!found) throw new Error(`expected to see "${text}"`);
+// Auto-waits: routes with a loading boundary change URL before their content
+// streams in, so a one-shot visibility check would assert against the shell.
+const expectText = async (text, timeout = 10_000) => {
+  try {
+    await page.getByText(text, { exact: false }).first().waitFor({ state: "visible", timeout });
+  } catch {
+    throw new Error(`expected to see "${text}"`);
+  }
 };
 
 await step("search lists seeded public athletes", async () => {
