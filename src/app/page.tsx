@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { Hero } from "@/components/landing/Hero";
+import { AppShell, SideCard } from "@/components/shell/AppShell";
 import type { Profile } from "@/lib/database.types";
 import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
@@ -9,9 +9,11 @@ import { isSupabaseConfigured } from "@/lib/supabase/config";
 /**
  * The app entry point.
  *
- * Signed out, it sells the one thing the product does: a resume at a link.
- * Signed in, it is the athlete's home — is the resume working? — with the
- * week's view count and the doors to the editor and their public page.
+ * Signed out, the X join screen translated: the mark filling half the
+ * viewport, the two-beat headline, and a stack of pills that put creating an
+ * account one press away. Signed in, the athlete's home inside the shell —
+ * is the resume working? — with the week's views and the doors to the editor
+ * and the public page.
  */
 export default async function HomePage() {
   const user = isSupabaseConfigured() ? await getCurrentUser() : null;
@@ -45,121 +47,110 @@ export default async function HomePage() {
 
 function Dashboard({ profile, weekViews }: { profile: Profile; weekViews: number }) {
   const stats = [
-    { label: "Views this week", value: weekViews },
-    { label: "Entries", value: profile.entry_count },
-    { label: "Verified", value: profile.verified_count },
+    { label: "views this week", value: weekViews },
+    { label: "entries", value: profile.entry_count },
+    { label: "verified", value: profile.verified_count },
   ];
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-(--space-gutter) py-(--space-section)">
-      <p className="label text-ink-subtle">Roster</p>
+    <AppShell
+      active="home"
+      right={
+        <SideCard title="Get found">
+          <p className="text-ink-muted text-sm leading-normal">
+            Recruiters filter by sport, class year, and state. The more of your
+            record is verified, the higher you rank.
+          </p>
+          <Link href="/search" className="btn-outline mt-1 self-start px-5 text-sm">
+            See the search they use
+          </Link>
+        </SideCard>
+      }
+    >
+      <div className="bar-blur border-rule sticky top-0 z-20 flex h-[53px] items-center border-b px-4">
+        <h1 className="text-display-sm font-display">Home</h1>
+      </div>
 
-      <h1 className="font-display text-display mt-4 leading-[0.95] tracking-tight text-balance">
-        {profile.display_name}
-      </h1>
+      <div className="px-4 py-4">
+        <p className="text-xl font-display">{profile.display_name}</p>
+        <p className="text-ink-muted mt-0.5">
+          Your resume lives at{" "}
+          <Link href={`/${profile.handle}`} className="text-accent hover:underline">
+            roster.us/{profile.handle}
+          </Link>
+        </p>
 
-      <p className="text-ink-muted mt-3 text-sm">
-        Your resume lives at{" "}
-        <Link
-          href={`/${profile.handle}`}
-          className="text-ink decoration-rule-strong hover:decoration-ink cursor-pointer underline underline-offset-4"
-        >
-          roster.us/{profile.handle}
-        </Link>
-      </p>
+        <p className="mt-4 flex flex-wrap gap-x-5 gap-y-1">
+          {stats.map((stat) => (
+            <span key={stat.label} className="text-ink-muted">
+              <span className="text-ink font-bold" data-numeric>
+                {stat.value}
+              </span>{" "}
+              {stat.label}
+            </span>
+          ))}
+        </p>
 
-      <dl className="border-rule mt-10 grid grid-cols-3 border-t pt-5">
-        {stats.map((stat) => (
-          <div key={stat.label} className="flex flex-col gap-1">
-            <dd className="font-display text-display-sm leading-none" data-numeric>
-              {stat.value}
-            </dd>
-            <dt className="label text-ink-subtle">{stat.label}</dt>
-          </div>
-        ))}
-      </dl>
-
-      <nav className="mt-12 flex flex-col gap-3" aria-label="Your resume">
-        <Link
-          href="/resume"
-          className="bg-ink text-paper hover:bg-ink-muted flex h-12 cursor-pointer items-center justify-center rounded-[2px] text-sm font-medium transition-colors duration-(--duration-fast)"
-        >
-          Edit your resume
-        </Link>
-
-        <Link
-          href={`/${profile.handle}`}
-          className="border-rule-strong text-ink hover:border-ink flex h-12 cursor-pointer items-center justify-center rounded-[2px] border text-sm font-medium transition-colors duration-(--duration-fast)"
-        >
-          View it as a recruiter
-        </Link>
-
-        <Link
-          href="/search"
-          className="label text-ink-muted hover:text-ink mt-2 cursor-pointer self-center underline decoration-transparent underline-offset-4 transition-colors duration-(--duration-fast) hover:decoration-ink"
-        >
-          Find other athletes →
-        </Link>
-      </nav>
-    </main>
+        <nav className="mt-6 flex flex-wrap gap-3" aria-label="Your resume">
+          <Link href="/resume" className="btn-primary">
+            Edit your resume
+          </Link>
+          <Link href={`/${profile.handle}`} className="btn-outline">
+            View it as a recruiter
+          </Link>
+        </nav>
+      </div>
+    </AppShell>
   );
 }
 
-/**
- * The dark cover, then the paper record: the hero carries the emotion and the
- * section below it makes the argument in the product's own editorial voice.
- * The contrast between the two surfaces is the design — the cover is the
- * stadium at night, and scrolling lands you on the document.
- */
 function Landing() {
   return (
-    <main className="flex flex-1 flex-col">
-      <Hero />
+    <main className="mx-auto flex min-h-dvh w-full max-w-5xl flex-col justify-center gap-10 px-8 py-10 lg:flex-row lg:items-center lg:gap-0">
+      {/* The mark, at billboard size. */}
+      <div className="flex flex-1 items-center lg:justify-center" aria-hidden>
+        <span className="font-display text-[clamp(5rem,20vw,17rem)] leading-none tracking-tighter">
+          R
+        </span>
+      </div>
 
-      <section
-        aria-labelledby="landing-record-heading"
-        className="mx-auto w-full max-w-2xl px-(--space-gutter) py-(--space-section)"
-      >
-        <p className="label text-ink-subtle">The record</p>
+      <section className="flex w-full max-w-md flex-col lg:pl-8">
+        <h1 className="text-display-lg font-display leading-none tracking-tight">
+          Get found.
+        </h1>
 
-        <h2
-          id="landing-record-heading"
-          className="font-display text-display mt-4 leading-[0.95] tracking-tight text-balance"
-        >
-          Your whole career. One link.
+        <h2 className="text-display font-display mt-10 leading-tight">
+          Join Roster today.
         </h2>
 
-        <p className="text-ink-muted mt-6 max-w-prose leading-relaxed">
-          A digital resume for athletes: every PR, result, award, and clip of
-          film — verified by your coaches, in one page a recruiter can open
-          without an account. Free for athletes.
-        </p>
-
-        <div className="mt-10 flex flex-col gap-3 sm:flex-row">
-          <Link
-            href="/sign-up"
-            className="bg-ink text-paper hover:bg-ink-muted flex h-12 cursor-pointer items-center justify-center rounded-[2px] px-8 text-sm font-medium transition-colors duration-(--duration-fast)"
-          >
-            Build your resume
+        <div className="mt-6 flex max-w-xs flex-col gap-3">
+          <Link href="/sign-up" className="btn-primary">
+            Create your resume
           </Link>
 
-          <Link
-            href="/search"
-            className="border-rule-strong text-ink hover:border-ink flex h-12 cursor-pointer items-center justify-center rounded-[2px] border px-8 text-sm font-medium transition-colors duration-(--duration-fast)"
-          >
+          <div className="flex items-center gap-2" aria-hidden>
+            <span className="bg-rule h-px flex-1" />
+            <span className="text-ink-muted text-sm">or</span>
+            <span className="bg-rule h-px flex-1" />
+          </div>
+
+          <Link href="/search" className="btn-outline">
             Find athletes
           </Link>
+
+          <p className="label text-ink-muted">
+            Every PR, result, award, and clip of film — verified by your
+            coaches, at one link a recruiter can open without an account. Free
+            for athletes.
+          </p>
         </div>
 
-        <p className="text-ink-subtle mt-10 text-sm">
-          Already on Roster?{" "}
-          <Link
-            href="/sign-in"
-            className="text-ink-muted hover:text-ink cursor-pointer underline decoration-rule underline-offset-4 transition-colors duration-(--duration-fast)"
-          >
+        <div className="mt-12 flex max-w-xs flex-col gap-3">
+          <p className="text-lg font-bold">Already have a resume?</p>
+          <Link href="/sign-in" className="btn-outline text-accent">
             Sign in
           </Link>
-        </p>
+        </div>
       </section>
     </main>
   );

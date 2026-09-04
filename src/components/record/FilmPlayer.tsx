@@ -32,7 +32,7 @@ export function FilmPlayer({ clip }: { clip: FilmClip }) {
   if (isPlaying) {
     return (
       <figure>
-        <div className="border-rule aspect-video w-full overflow-hidden rounded-(--radius-raised) border shadow-lg">
+        <div className="border-rule aspect-video w-full overflow-hidden rounded-(--radius-card) border">
           <iframe
             src={`${embedUrl}?autoplay=1`}
             title={clip.title}
@@ -50,13 +50,13 @@ export function FilmPlayer({ clip }: { clip: FilmClip }) {
 
   return (
     <figure>
-      {/* The heaviest shadow on the page: film is the most object-like thing
-          a resume carries, and the poster should sit over the sheet the way
-          a photograph sits on a desk. */}
+      {/* Media the X way: a 16px-cornered frame flush in the column, flat,
+          with the blue play circle every video on the internet has trained
+          people to press. */}
       <button
         type="button"
         onClick={() => setIsPlaying(true)}
-        className="group border-rule bg-paper-sunken pressable relative block aspect-video w-full cursor-pointer overflow-hidden rounded-(--radius-raised) border shadow-lg"
+        className="group border-rule bg-paper-sunken relative block aspect-video w-full cursor-pointer overflow-hidden rounded-(--radius-card) border"
       >
         {posterUrl && (
           <Image
@@ -75,12 +75,11 @@ export function FilmPlayer({ clip }: { clip: FilmClip }) {
           className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"
         />
 
-        <span className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-4 p-5 text-left">
-          <span className="font-display text-display-sm leading-tight text-white">
-            {clip.title}
-          </span>
-          <PlayMark />
+        <span className="absolute bottom-0 left-0 max-w-[80%] p-4 text-left">
+          <span className="text-lg leading-tight font-bold text-white">{clip.title}</span>
         </span>
+
+        <PlayMark />
 
         <span className="sr-only-text">Play {clip.title}</span>
       </button>
@@ -94,11 +93,11 @@ function PlayMark() {
   return (
     <span
       aria-hidden
-      className="flex size-12 shrink-0 items-center justify-center rounded-full border border-white/40 bg-black/40 backdrop-blur-sm transition-transform duration-(--duration-normal) ease-(--ease-out-expo) group-hover:scale-110"
+      className="bg-accent group-hover:bg-accent-hover absolute top-1/2 left-1/2 flex size-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-4 border-white/90 transition-colors duration-(--duration-fast)"
     >
       {/* Optically centred: a triangle's visual centre sits left of its
           bounding box, so it is nudged right by a pixel. */}
-      <svg viewBox="0 0 24 24" className="ml-px size-5 fill-white">
+      <svg viewBox="0 0 24 24" className="ml-0.5 size-7 fill-white">
         <path d="M8 5v14l11-7z" />
       </svg>
     </span>
@@ -111,14 +110,12 @@ function OutboundCard({ clip }: { clip: FilmClip }) {
       href={clip.url}
       target="_blank"
       rel="noopener noreferrer nofollow"
-      className="well pressable group flex aspect-video cursor-pointer flex-col justify-between p-6 hover:shadow-sm"
+      className="well wash-hover group flex aspect-video cursor-pointer flex-col justify-between p-6"
     >
-      <span className="label text-ink-subtle">
+      <span className="label text-ink-muted">
         Watch on {providerLabel(clip.provider) ?? "the source"} ↗
       </span>
-      <span className="font-display text-display-sm text-ink group-hover:text-ink-muted leading-tight transition-colors duration-(--duration-fast)">
-        {clip.title}
-      </span>
+      <span className="text-display-sm font-display leading-tight">{clip.title}</span>
     </a>
   );
 }

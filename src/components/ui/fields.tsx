@@ -1,15 +1,15 @@
 import type { ReactNode, SelectHTMLAttributes, InputHTMLAttributes, TextareaHTMLAttributes } from "react";
 
 /**
- * Form primitives in the editorial system: hairline underlines rather than
- * boxed inputs, so a form reads like a document being filled in rather than a
- * settings panel. Server-component-safe — interactivity lives in the browser's
- * own form behavior plus the SubmitButton's pending state.
+ * Form primitives in the X language: bordered rounded inputs that light up
+ * blue on focus, with the label as a small muted line above. Server-component
+ * safe — interactivity is the browser's own form behavior plus the
+ * SubmitButton's pending state.
  */
 
 const fieldClasses =
-  "w-full border-0 border-b border-rule bg-transparent px-0 py-2 text-base text-ink " +
-  "placeholder:text-ink-subtle focus:border-ink focus:outline-none focus:ring-0 " +
+  "w-full rounded-(--radius-input) border border-rule-strong bg-transparent px-3 py-3 text-lg text-ink " +
+  "placeholder:text-ink-subtle focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none " +
   "transition-colors duration-(--duration-fast)";
 
 export function Field({
@@ -23,9 +23,9 @@ export function Field({
 }) {
   return (
     <label className="block">
-      <span className="label text-ink-muted">{label}</span>
+      <span className="label text-ink-muted mb-1.5 block font-bold">{label}</span>
       {children}
-      {hint && <span className="text-ink-subtle mt-1 block text-sm">{hint}</span>}
+      {hint && <span className="label text-ink-muted mt-1.5 block">{hint}</span>}
     </label>
   );
 }
@@ -35,7 +35,7 @@ export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
 }
 
 export function TextArea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea rows={3} {...props} className={`${fieldClasses} resize-y leading-relaxed`} />;
+  return <textarea rows={3} {...props} className={`${fieldClasses} resize-y leading-normal`} />;
 }
 
 export function Select({ children, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {

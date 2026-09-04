@@ -1,170 +1,104 @@
 @import "tailwindcss";
-@import "../components/landing/hero.css";
 
 /* ===========================================================================
    Roster design tokens
 
-   Direction: the dossier on the desk. The record is still a document — the
-   typography, hairlines, and semantic colour survive from the print system —
-   but the document is now a physical object: sheets of card stock lifted off
-   an atmospheric ground, lit from above, with elevation doing the work that
-   borders alone used to do.
+   Direction: the X (x.com) design language, adopted wholesale. Pure black
+   and pure white chrome, one signal blue, bold tight system type, pill
+   buttons, rounded-16 cards, hairline dividers, and interaction states that
+   are washes of colour rather than shadows. Flat on purpose: X separates
+   surfaces with borders and luminance, and spends elevation on nothing but
+   popovers.
 
-   The depth grammar, used everywhere:
-     ground  — the desk. A gradient-washed, faintly grained backdrop that
-               nothing is ever printed on directly.
-     sheet   — a document surface. Carries a shadow and a lit top edge.
-     raised  — an element sitting on a sheet (active tab, chip, card).
-     well    — recessed into a sheet (posters, banners, empty states).
-
-   Light mode expresses elevation mostly through shadow; dark mode through
-   luminance and lit edges, because shadow barely reads on a dark ground.
-   Colour is still reserved for meaning — verification state and the primary
-   action — never decoration.
+   Token names stay app-semantic (paper/ink/rule) so components read as
+   Roster, not as a palette dump:
+     paper         — the canvas (#fff light, #000 "lights out" dark)
+     paper-raised  — elevated cards (sidebar modules, editor cards)
+     paper-sunken  — recessed fills (search pill, input backgrounds)
+     ink           — text; accent — the blue that means "action" and, here,
+                     "verified": on X the blue seal is the trust mark, and
+                     Roster's verification badge adopts it outright.
    =========================================================================== */
 
 :root {
-  /* The desk. Warm and a full step darker than the sheets, so the sheets
-     read as objects against it rather than regions of it. */
-  --ground: oklch(93% 0.008 80);
-  --ground-glow: oklch(97% 0.015 85 / 0.9);
+  --paper: #ffffff;
+  --paper-raised: #f7f9f9;
+  --paper-sunken: #eff3f4;
 
-  /* Sheets. Warm off-white rather than pure white: on an OLED phone in a gym
-     lobby, #fff glares and the record stops reading like a document. */
-  --paper: oklch(98.4% 0.004 85);
-  --paper-raised: oklch(100% 0 0);
-  --paper-sunken: oklch(95.2% 0.006 85);
+  --ink: #0f1419;
+  --ink-muted: #536471;
+  --ink-subtle: #8b98a5;
 
-  /* Ink. The 11% base is #0b0b0a from the Roster wordmark. */
-  --ink: oklch(11% 0.003 85);
-  --ink-muted: oklch(44% 0.006 85);
-  --ink-subtle: oklch(62% 0.006 85);
+  --rule: #eff3f4;
+  --rule-strong: #cfd9de;
 
-  /* Hairlines. Two weights only: a whisper for internal divisions, a firmer
-     one for section boundaries. */
-  --rule: oklch(89% 0.004 85);
-  --rule-strong: oklch(78% 0.005 85);
+  /* The blue. Actions, links, focus, the active tab, and the verified seal. */
+  --accent: #1d9bf0;
+  --accent-hover: #1a8cd8;
+  --accent-wash: rgb(29 155 240 / 0.1);
 
-  /* Elevation. Every shadow is the same warm near-black at different reach —
-     one light source, directly above, slightly soft. Two layers each: a
-     contact shadow that seats the object and an ambient one that lifts it. */
-  --shadow-ink: oklch(25% 0.01 85);
-  --elev-xs:
-    0 1px 2px oklch(from var(--shadow-ink) l c h / 0.07);
-  --elev-sm:
-    0 1px 2px oklch(from var(--shadow-ink) l c h / 0.08),
-    0 2px 8px oklch(from var(--shadow-ink) l c h / 0.06);
-  --elev-md:
-    0 2px 4px oklch(from var(--shadow-ink) l c h / 0.05),
-    0 10px 28px oklch(from var(--shadow-ink) l c h / 0.1);
-  --elev-lg:
-    0 4px 12px oklch(from var(--shadow-ink) l c h / 0.08),
-    0 24px 56px oklch(from var(--shadow-ink) l c h / 0.16);
+  /* Interaction washes — X's hover language. A tint of the content colour,
+     never a border change, never a shadow. */
+  --wash: rgb(15 20 25 / 0.06);
+  --wash-strong: rgb(15 20 25 / 0.1);
 
-  /* The lit top edge. On a light sheet this is nearly subliminal; it exists
-     so light and dark mode share one material recipe. */
-  --edge: inset 0 1px 0 oklch(100% 0 0 / 0.85);
-  --edge-raised: inset 0 1px 0 oklch(100% 0 0 / 0.95);
+  /* Semantic state. Verified is the blue; the rest keep X's own signal
+     colours (its error red, its brand gold for "still cooking"). */
+  --state-verified: var(--accent);
+  --state-verified-bg: var(--accent-wash);
+  --state-pending: #a07a00;
+  --state-pending-bg: rgb(255 212 0 / 0.14);
+  --state-disputed: #f4212e;
+  --state-disputed-bg: rgb(244 33 46 / 0.1);
 
-  /* Recess: wells are shaded at the top, the inverse of the lit edge. */
-  --recess:
-    inset 0 1px 3px oklch(from var(--shadow-ink) l c h / 0.08),
-    inset 0 0 0 1px oklch(from var(--shadow-ink) l c h / 0.04);
+  --focus: var(--accent);
 
-  /* Semantic state. Verification is the product's core signal, so it gets a
-     real colour — a deep forest that reads as "confirmed by an authority"
-     rather than the consumer-blue checkmark everyone already discounts. */
-  --state-verified: oklch(45% 0.085 155);
-  --state-verified-bg: oklch(95% 0.025 155);
-  --state-pending: oklch(58% 0.09 75);
-  --state-pending-bg: oklch(96% 0.03 75);
-  --state-disputed: oklch(55% 0.15 30);
-  --state-disputed-bg: oklch(95% 0.03 30);
+  /* Radii: two ideas only — the card and the pill. */
+  --radius-card: 1rem;
+  --radius-input: 0.5rem;
 
-  --focus: oklch(45% 0.085 155);
+  /* Type scale — X's ramp: 13 for meta, 15 for everything, 17 for inputs
+     and emphasis, 20 for column titles, then the display jumps. */
+  --text-micro: 0.8125rem;   /* 13px — meta, timestamps, labels */
+  --text-sm: 0.8125rem;      /* 13px */
+  --text-base: 0.9375rem;    /* 15px — the reading size */
+  --text-lg: 1.0625rem;      /* 17px */
+  --text-display-sm: 1.25rem;                          /* 20px — bar titles */
+  --text-display: clamp(1.9375rem, 1.5rem + 2vw, 2.5rem);
+  --text-display-lg: clamp(2.5rem, 1.5rem + 4.5vw, 4rem);
 
-  /* Radii. Sheets are card stock, not paper: a soft corner reads as a
-     physical object where a hard one reads as a screen region. Elements on a
-     sheet round less than the sheet, wells less again — nested radii shrink
-     toward the inside, the way real laminated corners do. */
-  --radius-sheet: 0.75rem;
-  --radius-raised: 0.5rem;
-  --radius-chip: 0.3125rem;
-
-  /* Type scale. Fluid at the display end where the range matters, fixed for
-     UI text where predictability matters more. */
-  --text-micro: 0.6875rem;  /* 11px — labels, small caps only */
-  --text-sm: 0.8125rem;     /* 13px */
-  --text-base: 0.9375rem;   /* 15px */
-  --text-lg: 1.0625rem;     /* 17px */
-  --text-display-sm: clamp(1.5rem, 1.2rem + 1.2vw, 2rem);
-  --text-display: clamp(2rem, 1.4rem + 2.8vw, 3.5rem);
-  --text-display-lg: clamp(2.75rem, 1.5rem + 5.5vw, 6rem);
-
-  /* Spacing rhythm: a 4px base, with named steps for the two that carry
-     structural meaning. */
-  --space-gutter: clamp(1.25rem, 0.75rem + 2vw, 3rem);
-  --space-section: clamp(3rem, 2rem + 4vw, 6rem);
+  --space-gutter: 1rem;
+  --space-section: clamp(2.5rem, 2rem + 2vw, 4rem);
 
   --duration-fast: 140ms;
   --duration-normal: 240ms;
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Dark mode is a genuine second design, not an inversion. Shadow carries
-   almost nothing against a near-black desk, so elevation is restated in the
-   two currencies that survive darkness: each layer up is a step lighter, and
-   every lifted surface keeps a lit top edge. Shadows stay — deeper and
-   tighter — to seat objects, not to lift them. */
+/* Lights out. Not charcoal: #000, with cards a bare step up and the same
+   blue doing the same jobs. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --ground: oklch(9.5% 0.006 75);
-    --ground-glow: oklch(22% 0.02 75 / 0.5);
+    --paper: #000000;
+    --paper-raised: #16181c;
+    --paper-sunken: #202327;
 
-    --paper: oklch(14.5% 0.005 85);
-    --paper-raised: oklch(18.5% 0.006 85);
-    --paper-sunken: oklch(11.5% 0.005 85);
+    --ink: #e7e9ea;
+    --ink-muted: #71767b;
+    --ink-subtle: #5b6167;
 
-    --ink: oklch(95% 0.004 85);
-    --ink-muted: oklch(71% 0.006 85);
-    --ink-subtle: oklch(55% 0.006 85);
+    --rule: #2f3336;
+    --rule-strong: #3e4247;
 
-    --rule: oklch(25% 0.005 85);
-    --rule-strong: oklch(37% 0.006 85);
+    --wash: rgb(231 233 234 / 0.07);
+    --wash-strong: rgb(231 233 234 / 0.12);
 
-    --shadow-ink: oklch(0% 0 0);
-    --elev-xs:
-      0 1px 2px oklch(from var(--shadow-ink) l c h / 0.4);
-    --elev-sm:
-      0 1px 2px oklch(from var(--shadow-ink) l c h / 0.45),
-      0 2px 8px oklch(from var(--shadow-ink) l c h / 0.35);
-    --elev-md:
-      0 2px 4px oklch(from var(--shadow-ink) l c h / 0.4),
-      0 12px 32px oklch(from var(--shadow-ink) l c h / 0.45);
-    --elev-lg:
-      0 4px 12px oklch(from var(--shadow-ink) l c h / 0.5),
-      0 28px 64px oklch(from var(--shadow-ink) l c h / 0.55);
-
-    --edge: inset 0 1px 0 oklch(100% 0 0 / 0.06);
-    --edge-raised: inset 0 1px 0 oklch(100% 0 0 / 0.09);
-
-    --recess:
-      inset 0 1px 4px oklch(0% 0 0 / 0.5),
-      inset 0 0 0 1px oklch(0% 0 0 / 0.3);
-
-    --state-verified: oklch(78% 0.13 155);
-    --state-verified-bg: oklch(26% 0.05 155);
-    --state-pending: oklch(80% 0.11 75);
-    --state-pending-bg: oklch(26% 0.04 75);
-    --state-disputed: oklch(72% 0.15 30);
-    --state-disputed-bg: oklch(26% 0.05 30);
-
-    --focus: oklch(78% 0.13 155);
+    --state-pending: #ffd400;
+    --state-pending-bg: rgb(255 212 0 / 0.12);
   }
 }
 
 @theme inline {
-  --color-ground: var(--ground);
   --color-paper: var(--paper);
   --color-paper-raised: var(--paper-raised);
   --color-paper-sunken: var(--paper-sunken);
@@ -176,6 +110,12 @@
   --color-rule: var(--rule);
   --color-rule-strong: var(--rule-strong);
 
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-wash: var(--accent-wash);
+  --color-wash: var(--wash);
+  --color-wash-strong: var(--wash-strong);
+
   --color-verified: var(--state-verified);
   --color-verified-bg: var(--state-verified-bg);
   --color-pending: var(--state-pending);
@@ -183,19 +123,14 @@
   --color-disputed: var(--state-disputed);
   --color-disputed-bg: var(--state-disputed-bg);
 
-  /* Re-theme Tailwind's own shadow scale so `shadow-sm` etc. mean *our*
-     light, in both schemes, everywhere. */
-  --shadow-xs: var(--elev-xs);
-  --shadow-sm: var(--elev-sm);
-  --shadow-md: var(--elev-md);
-  --shadow-lg: var(--elev-lg);
+  --radius-card: var(--radius-card);
+  --radius-input: var(--radius-input);
 
-  --radius-sheet: var(--radius-sheet);
-  --radius-raised: var(--radius-raised);
-  --radius-chip: var(--radius-chip);
-
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-display: var(--font-instrument), ui-serif, Georgia, serif;
+  /* Chirp is proprietary, so this is Chirp's own documented fallback chain —
+     which is what X actually renders in for most non-macOS visitors. */
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
 
   --text-micro: var(--text-micro);
   --text-display-sm: var(--text-display-sm);
@@ -207,22 +142,14 @@
    Base
    =========================================================================== */
 
-/* The desk: base colour, an overhead wash that puts the light source above
-   the page (the same light the shadows and edges answer to), and a whisper of
-   grain so the ground reads as material rather than dead colour. The grain is
-   baked into the background stack — never an overlay element — so it can only
-   ever appear where the ground itself shows. */
 body {
-  background-color: var(--ground);
-  background-image:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='0.055'/%3E%3C/svg%3E"),
-    radial-gradient(90rem 46rem at 50% -18rem, var(--ground-glow), transparent 70%);
-  background-attachment: fixed, fixed;
-  background-blend-mode: soft-light, normal;
+  background: var(--paper);
   color: var(--ink);
-  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
   font-size: var(--text-base);
-  line-height: 1.6;
+  line-height: 1.3125; /* X sets 15px/20px on body text */
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -236,15 +163,15 @@ body {
 }
 
 ::selection {
-  background: var(--ink);
-  color: var(--paper);
+  background: var(--accent);
+  color: #ffffff;
 }
 
 /* A single visible focus treatment, never removed. */
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
-  border-radius: 2px;
+  border-radius: 4px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -259,110 +186,117 @@ body {
 }
 
 /* ===========================================================================
-   Material utilities — the four layers of the depth grammar
+   Language utilities
    =========================================================================== */
 
-/* A document surface: the rail, the section panel, a form. The border earns
-   its keep in dark mode, where it separates the sheet from anything behind it
-   that the shadow cannot. */
+/* Display type: X has no serif — hierarchy is weight and tightness. */
+@utility font-display {
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+/* Meta text: 13px, sentence case. (This replaces the old small-caps eyebrow —
+   X never shouts in uppercase; it mutes and shrinks instead.) */
+@utility label {
+  font-size: var(--text-micro);
+  font-weight: 400;
+  line-height: 1.25;
+}
+
+/* The card: 16px corners, hairline border, flat. Sidebar modules and editor
+   sections use `raised` instead when they want X's grey module fill. */
 @utility sheet {
   background: var(--paper);
   border: 1px solid var(--rule);
-  border-radius: var(--radius-sheet);
-  box-shadow: var(--edge), var(--elev-md);
+  border-radius: var(--radius-card);
 }
 
-/* An element sitting on a sheet: active tab, hover row, small card. */
 @utility raised {
   background: var(--paper-raised);
-  border-radius: var(--radius-raised);
-  box-shadow: var(--edge-raised), var(--elev-xs);
+  border-radius: var(--radius-card);
 }
 
-/* Recessed into a sheet: banners, posters, code, empty states. */
 @utility well {
   background: var(--paper-sunken);
-  border-radius: var(--radius-raised);
-  box-shadow: var(--recess);
+  border-radius: var(--radius-card);
 }
 
-/* Anything that can be pushed: lifts a hair on hover, seats flat on press.
-   Transform and shadow only — no layout properties move. */
-@utility pressable {
-  transition:
-    transform var(--duration-fast) var(--ease-out-expo),
-    box-shadow var(--duration-fast) var(--ease-out-expo),
-    background-color var(--duration-fast) ease;
+/* Rows and icons that respond to the pointer with a wash, X's only hover. */
+@utility wash-hover {
+  transition: background-color var(--duration-fast) ease;
   &:hover {
-    transform: translateY(-1px);
-  }
-  &:active {
-    transform: translateY(0);
-    transition-duration: 60ms;
+    background-color: var(--wash);
   }
 }
 
-/* The primary action. One per view. The gradient gives the face a curvature
-   highlight, the edge catches the light, and pressing it visibly seats it —
-   the one control on the page that behaves most like a physical thing. */
+/* Pill buttons. Three, exactly as X ships them:
+   btn-primary — the blue action;
+   btn-pill    — the inverted "Follow" pill (ink on paper);
+   btn-outline — the bordered secondary. */
 @utility btn-primary {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   min-height: 2.75rem;
   padding-inline: 1.5rem;
   cursor: pointer;
-  border-radius: var(--radius-raised);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--paper);
-  background-image: linear-gradient(
-    to bottom,
-    oklch(from var(--ink) calc(l + 0.09) c h),
-    var(--ink) 55%
-  );
-  box-shadow:
-    inset 0 1px 0 oklch(100% 0 0 / 0.14),
-    var(--elev-sm);
-  transition:
-    transform var(--duration-fast) var(--ease-out-expo),
-    box-shadow var(--duration-fast) var(--ease-out-expo),
-    filter var(--duration-fast) ease;
+  border-radius: 9999px;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: var(--text-base);
+  font-weight: 700;
+  transition: background-color var(--duration-fast) ease;
   &:hover {
-    transform: translateY(-1px);
-    filter: brightness(1.06);
-    box-shadow:
-      inset 0 1px 0 oklch(100% 0 0 / 0.14),
-      var(--elev-md);
-  }
-  &:active {
-    transform: translateY(0);
-    filter: brightness(0.98);
-    box-shadow:
-      inset 0 1px 0 oklch(100% 0 0 / 0.08),
-      var(--elev-xs);
-    transition-duration: 60ms;
+    background: var(--accent-hover);
   }
   &:disabled {
     cursor: default;
-    opacity: 0.6;
-    transform: none;
-    filter: none;
+    opacity: 0.5;
   }
 }
 
-/* ===========================================================================
-   Other utilities
-   =========================================================================== */
+@utility btn-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding-inline: 1.5rem;
+  cursor: pointer;
+  border-radius: 9999px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: var(--text-base);
+  font-weight: 700;
+  transition: opacity var(--duration-fast) ease;
+  &:hover {
+    opacity: 0.9;
+  }
+}
 
-/* The editorial label: small caps, wide tracking, used for section eyebrows
-   and state chips. Defined once so tracking stays consistent everywhere. */
-@utility label {
-  font-size: var(--text-micro);
-  font-weight: 500;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
-  line-height: 1;
+@utility btn-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding-inline: 1.5rem;
+  cursor: pointer;
+  border-radius: 9999px;
+  border: 1px solid var(--rule-strong);
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--text-base);
+  font-weight: 700;
+  transition: background-color var(--duration-fast) ease;
+  &:hover {
+    background-color: var(--wash);
+  }
+}
+
+/* The sticky column header: X's signature blurred glass bar. */
+@utility bar-blur {
+  background: color-mix(in srgb, var(--paper) 75%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 @utility rule-t {

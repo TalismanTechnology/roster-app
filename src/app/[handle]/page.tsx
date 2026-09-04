@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ResumeFrame } from "@/components/record/ResumeFrame";
+import { AppShell, SideCard } from "@/components/shell/AppShell";
 import type { CoachContact, FilmClip, Profile, RecordEntry } from "@/lib/database.types";
 import { levelLabel, sportLabel } from "@/lib/format";
 import { createClient, getCurrentUser } from "@/lib/supabase/server";
@@ -104,41 +105,40 @@ export default async function ResumePage({ params }: PageProps<"/[handle]">) {
   void supabase.rpc("record_profile_view", { target: profile.id });
 
   return (
-    // See the note in /preview: above `lg` the height must be definite, so
-    // `flex-1` is scoped below that breakpoint.
-    <main className="flex flex-col max-lg:flex-1 lg:h-dvh lg:overflow-hidden">
-      {isOwner && <OwnerBar visibility={profile.visibility} />}
-
+    <AppShell
+      right={
+        isOwner ? (
+          <SideCard title="Your resume">
+            <p className="text-ink-muted text-sm leading-normal">
+              {profile.visibility === "public"
+                ? "Public — this is exactly what a recruiter sees."
+                : profile.visibility === "unlisted"
+                  ? "Unlisted — only people you send the link can see this."
+                  : "Private — only you can see this."}
+            </p>
+            <Link href="/resume" className="btn-pill mt-1 self-start px-5">
+              Edit resume
+            </Link>
+          </SideCard>
+        ) : (
+          <SideCard title="New to Roster?">
+            <p className="text-ink-muted text-sm leading-normal">
+              One link for your whole career — record, film, references,
+              verified by your coaches. Free for athletes.
+            </p>
+            <Link href="/sign-up" className="btn-primary mt-1 self-start px-5">
+              Create your resume
+            </Link>
+          </SideCard>
+        )
+      }
+    >
       <ResumeFrame
         profile={profile}
         entries={entries}
         film={film}
         coaches={profile.is_recruitable ? coaches : []}
       />
-    </main>
-  );
-}
-
-/** Shown only to the athlete on their own page: the state of the door. */
-function OwnerBar({ visibility }: { visibility: Profile["visibility"] }) {
-  const note =
-    visibility === "public"
-      ? "This is your public resume — what a recruiter sees."
-      : visibility === "unlisted"
-        ? "Unlisted — only people you send the link can see this."
-        : "Private — only you can see this.";
-
-  // Written straight on the desk: the owner's chrome sits a layer below the
-  // document itself.
-  return (
-    <div className="flex shrink-0 flex-wrap items-baseline justify-between gap-3 px-5 pt-4 pb-0.5 sm:px-6">
-      <p className="text-ink-muted text-sm">{note}</p>
-      <Link
-        href="/resume"
-        className="label text-ink decoration-rule-strong hover:decoration-ink cursor-pointer underline underline-offset-4"
-      >
-        Edit resume →
-      </Link>
-    </div>
+    </AppShell>
   );
 }

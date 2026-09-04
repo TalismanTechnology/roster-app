@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
 import { ResumeFrame } from "@/components/record/ResumeFrame";
+import { AppShell, SideCard } from "@/components/shell/AppShell";
 import {
   previewCoaches,
   previewEntries,
@@ -11,9 +13,9 @@ import {
 /**
  * A database-free view of the resume.
  *
- * Renders the same frame the live `/[handle]` route uses, against fixtures.
- * Useful for design review and for anyone who has cloned the repo but not yet
- * stood up a Supabase project.
+ * Renders the same shell and profile column the live `/[handle]` route uses,
+ * against fixtures. Useful for design review and for anyone who has cloned
+ * the repo but not yet stood up a Supabase project.
  */
 export const metadata: Metadata = {
   title: "Interface preview",
@@ -22,33 +24,25 @@ export const metadata: Metadata = {
 
 export default function PreviewPage() {
   return (
-    // `max-lg:flex-1` rather than a plain `flex-1`: as a flex item, `flex-1`
-    // sets `flex-basis: 0%` and then grows to fit content, which silently wins
-    // over `h-dvh` and lets the frame run past the viewport — at which point
-    // the panel's internal scrolling never engages and the rail's footer ends
-    // up below the fold. Above `lg` the height must be definite and nothing
-    // else may negotiate it.
-    <div className="flex flex-col max-lg:flex-1 lg:h-dvh lg:overflow-hidden">
-      <PreviewBanner />
-
+    <AppShell
+      right={
+        <SideCard title="This is a preview">
+          <p className="text-ink-muted text-sm leading-normal">
+            Sample data, no database. The live resume lives at{" "}
+            <code className="text-ink">/[handle]</code>.
+          </p>
+          <Link href="/sign-up" className="btn-primary mt-1 self-start px-5">
+            Create yours
+          </Link>
+        </SideCard>
+      }
+    >
       <ResumeFrame
         profile={previewProfile}
         entries={previewEntries}
         film={previewFilm}
         coaches={previewCoaches}
       />
-    </div>
-  );
-}
-
-/** Written straight on the desk, not boxed: chrome should sit a layer below
- *  the document, and a bordered strip would compete with the sheets. */
-function PreviewBanner() {
-  return (
-    <p className="text-ink-muted shrink-0 px-5 pt-4 pb-0.5 text-sm sm:px-6">
-      <span className="label text-ink mr-2">Preview</span>
-      Sample data, no database. The live resume lives at{" "}
-      <code className="text-ink">/[handle]</code>.
-    </p>
+    </AppShell>
   );
 }

@@ -3,11 +3,9 @@ import type { CoachContact, FilmClip, Profile } from "@/lib/database.types";
 import { FilmPlayer, providerLabel } from "./FilmPlayer";
 
 /**
- * The resume sections beyond the record: film, academics, references.
- *
- * Each is a bare panel with no heading of its own — the tab in `ResumeFrame`
- * names it, and repeating that name at the top of the panel would say
- * "Film / Film" to anyone who just clicked the tab.
+ * The resume sections beyond the record: film, academics, references — each
+ * a bare panel with no heading of its own, because the tab above it already
+ * says the word. Styled as X panels: full-width cells, hairlines, washes.
  */
 
 // ---------------------------------------------------------------------------
@@ -21,23 +19,23 @@ export function FilmPanel({ clips }: { clips: FilmClip[] }) {
   const rest = clips.filter((clip) => clip.id !== featured.id);
 
   return (
-    <div className="mx-auto max-w-3xl">
-      <FilmPlayer clip={featured} />
+    <div>
+      <div className="px-4 py-3">
+        <FilmPlayer clip={featured} />
+      </div>
 
       {rest.length > 0 && (
-        <ol className="mt-8">
+        <ol>
           {rest.map((clip) => (
-            <li key={clip.id} className="border-rule border-b first:border-t">
+            <li key={clip.id} className="border-rule border-t">
               <a
                 href={clip.url}
                 target="_blank"
                 rel="noopener noreferrer nofollow"
-                className="group flex cursor-pointer items-baseline justify-between gap-4 py-4"
+                className="wash-hover flex cursor-pointer items-baseline justify-between gap-4 px-4 py-3"
               >
-                <span className="text-ink group-hover:text-ink-muted min-w-0 truncate transition-colors duration-(--duration-fast)">
-                  {clip.title}
-                </span>
-                <span className="label text-ink-subtle shrink-0">
+                <span className="min-w-0 truncate font-bold">{clip.title}</span>
+                <span className="label text-ink-muted shrink-0">
                   {[clip.season, providerLabel(clip.provider)].filter(Boolean).join(" · ")} ↗
                 </span>
               </a>
@@ -63,20 +61,25 @@ export function AcademicsPanel({ profile }: { profile: Profile }) {
 
   if (items.length === 0) return null;
 
+  // Settings-list cells: label left, bold figure right — the way X renders
+  // any about-panel of facts.
   return (
-    <div className="mx-auto max-w-3xl">
-      <dl className="border-rule grid grid-cols-2 gap-x-8 gap-y-10 border-t pt-8 sm:grid-cols-4">
+    <div>
+      <dl>
         {items.map((item) => (
-          <div key={item.label} className="flex flex-col gap-2">
-            <dd className="font-display text-display-sm leading-none" data-numeric>
+          <div
+            key={item.label}
+            className="border-rule flex items-center justify-between border-b px-4 py-4"
+          >
+            <dt className="text-ink-muted">{item.label}</dt>
+            <dd className="text-lg font-bold" data-numeric>
               {item.value}
             </dd>
-            <dt className="label text-ink-subtle">{item.label}</dt>
           </div>
         ))}
       </dl>
 
-      <p className="text-ink-subtle mt-10 max-w-prose text-sm leading-relaxed">
+      <p className="label text-ink-muted px-4 py-4">
         Academic figures are athlete-reported. A transcript is provided on request.
       </p>
     </div>
@@ -96,38 +99,49 @@ function formatGpa(gpa: number): string {
 export function ReferencePanel({ coaches }: { coaches: CoachContact[] }) {
   if (coaches.length === 0) return null;
 
+  // User cells: round monogram, bold name over muted role, actions as small
+  // pills on the right — the who-to-follow module's anatomy, repurposed for
+  // the people a recruiter calls next.
   return (
-    <div className="mx-auto max-w-3xl">
-      <ol>
-        {coaches.map((coach) => (
-          <li key={coach.id} className="border-rule border-b py-5 first:border-t">
-            <p className="text-ink font-medium">{coach.name}</p>
-            <p className="text-ink-muted mt-0.5 text-sm">
+    <ol>
+      {coaches.map((coach) => (
+        <li
+          key={coach.id}
+          className="border-rule flex items-center gap-3 border-b px-4 py-3"
+        >
+          <span
+            aria-hidden
+            className="bg-paper-sunken text-ink-muted flex size-10 shrink-0 items-center justify-center rounded-full font-bold"
+          >
+            {coach.name
+              .split(/\s+/)
+              .slice(0, 2)
+              .map((word) => word[0])
+              .join("")
+              .toUpperCase()}
+          </span>
+
+          <div className="min-w-0 flex-1 leading-tight">
+            <p className="truncate font-bold">{coach.name}</p>
+            <p className="text-ink-muted label mt-0.5 truncate">
               {[coach.role, coach.org_name].filter(Boolean).join(" · ")}
             </p>
+          </div>
 
-            <p className="mt-3 flex flex-wrap gap-x-5 gap-y-1">
-              {coach.email && (
-                <a
-                  href={`mailto:${coach.email}`}
-                  className="label text-ink-muted hover:text-ink decoration-rule-strong hover:decoration-ink cursor-pointer underline underline-offset-4 transition-colors duration-(--duration-fast)"
-                >
-                  {coach.email}
-                </a>
-              )}
-              {coach.phone && (
-                <a
-                  href={`tel:${coach.phone}`}
-                  className="label text-ink-muted hover:text-ink decoration-rule-strong hover:decoration-ink cursor-pointer underline underline-offset-4 transition-colors duration-(--duration-fast)"
-                  data-numeric
-                >
-                  {coach.phone}
-                </a>
-              )}
-            </p>
-          </li>
-        ))}
-      </ol>
-    </div>
+          <div className="flex shrink-0 gap-2">
+            {coach.email && (
+              <a href={`mailto:${coach.email}`} className="btn-outline min-h-8 px-4 text-sm">
+                Email
+              </a>
+            )}
+            {coach.phone && (
+              <a href={`tel:${coach.phone}`} className="btn-outline min-h-8 px-4 text-sm">
+                Call
+              </a>
+            )}
+          </div>
+        </li>
+      ))}
+    </ol>
   );
 }

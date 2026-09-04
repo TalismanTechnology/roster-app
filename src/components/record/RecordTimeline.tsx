@@ -1,18 +1,15 @@
+import { PinIcon } from "@/components/shell/icons";
 import type { RecordEntry } from "@/lib/database.types";
 import { entryContext, fullDate, kindLabel, placementLabel, recordDate } from "@/lib/format";
 
 import { VerificationMark } from "./VerificationMark";
 
 /**
- * The living record.
- *
- * Laid out as a ruled document rather than a stack of cards: a recruiter scans
- * this the way they scan a results sheet — down the date column, across to the
- * mark. Cards would put a box around every line and destroy that column.
- *
- * The entries an athlete pinned lead, under a heading. Everything else follows
- * without one — inside the Record tab, a subhead reading "Record" would only
- * repeat the tab that was just clicked.
+ * The record as a timeline of cells — X's feed grammar. Each entry is a
+ * full-width cell with a hairline below and a wash on hover; pinned entries
+ * lead with the small "Pinned" marker exactly the way a pinned post does.
+ * The date folds into the meta line (a feed carries its timestamps inline;
+ * a left-hand date column is a table, and tables don't scroll like feeds).
  */
 export function RecordTimeline({ entries }: { entries: RecordEntry[] }) {
   if (entries.length === 0) {
@@ -23,94 +20,52 @@ export function RecordTimeline({ entries }: { entries: RecordEntry[] }) {
   const timeline = entries.filter((entry) => !entry.is_pinned);
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-12">
-      {pinned.length > 0 && (
-        <RecordSection title="Selected" count={pinned.length}>
-          {pinned.map((entry) => (
-            <RecordRow key={entry.id} entry={entry} />
-          ))}
-        </RecordSection>
-      )}
-
-      {timeline.length > 0 &&
-        (pinned.length > 0 ? (
-          <RecordSection title="Everything else" count={timeline.length}>
-            {timeline.map((entry) => (
-              <RecordRow key={entry.id} entry={entry} />
-            ))}
-          </RecordSection>
-        ) : (
-          <ol className="border-rule border-t">
-            {timeline.map((entry) => (
-              <RecordRow key={entry.id} entry={entry} />
-            ))}
-          </ol>
-        ))}
-    </div>
+    <ol>
+      {pinned.map((entry) => (
+        <RecordCell key={entry.id} entry={entry} isPinned />
+      ))}
+      {timeline.map((entry) => (
+        <RecordCell key={entry.id} entry={entry} />
+      ))}
+    </ol>
   );
 }
 
-function RecordSection({
-  title,
-  count,
-  children,
-}: {
-  title: string;
-  count: number;
-  children: React.ReactNode;
-}) {
-  return (
-    <section aria-labelledby={`section-${title}`}>
-      <header className="flex items-baseline justify-between border-b border-rule-strong pb-3">
-        <h2 id={`section-${title}`} className="label text-ink">
-          {title}
-        </h2>
-        <span className="label text-ink-subtle" data-numeric>
-          {count} {count === 1 ? "entry" : "entries"}
-        </span>
-      </header>
-
-      <ol className="contents">{children}</ol>
-    </section>
-  );
-}
-
-function RecordRow({ entry }: { entry: RecordEntry }) {
+function RecordCell({ entry, isPinned = false }: { entry: RecordEntry; isPinned?: boolean }) {
   const context = entryContext(entry);
   const placement = placementLabel(entry);
 
   return (
-    <li className="group -mx-3 grid grid-cols-[4.5rem_1fr] items-baseline gap-x-4 rounded-(--radius-raised) border-b border-rule px-3 py-5 transition-colors duration-(--duration-fast) hover:bg-paper-raised/60 sm:grid-cols-[6.5rem_1fr_auto] sm:gap-x-8">
-      {/* Date column. Tabular figures keep this a true column down the page. */}
-      <time
-        dateTime={entry.achieved_on}
-        title={fullDate(entry.achieved_on)}
-        className="text-ink-subtle text-sm"
-      >
-        {recordDate(entry.achieved_on)}
-      </time>
+    <li className="wash-hover border-rule border-b px-4 py-3">
+      {isPinned && (
+        <p className="label text-ink-muted mb-1 flex items-center gap-2 font-bold">
+          <PinIcon className="size-3.5" />
+          Pinned
+        </p>
+      )}
 
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1.5">
-          <h3 className="text-ink text-lg leading-snug font-medium">{entry.title}</h3>
-          <span className="label text-ink-subtle">{kindLabel(entry.kind)}</span>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h3 className="font-bold">{entry.title}</h3>
+
+          <p className="text-ink-muted label mt-0.5">
+            {kindLabel(entry.kind)}
+            {context && <> · {context}</>}
+            {" · "}
+            <time dateTime={entry.achieved_on} title={fullDate(entry.achieved_on)}>
+              {recordDate(entry.achieved_on)}
+            </time>
+          </p>
+
+          {entry.detail && (
+            <p className="text-ink mt-2 leading-normal">{entry.detail}</p>
+          )}
         </div>
 
-        {context && <p className="text-ink-muted mt-1 text-sm">{context}</p>}
-
-        {entry.detail && (
-          <p className="text-ink-muted mt-2 max-w-prose text-sm leading-relaxed">{entry.detail}</p>
-        )}
-
-      </div>
-
-      {/* Rendered once and repositioned by the grid, rather than duplicated per
-          breakpoint with one copy hidden. A `sm:hidden` twin is still in the
-          accessibility tree, so every entry would be announced twice. Below
-          `sm` this wraps under the title; from `sm` up it is the third column. */}
-      <div className="col-start-2 mt-3 flex flex-wrap items-center gap-3 sm:col-start-3 sm:row-start-1 sm:mt-0 sm:flex-nowrap sm:gap-4 sm:justify-self-end">
-        <EntryValue entry={entry} placement={placement} />
-        <VerificationMark state={entry.verification} />
+        <div className="flex shrink-0 items-center gap-2">
+          <EntryValue entry={entry} placement={placement} />
+          <VerificationMark state={entry.verification} />
+        </div>
       </div>
     </li>
   );
@@ -123,37 +78,31 @@ function EntryValue({
   entry: RecordEntry;
   placement: string | null;
 }) {
-  if (entry.value_display) {
-    return (
-      <span className="text-ink font-display text-display-sm leading-none" data-numeric>
-        {entry.value_display}
-        {entry.unit && (
-          <span className="text-ink-subtle ml-1 align-baseline text-sm font-sans">
-            {entry.unit}
-          </span>
-        )}
-      </span>
-    );
-  }
+  const value = entry.value_display ?? placement;
 
-  if (placement) {
-    return (
-      <span className="text-ink font-display text-display-sm leading-none" data-numeric>
-        {placement}
-      </span>
-    );
-  }
+  if (!value) return null;
 
-  return null;
+  return (
+    <span className="text-xl font-display" data-numeric>
+      {value}
+      {entry.value_display && entry.unit && (
+        <span className="text-ink-muted ml-0.5 text-sm font-normal">{entry.unit}</span>
+      )}
+    </span>
+  );
 }
 
 function EmptyRecord() {
+  // X's empty-timeline treatment: a big bold line and one muted sentence,
+  // centred in the column with air around it.
   return (
-    <div className="well px-6 py-16 text-center">
-      <p className="text-ink font-display text-display-sm">Nothing on the record yet.</p>
-      <p className="text-ink-muted mx-auto mt-3 max-w-sm text-sm leading-relaxed">
-        Every PR, win, award, and commitment you add becomes part of a permanent, verifiable
-        history.
+    <div className="mx-auto max-w-sm px-8 py-14">
+      <p className="text-display font-display leading-tight">
+        Nothing on the record yet.
+      </p>
+      <p className="text-ink-muted mt-2">
+        Every PR, win, award, and commitment added here becomes part of a
+        permanent, verifiable history.
       </p>
     </div>
   );

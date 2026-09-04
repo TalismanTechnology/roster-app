@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { VerifiedSeal } from "@/components/record/VerificationMark";
+import { AppShell, SideCard } from "@/components/shell/AppShell";
+import { SearchIcon } from "@/components/shell/icons";
 import type { AthleteLevel, Profile } from "@/lib/database.types";
 import { LEVEL_OPTIONS, levelLabel, sportLabel } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
@@ -45,34 +48,33 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
   });
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-(--space-gutter) py-(--space-section)">
-      <header>
-        <p className="label text-ink-subtle">Roster</p>
-        <h1 className="font-display text-display mt-2 leading-[0.95] tracking-tight">
-          Find athletes
-        </h1>
-      </header>
+    <AppShell
+      active="search"
+      right={
+        <SideCard title="New to Roster?">
+          <p className="text-ink-muted text-sm leading-normal">
+            One link for your whole career — record, film, references,
+            verified by your coaches. Free for athletes.
+          </p>
+          <Link href="/sign-up" className="btn-primary mt-1 self-start px-5">
+            Create your resume
+          </Link>
+        </SideCard>
+      }
+    >
+      {/* Explore's anatomy: the search pill lives in the sticky glass bar at
+          the top of the column, the filters fold underneath, results are user
+          cells. The whole thing is one GET form so every state has a URL. */}
+      <SearchForm defaults={{ q, sport, level, gradYear, region, verifiedOnly }} />
 
-      <SearchForm
-        defaults={{ q, sport, level, gradYear, region, verifiedOnly }}
-      />
-
-      <section aria-label="Results" className="sheet mt-6 px-6 py-6 sm:px-8">
-        <header className="border-rule flex items-baseline justify-between border-b pb-3">
-          <h2 className="label text-ink">Results</h2>
-          <span className="label text-ink-subtle" data-numeric>
-            {athletes === null
-              ? "—"
-              : `${athletes.length}${athletes.length === PAGE_SIZE ? "+" : ""}`}
-          </span>
-        </header>
-
+      <section aria-label="Results">
         {athletes === null ? (
-          <Notice>Search comes online once the database is connected.</Notice>
+          <Notice title="Not plugged in yet.">
+            Search comes online once the database is connected.
+          </Notice>
         ) : athletes.length === 0 ? (
-          <Notice>
-            No one matches those filters yet. Loosen one — or invite the athlete
-            you were looking for.
+          <Notice title="No one matches.">
+            Loosen a filter — or invite the athlete you were looking for.
           </Notice>
         ) : (
           <ol>
@@ -90,7 +92,7 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
           />
         )}
       </section>
-    </main>
+    </AppShell>
   );
 }
 
@@ -129,88 +131,94 @@ async function runSearch(
 
 function SearchForm({ defaults }: { defaults: Filters }) {
   const fieldClasses =
-    "w-full border-0 border-b border-rule bg-transparent px-0 py-2 text-base text-ink " +
-    "placeholder:text-ink-subtle focus:border-ink focus:outline-none";
+    "w-full rounded-(--radius-input) border border-rule-strong bg-transparent px-3 py-2 text-base text-ink " +
+    "placeholder:text-ink-subtle focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none";
 
   return (
-    <form
-      method="GET"
-      className="sheet mt-8 grid grid-cols-2 items-end gap-x-6 gap-y-5 px-6 py-6 sm:grid-cols-4 sm:px-8"
-    >
-      <label className="col-span-2 block sm:col-span-4">
-        <span className="label text-ink-muted">Name or handle</span>
-        <input
-          type="search"
-          name="q"
-          defaultValue={defaults.q ?? ""}
-          placeholder="Ava Reyes"
-          className={fieldClasses}
-        />
-      </label>
+    <form method="GET">
+      <div className="bar-blur border-rule sticky top-0 z-20 border-b px-4 py-2">
+        <label className="bg-paper-sunken focus-within:bg-paper focus-within:outline-accent flex h-11 cursor-text items-center gap-3 rounded-full px-4 focus-within:outline-2">
+          <SearchIcon className="text-ink-muted size-5" />
+          <input
+            type="search"
+            name="q"
+            defaultValue={defaults.q ?? ""}
+            placeholder="Search athletes"
+            className="placeholder:text-ink-muted w-full bg-transparent text-base outline-none"
+          />
+          <span className="sr-only-text">Name or handle</span>
+        </label>
+      </div>
 
-      <label className="block">
-        <span className="label text-ink-muted">Sport</span>
-        <input
-          name="sport"
-          defaultValue={defaults.sport ?? ""}
-          placeholder="track_field"
-          className={fieldClasses}
-        />
-      </label>
+      <fieldset className="border-rule grid grid-cols-2 items-end gap-x-4 gap-y-4 border-b px-4 py-4 sm:grid-cols-4">
+        <legend className="sr-only-text">Filters</legend>
 
-      <label className="block">
-        <span className="label text-ink-muted">Level</span>
-        <select
-          name="level"
-          defaultValue={defaults.level ?? ""}
-          className={`${fieldClasses} cursor-pointer appearance-none`}
-        >
-          <option value="">Any</option>
-          {LEVEL_OPTIONS.map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </label>
+        <label className="block">
+          <span className="label text-ink-muted mb-1 block font-bold">Sport</span>
+          <input
+            name="sport"
+            defaultValue={defaults.sport ?? ""}
+            placeholder="track_field"
+            className={fieldClasses}
+          />
+        </label>
 
-      <label className="block">
-        <span className="label text-ink-muted">Class of</span>
-        <input
-          name="class"
-          type="number"
-          min={1950}
-          max={2100}
-          defaultValue={defaults.gradYear ?? ""}
-          className={fieldClasses}
-        />
-      </label>
+        <label className="block">
+          <span className="label text-ink-muted mb-1 block font-bold">Level</span>
+          <select
+            name="level"
+            defaultValue={defaults.level ?? ""}
+            className={`${fieldClasses} cursor-pointer appearance-none`}
+          >
+            <option value="">Any</option>
+            {LEVEL_OPTIONS.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
 
-      <label className="block">
-        <span className="label text-ink-muted">State</span>
-        <input
-          name="state"
-          maxLength={2}
-          defaultValue={defaults.region ?? ""}
-          placeholder="MI"
-          className={fieldClasses}
-        />
-      </label>
+        <label className="block">
+          <span className="label text-ink-muted mb-1 block font-bold">Class of</span>
+          <input
+            name="class"
+            type="number"
+            min={1950}
+            max={2100}
+            defaultValue={defaults.gradYear ?? ""}
+            className={fieldClasses}
+          />
+        </label>
 
-      <label className="col-span-2 flex cursor-pointer items-center gap-3 sm:col-span-3">
-        <input
-          type="checkbox"
-          name="verified"
-          value="1"
-          defaultChecked={defaults.verifiedOnly}
-          className="accent-ink size-4"
-        />
-        <span className="text-sm">Verified records only</span>
-      </label>
+        <label className="block">
+          <span className="label text-ink-muted mb-1 block font-bold">State</span>
+          <input
+            name="state"
+            maxLength={2}
+            defaultValue={defaults.region ?? ""}
+            placeholder="MI"
+            className={fieldClasses}
+          />
+        </label>
 
-      <button type="submit" className="btn-primary">
-        Search
-      </button>
+        <label className="col-span-2 flex cursor-pointer items-center gap-3 sm:col-span-3">
+          <input
+            type="checkbox"
+            name="verified"
+            value="1"
+            defaultChecked={defaults.verifiedOnly}
+            className="accent-accent size-4"
+          />
+          <span className="flex items-center gap-1.5 text-sm font-bold">
+            Verified only <VerifiedSeal className="size-4" />
+          </span>
+        </label>
+
+        <button type="submit" className="btn-primary min-h-9">
+          Search
+        </button>
+      </fieldset>
     </form>
   );
 }
@@ -225,30 +233,45 @@ function AthleteRow({ athlete }: { athlete: Profile }) {
     .filter(Boolean)
     .join(" · ");
 
+  const initials = athlete.display_name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((word) => word[0])
+    .join("")
+    .toUpperCase();
+
+  // A user cell: monogram, bold name with the seal, muted meta, and the one
+  // action pill on the right.
   return (
     <li className="border-rule border-b">
       <Link
         href={`/${athlete.handle}`}
-        className="group -mx-3 grid cursor-pointer grid-cols-[1fr_auto] items-baseline gap-x-6 rounded-(--radius-raised) px-3 py-5 transition-colors duration-(--duration-fast) hover:bg-paper-raised/60"
+        className="wash-hover flex cursor-pointer items-center gap-3 px-4 py-3"
       >
-        <div className="min-w-0">
-          <p className="text-ink group-hover:text-ink-muted text-lg font-medium transition-colors duration-(--duration-fast)">
-            {athlete.display_name}
-          </p>
-          {meta && <p className="text-ink-muted mt-1 truncate text-sm">{meta}</p>}
-          {athlete.positions.length > 0 && (
-            <p className="label text-ink-subtle mt-1.5">{athlete.positions.join(" / ")}</p>
-          )}
-        </div>
+        <span
+          aria-hidden
+          className="bg-paper-sunken text-ink-muted flex size-10 shrink-0 items-center justify-center rounded-full font-bold"
+        >
+          {initials}
+        </span>
 
-        {athlete.verified_count > 0 && (
-          <p className="text-right">
-            <span className="font-display text-display-sm text-verified leading-none" data-numeric>
-              {athlete.verified_count}
+        <span className="min-w-0 flex-1 leading-tight">
+          <span className="flex items-center gap-1.5 font-bold">
+            <span className="truncate">{athlete.display_name}</span>
+            {athlete.verified_count > 0 && <VerifiedSeal className="size-[18px]" />}
+          </span>
+          <span className="text-ink-muted label mt-0.5 block truncate">
+            @{athlete.handle}
+            {meta && <> · {meta}</>}
+          </span>
+          {athlete.positions.length > 0 && (
+            <span className="text-ink-muted label mt-0.5 block truncate">
+              {athlete.positions.join(" / ")}
             </span>
-            <span className="label text-ink-subtle mt-1 block">verified</span>
-          </p>
-        )}
+          )}
+        </span>
+
+        <span className="btn-pill min-h-8 shrink-0 px-4 text-sm">View</span>
       </Link>
     </li>
   );
@@ -278,29 +301,31 @@ function Pager({
   };
 
   return (
-    <nav aria-label="Pagination" className="mt-8 flex justify-between">
+    <nav aria-label="Pagination" className="flex justify-between px-4 py-4">
       {page > 1 ? (
-        <Link href={query(page - 1)} className="label text-ink cursor-pointer underline underline-offset-4">
-          ← Previous
+        <Link href={query(page - 1)} className="btn-outline min-h-9 px-5 text-sm">
+          Previous
         </Link>
       ) : (
         <span />
       )}
 
       {hasMore && (
-        <Link href={query(page + 1)} className="label text-ink cursor-pointer underline underline-offset-4">
-          Next →
+        <Link href={query(page + 1)} className="btn-outline min-h-9 px-5 text-sm">
+          Next
         </Link>
       )}
     </nav>
   );
 }
 
-function Notice({ children }: { children: React.ReactNode }) {
+/** X's empty-state block: bold display line, one muted sentence. */
+function Notice({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <p className="text-ink-muted mx-auto max-w-sm py-16 text-center text-sm leading-relaxed">
-      {children}
-    </p>
+    <div className="mx-auto max-w-sm px-8 py-14">
+      <p className="text-display font-display leading-tight">{title}</p>
+      <p className="text-ink-muted mt-2">{children}</p>
+    </div>
   );
 }
 
