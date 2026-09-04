@@ -1,20 +1,39 @@
 @import "tailwindcss";
+@import "../components/landing/hero.css";
 
 /* ===========================================================================
    Roster design tokens
 
-   Direction: editorial print. The record is a document before it is a feed,
-   so the system is built from ink, paper, and hairline rules rather than
-   cards floating on gray. Colour is reserved for meaning — verification state
-   and the single primary action — never decoration.
+   Direction: the dossier on the desk. The record is still a document — the
+   typography, hairlines, and semantic colour survive from the print system —
+   but the document is now a physical object: sheets of card stock lifted off
+   an atmospheric ground, lit from above, with elevation doing the work that
+   borders alone used to do.
+
+   The depth grammar, used everywhere:
+     ground  — the desk. A gradient-washed, faintly grained backdrop that
+               nothing is ever printed on directly.
+     sheet   — a document surface. Carries a shadow and a lit top edge.
+     raised  — an element sitting on a sheet (active tab, chip, card).
+     well    — recessed into a sheet (posters, banners, empty states).
+
+   Light mode expresses elevation mostly through shadow; dark mode through
+   luminance and lit edges, because shadow barely reads on a dark ground.
+   Colour is still reserved for meaning — verification state and the primary
+   action — never decoration.
    =========================================================================== */
 
 :root {
-  /* Surfaces. Warm off-white rather than pure white: on an OLED phone in a gym
+  /* The desk. Warm and a full step darker than the sheets, so the sheets
+     read as objects against it rather than regions of it. */
+  --ground: oklch(93% 0.008 80);
+  --ground-glow: oklch(97% 0.015 85 / 0.9);
+
+  /* Sheets. Warm off-white rather than pure white: on an OLED phone in a gym
      lobby, #fff glares and the record stops reading like a document. */
-  --paper: oklch(98.2% 0.004 85);
+  --paper: oklch(98.4% 0.004 85);
   --paper-raised: oklch(100% 0 0);
-  --paper-sunken: oklch(95.8% 0.005 85);
+  --paper-sunken: oklch(95.2% 0.006 85);
 
   /* Ink. The 11% base is #0b0b0a from the Roster wordmark. */
   --ink: oklch(11% 0.003 85);
@@ -25,6 +44,32 @@
      one for section boundaries. */
   --rule: oklch(89% 0.004 85);
   --rule-strong: oklch(78% 0.005 85);
+
+  /* Elevation. Every shadow is the same warm near-black at different reach —
+     one light source, directly above, slightly soft. Two layers each: a
+     contact shadow that seats the object and an ambient one that lifts it. */
+  --shadow-ink: oklch(25% 0.01 85);
+  --elev-xs:
+    0 1px 2px oklch(from var(--shadow-ink) l c h / 0.07);
+  --elev-sm:
+    0 1px 2px oklch(from var(--shadow-ink) l c h / 0.08),
+    0 2px 8px oklch(from var(--shadow-ink) l c h / 0.06);
+  --elev-md:
+    0 2px 4px oklch(from var(--shadow-ink) l c h / 0.05),
+    0 10px 28px oklch(from var(--shadow-ink) l c h / 0.1);
+  --elev-lg:
+    0 4px 12px oklch(from var(--shadow-ink) l c h / 0.08),
+    0 24px 56px oklch(from var(--shadow-ink) l c h / 0.16);
+
+  /* The lit top edge. On a light sheet this is nearly subliminal; it exists
+     so light and dark mode share one material recipe. */
+  --edge: inset 0 1px 0 oklch(100% 0 0 / 0.85);
+  --edge-raised: inset 0 1px 0 oklch(100% 0 0 / 0.95);
+
+  /* Recess: wells are shaded at the top, the inverse of the lit edge. */
+  --recess:
+    inset 0 1px 3px oklch(from var(--shadow-ink) l c h / 0.08),
+    inset 0 0 0 1px oklch(from var(--shadow-ink) l c h / 0.04);
 
   /* Semantic state. Verification is the product's core signal, so it gets a
      real colour — a deep forest that reads as "confirmed by an authority"
@@ -37,6 +82,14 @@
   --state-disputed-bg: oklch(95% 0.03 30);
 
   --focus: oklch(45% 0.085 155);
+
+  /* Radii. Sheets are card stock, not paper: a soft corner reads as a
+     physical object where a hard one reads as a screen region. Elements on a
+     sheet round less than the sheet, wells less again — nested radii shrink
+     toward the inside, the way real laminated corners do. */
+  --radius-sheet: 0.75rem;
+  --radius-raised: 0.5rem;
+  --radius-chip: 0.3125rem;
 
   /* Type scale. Fluid at the display end where the range matters, fixed for
      UI text where predictability matters more. */
@@ -58,21 +111,46 @@
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Dark mode is a genuine second design, not an inversion: the ink lifts to a
-   warm off-white, surfaces stay near-black but separate by luminance, and the
-   state colours are desaturated so they don't glow. */
+/* Dark mode is a genuine second design, not an inversion. Shadow carries
+   almost nothing against a near-black desk, so elevation is restated in the
+   two currencies that survive darkness: each layer up is a step lighter, and
+   every lifted surface keeps a lit top edge. Shadows stay — deeper and
+   tighter — to seat objects, not to lift them. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: oklch(13% 0.004 85);
-    --paper-raised: oklch(17% 0.005 85);
-    --paper-sunken: oklch(10% 0.004 85);
+    --ground: oklch(9.5% 0.006 75);
+    --ground-glow: oklch(22% 0.02 75 / 0.5);
+
+    --paper: oklch(14.5% 0.005 85);
+    --paper-raised: oklch(18.5% 0.006 85);
+    --paper-sunken: oklch(11.5% 0.005 85);
 
     --ink: oklch(95% 0.004 85);
     --ink-muted: oklch(71% 0.006 85);
     --ink-subtle: oklch(55% 0.006 85);
 
-    --rule: oklch(26% 0.005 85);
-    --rule-strong: oklch(38% 0.006 85);
+    --rule: oklch(25% 0.005 85);
+    --rule-strong: oklch(37% 0.006 85);
+
+    --shadow-ink: oklch(0% 0 0);
+    --elev-xs:
+      0 1px 2px oklch(from var(--shadow-ink) l c h / 0.4);
+    --elev-sm:
+      0 1px 2px oklch(from var(--shadow-ink) l c h / 0.45),
+      0 2px 8px oklch(from var(--shadow-ink) l c h / 0.35);
+    --elev-md:
+      0 2px 4px oklch(from var(--shadow-ink) l c h / 0.4),
+      0 12px 32px oklch(from var(--shadow-ink) l c h / 0.45);
+    --elev-lg:
+      0 4px 12px oklch(from var(--shadow-ink) l c h / 0.5),
+      0 28px 64px oklch(from var(--shadow-ink) l c h / 0.55);
+
+    --edge: inset 0 1px 0 oklch(100% 0 0 / 0.06);
+    --edge-raised: inset 0 1px 0 oklch(100% 0 0 / 0.09);
+
+    --recess:
+      inset 0 1px 4px oklch(0% 0 0 / 0.5),
+      inset 0 0 0 1px oklch(0% 0 0 / 0.3);
 
     --state-verified: oklch(78% 0.13 155);
     --state-verified-bg: oklch(26% 0.05 155);
@@ -86,6 +164,7 @@
 }
 
 @theme inline {
+  --color-ground: var(--ground);
   --color-paper: var(--paper);
   --color-paper-raised: var(--paper-raised);
   --color-paper-sunken: var(--paper-sunken);
@@ -104,6 +183,17 @@
   --color-disputed: var(--state-disputed);
   --color-disputed-bg: var(--state-disputed-bg);
 
+  /* Re-theme Tailwind's own shadow scale so `shadow-sm` etc. mean *our*
+     light, in both schemes, everywhere. */
+  --shadow-xs: var(--elev-xs);
+  --shadow-sm: var(--elev-sm);
+  --shadow-md: var(--elev-md);
+  --shadow-lg: var(--elev-lg);
+
+  --radius-sheet: var(--radius-sheet);
+  --radius-raised: var(--radius-raised);
+  --radius-chip: var(--radius-chip);
+
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-display: var(--font-instrument), ui-serif, Georgia, serif;
 
@@ -117,8 +207,18 @@
    Base
    =========================================================================== */
 
+/* The desk: base colour, an overhead wash that puts the light source above
+   the page (the same light the shadows and edges answer to), and a whisper of
+   grain so the ground reads as material rather than dead colour. The grain is
+   baked into the background stack — never an overlay element — so it can only
+   ever appear where the ground itself shows. */
 body {
-  background: var(--paper);
+  background-color: var(--ground);
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='0.055'/%3E%3C/svg%3E"),
+    radial-gradient(90rem 46rem at 50% -18rem, var(--ground-glow), transparent 70%);
+  background-attachment: fixed, fixed;
+  background-blend-mode: soft-light, normal;
   color: var(--ink);
   font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   font-size: var(--text-base);
@@ -144,7 +244,7 @@ body {
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
-  border-radius: 1px;
+  border-radius: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -159,7 +259,100 @@ body {
 }
 
 /* ===========================================================================
-   Utilities
+   Material utilities — the four layers of the depth grammar
+   =========================================================================== */
+
+/* A document surface: the rail, the section panel, a form. The border earns
+   its keep in dark mode, where it separates the sheet from anything behind it
+   that the shadow cannot. */
+@utility sheet {
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sheet);
+  box-shadow: var(--edge), var(--elev-md);
+}
+
+/* An element sitting on a sheet: active tab, hover row, small card. */
+@utility raised {
+  background: var(--paper-raised);
+  border-radius: var(--radius-raised);
+  box-shadow: var(--edge-raised), var(--elev-xs);
+}
+
+/* Recessed into a sheet: banners, posters, code, empty states. */
+@utility well {
+  background: var(--paper-sunken);
+  border-radius: var(--radius-raised);
+  box-shadow: var(--recess);
+}
+
+/* Anything that can be pushed: lifts a hair on hover, seats flat on press.
+   Transform and shadow only — no layout properties move. */
+@utility pressable {
+  transition:
+    transform var(--duration-fast) var(--ease-out-expo),
+    box-shadow var(--duration-fast) var(--ease-out-expo),
+    background-color var(--duration-fast) ease;
+  &:hover {
+    transform: translateY(-1px);
+  }
+  &:active {
+    transform: translateY(0);
+    transition-duration: 60ms;
+  }
+}
+
+/* The primary action. One per view. The gradient gives the face a curvature
+   highlight, the edge catches the light, and pressing it visibly seats it —
+   the one control on the page that behaves most like a physical thing. */
+@utility btn-primary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding-inline: 1.5rem;
+  cursor: pointer;
+  border-radius: var(--radius-raised);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--paper);
+  background-image: linear-gradient(
+    to bottom,
+    oklch(from var(--ink) calc(l + 0.09) c h),
+    var(--ink) 55%
+  );
+  box-shadow:
+    inset 0 1px 0 oklch(100% 0 0 / 0.14),
+    var(--elev-sm);
+  transition:
+    transform var(--duration-fast) var(--ease-out-expo),
+    box-shadow var(--duration-fast) var(--ease-out-expo),
+    filter var(--duration-fast) ease;
+  &:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.06);
+    box-shadow:
+      inset 0 1px 0 oklch(100% 0 0 / 0.14),
+      var(--elev-md);
+  }
+  &:active {
+    transform: translateY(0);
+    filter: brightness(0.98);
+    box-shadow:
+      inset 0 1px 0 oklch(100% 0 0 / 0.08),
+      var(--elev-xs);
+    transition-duration: 60ms;
+  }
+  &:disabled {
+    cursor: default;
+    opacity: 0.6;
+    transform: none;
+    filter: none;
+  }
+}
+
+/* ===========================================================================
+   Other utilities
    =========================================================================== */
 
 /* The editorial label: small caps, wide tracking, used for section eyebrows

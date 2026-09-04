@@ -24,8 +24,10 @@ export function EditorSection({
   lede?: string;
   children: React.ReactNode;
 }) {
+  // Each section is its own sheet: the editor reads as a stack of documents
+  // being filled in, and the seam between sections is desk, not a rule.
   return (
-    <section className="border-rule border-t pt-8">
+    <section className="sheet px-6 py-7 sm:px-8">
       <h2 className="font-display text-display-sm leading-tight">{title}</h2>
       {lede && <p className="text-ink-muted mt-2 max-w-prose text-sm leading-relaxed">{lede}</p>}
       <div className="mt-6">{children}</div>

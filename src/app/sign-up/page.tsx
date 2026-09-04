@@ -27,7 +27,7 @@ export default async function SignUpPage() {
         link a recruiter can open without an account.
       </p>
 
-      <div className="mt-10">
+      <div className="sheet mt-10 p-6 sm:p-8">
         <AuthForm action={signUp} submitLabel="Create account" />
       </div>
 

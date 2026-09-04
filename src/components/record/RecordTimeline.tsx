@@ -80,7 +80,7 @@ function RecordRow({ entry }: { entry: RecordEntry }) {
   const placement = placementLabel(entry);
 
   return (
-    <li className="group grid grid-cols-[4.5rem_1fr] items-baseline gap-x-4 border-b border-rule py-5 sm:grid-cols-[6.5rem_1fr_auto] sm:gap-x-8">
+    <li className="group -mx-3 grid grid-cols-[4.5rem_1fr] items-baseline gap-x-4 rounded-(--radius-raised) border-b border-rule px-3 py-5 transition-colors duration-(--duration-fast) hover:bg-paper-raised/60 sm:grid-cols-[6.5rem_1fr_auto] sm:gap-x-8">
       {/* Date column. Tabular figures keep this a true column down the page. */}
       <time
         dateTime={entry.achieved_on}
@@ -149,7 +149,7 @@ function EntryValue({
 
 function EmptyRecord() {
   return (
-    <div className="border-rule border-t py-16 text-center">
+    <div className="well px-6 py-16 text-center">
       <p className="text-ink font-display text-display-sm">Nothing on the record yet.</p>
       <p className="text-ink-muted mx-auto mt-3 max-w-sm text-sm leading-relaxed">
         Every PR, win, award, and commitment you add becomes part of a permanent, verifiable

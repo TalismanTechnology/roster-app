@@ -41,14 +41,14 @@ export default function PreviewPage() {
   );
 }
 
+/** Written straight on the desk, not boxed: chrome should sit a layer below
+ *  the document, and a bordered strip would compete with the sheets. */
 function PreviewBanner() {
   return (
-    <div className="border-rule bg-paper-sunken shrink-0 border-b">
-      <p className="text-ink-muted px-(--space-gutter) py-2.5 text-sm">
-        <span className="label text-ink mr-2">Preview</span>
-        Sample data, no database. The live resume lives at{" "}
-        <code className="text-ink">/[handle]</code>.
-      </p>
-    </div>
+    <p className="text-ink-muted shrink-0 px-5 pt-4 pb-0.5 text-sm sm:px-6">
+      <span className="label text-ink mr-2">Preview</span>
+      Sample data, no database. The live resume lives at{" "}
+      <code className="text-ink">/[handle]</code>.
+    </p>
   );
 }

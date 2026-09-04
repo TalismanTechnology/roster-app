@@ -28,12 +28,13 @@ const args = process.argv.slice(2);
 const route = args.find((arg) => !arg.startsWith("--")) ?? "/preview";
 const tab = args.find((arg) => arg.startsWith("--tab="))?.split("=")[1];
 const outDir = args.find((arg) => arg.startsWith("--out="))?.split("=")[1] ?? "./.shots";
+const colorScheme = args.includes("--dark") ? "dark" : "light";
 
 const browser = await chromium.launch({ channel: "chromium" });
 await mkdir(outDir, { recursive: true });
 
 for (const { name, width, height } of BREAKPOINTS) {
-  const page = await browser.newPage({ viewport: { width, height } });
+  const page = await browser.newPage({ viewport: { width, height }, colorScheme });
   await page.goto(`http://localhost:3000${route}`, { waitUntil: "networkidle" });
 
   if (tab) {
@@ -60,7 +61,7 @@ for (const { name, width, height } of BREAKPOINTS) {
     return { scrollWidth: doc.scrollWidth, clientWidth: doc.clientWidth, offenders };
   });
 
-  const suffix = tab ? `-${tab}` : "";
+  const suffix = `${tab ? `-${tab}` : ""}${colorScheme === "dark" ? "-dark" : ""}`;
   await page.screenshot({ path: path.join(outDir, `${name}${suffix}.png`) });
 
   const isOverflowing = overflow.scrollWidth > overflow.clientWidth;

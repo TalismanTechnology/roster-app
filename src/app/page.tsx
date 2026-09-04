@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { Hero } from "@/components/landing/Hero";
 import type { Profile } from "@/lib/database.types";
 import { createClient, getCurrentUser } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
@@ -104,48 +105,62 @@ function Dashboard({ profile, weekViews }: { profile: Profile; weekViews: number
   );
 }
 
+/**
+ * The dark cover, then the paper record: the hero carries the emotion and the
+ * section below it makes the argument in the product's own editorial voice.
+ * The contrast between the two surfaces is the design — the cover is the
+ * stadium at night, and scrolling lands you on the document.
+ */
 function Landing() {
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center px-(--space-gutter) py-(--space-section)">
-      <p className="label text-ink-subtle">Roster</p>
+    <main className="flex flex-1 flex-col">
+      <Hero />
 
-      <h1 className="font-display text-display-lg mt-4 leading-[0.95] tracking-tight text-balance">
-        Your whole career.
-        <br />
-        One link.
-      </h1>
+      <section
+        aria-labelledby="landing-record-heading"
+        className="mx-auto w-full max-w-2xl px-(--space-gutter) py-(--space-section)"
+      >
+        <p className="label text-ink-subtle">The record</p>
 
-      <p className="text-ink-muted mt-6 max-w-prose leading-relaxed">
-        A digital resume for athletes: every PR, result, award, and clip of
-        film — verified by your coaches, in one page a recruiter can open
-        without an account. Free for athletes.
-      </p>
-
-      <div className="mt-10 flex flex-col gap-3 sm:flex-row">
-        <Link
-          href="/sign-up"
-          className="bg-ink text-paper hover:bg-ink-muted flex h-12 cursor-pointer items-center justify-center rounded-[2px] px-8 text-sm font-medium transition-colors duration-(--duration-fast)"
+        <h2
+          id="landing-record-heading"
+          className="font-display text-display mt-4 leading-[0.95] tracking-tight text-balance"
         >
-          Build your resume
-        </Link>
+          Your whole career. One link.
+        </h2>
 
-        <Link
-          href="/search"
-          className="border-rule-strong text-ink hover:border-ink flex h-12 cursor-pointer items-center justify-center rounded-[2px] border px-8 text-sm font-medium transition-colors duration-(--duration-fast)"
-        >
-          Find athletes
-        </Link>
-      </div>
+        <p className="text-ink-muted mt-6 max-w-prose leading-relaxed">
+          A digital resume for athletes: every PR, result, award, and clip of
+          film — verified by your coaches, in one page a recruiter can open
+          without an account. Free for athletes.
+        </p>
 
-      <p className="text-ink-subtle mt-10 text-sm">
-        Already on Roster?{" "}
-        <Link
-          href="/sign-in"
-          className="text-ink-muted hover:text-ink cursor-pointer underline decoration-rule underline-offset-4 transition-colors duration-(--duration-fast)"
-        >
-          Sign in
-        </Link>
-      </p>
+        <div className="mt-10 flex flex-col gap-3 sm:flex-row">
+          <Link
+            href="/sign-up"
+            className="bg-ink text-paper hover:bg-ink-muted flex h-12 cursor-pointer items-center justify-center rounded-[2px] px-8 text-sm font-medium transition-colors duration-(--duration-fast)"
+          >
+            Build your resume
+          </Link>
+
+          <Link
+            href="/search"
+            className="border-rule-strong text-ink hover:border-ink flex h-12 cursor-pointer items-center justify-center rounded-[2px] border px-8 text-sm font-medium transition-colors duration-(--duration-fast)"
+          >
+            Find athletes
+          </Link>
+        </div>
+
+        <p className="text-ink-subtle mt-10 text-sm">
+          Already on Roster?{" "}
+          <Link
+            href="/sign-in"
+            className="text-ink-muted hover:text-ink cursor-pointer underline decoration-rule underline-offset-4 transition-colors duration-(--duration-fast)"
+          >
+            Sign in
+          </Link>
+        </p>
+      </section>
     </main>
   );
 }

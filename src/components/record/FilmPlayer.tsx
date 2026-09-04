@@ -32,7 +32,7 @@ export function FilmPlayer({ clip }: { clip: FilmClip }) {
   if (isPlaying) {
     return (
       <figure>
-        <div className="border-rule aspect-video w-full overflow-hidden border">
+        <div className="border-rule aspect-video w-full overflow-hidden rounded-(--radius-raised) border shadow-lg">
           <iframe
             src={`${embedUrl}?autoplay=1`}
             title={clip.title}
@@ -50,10 +50,13 @@ export function FilmPlayer({ clip }: { clip: FilmClip }) {
 
   return (
     <figure>
+      {/* The heaviest shadow on the page: film is the most object-like thing
+          a resume carries, and the poster should sit over the sheet the way
+          a photograph sits on a desk. */}
       <button
         type="button"
         onClick={() => setIsPlaying(true)}
-        className="group border-rule hover:border-rule-strong relative block aspect-video w-full cursor-pointer overflow-hidden border bg-paper-sunken transition-colors duration-(--duration-fast)"
+        className="group border-rule bg-paper-sunken pressable relative block aspect-video w-full cursor-pointer overflow-hidden rounded-(--radius-raised) border shadow-lg"
       >
         {posterUrl && (
           <Image
@@ -108,7 +111,7 @@ function OutboundCard({ clip }: { clip: FilmClip }) {
       href={clip.url}
       target="_blank"
       rel="noopener noreferrer nofollow"
-      className="border-rule bg-paper-sunken hover:border-rule-strong group flex aspect-video cursor-pointer flex-col justify-between border p-6 transition-colors duration-(--duration-fast)"
+      className="well pressable group flex aspect-video cursor-pointer flex-col justify-between p-6 hover:shadow-sm"
     >
       <span className="label text-ink-subtle">
         Watch on {providerLabel(clip.provider) ?? "the source"} ↗

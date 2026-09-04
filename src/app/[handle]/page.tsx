@@ -128,8 +128,10 @@ function OwnerBar({ visibility }: { visibility: Profile["visibility"] }) {
         ? "Unlisted — only people you send the link can see this."
         : "Private — only you can see this.";
 
+  // Written straight on the desk: the owner's chrome sits a layer below the
+  // document itself.
   return (
-    <div className="border-rule bg-paper-sunken flex shrink-0 flex-wrap items-baseline justify-between gap-3 border-b px-(--space-gutter) py-2.5">
+    <div className="flex shrink-0 flex-wrap items-baseline justify-between gap-3 px-5 pt-4 pb-0.5 sm:px-6">
       <p className="text-ink-muted text-sm">{note}</p>
       <Link
         href="/resume"

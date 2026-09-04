@@ -25,7 +25,7 @@ export default async function SignInPage({ searchParams }: PageProps<"/sign-in">
         Sign in
       </h1>
 
-      <div className="mt-10">
+      <div className="sheet mt-10 p-6 sm:p-8">
         <AuthForm action={signIn} submitLabel="Sign in" next={next} />
       </div>
 

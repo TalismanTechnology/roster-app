@@ -35,7 +35,7 @@ export default async function OnboardingPage() {
         Claim your page
       </h1>
 
-      <div className="mt-10">
+      <div className="sheet mt-10 p-6 sm:p-8">
         <OnboardingForm />
       </div>
     </main>

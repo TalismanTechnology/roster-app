@@ -18,7 +18,7 @@ export function IdentityRail({
   entryCount: number;
 }) {
   return (
-    <aside className="border-rule bg-paper-sunken flex shrink-0 flex-col gap-6 border-b px-(--space-gutter) py-8 lg:w-[22rem] lg:overflow-y-auto lg:border-r lg:border-b-0 xl:w-[25rem]">
+    <aside className="sheet flex shrink-0 flex-col gap-6 px-6 py-7 lg:min-h-0 lg:w-[21.5rem] lg:overflow-y-auto xl:w-[24rem]">
       <div className="flex items-start gap-4 lg:flex-col lg:gap-5">
         <Avatar profile={profile} />
 
@@ -95,6 +95,8 @@ function VerifiedSummary({ verified, total }: { verified: number; total: number 
 
 function Avatar({ profile }: { profile: Profile }) {
   if (profile.avatar_url) {
+    // The one photograph on the sheet gets a real lift: shadow below, lit
+    // edge above, like a print laid on the document.
     return (
       <Image
         src={profile.avatar_url}
@@ -102,7 +104,7 @@ function Avatar({ profile }: { profile: Profile }) {
         width={96}
         height={96}
         priority
-        className="border-rule size-16 shrink-0 rounded-full border object-cover lg:size-24"
+        className="border-rule size-16 shrink-0 rounded-full border object-cover shadow-sm lg:size-24"
       />
     );
   }
@@ -116,10 +118,12 @@ function Avatar({ profile }: { profile: Profile }) {
     .join("")
     .toUpperCase();
 
+  // The absence of a photo is recessed where a photo would be raised: an
+  // empty seat in the document, not a fake object.
   return (
     <div
       aria-hidden
-      className="border-rule bg-paper text-ink-subtle font-display flex size-16 shrink-0 items-center justify-center rounded-full border text-xl lg:size-24 lg:text-2xl"
+      className="bg-paper-sunken text-ink-subtle font-display flex size-16 shrink-0 items-center justify-center rounded-full text-xl shadow-[var(--recess)] lg:size-24 lg:text-2xl"
     >
       {initials}
     </div>
@@ -175,10 +179,7 @@ function ProofLinks({ profile }: { profile: Profile }) {
           are links. A recruiter who has decided should not have to hunt for
           the email among four identically-weighted underlines. */}
       {isContactable && (
-        <a
-          href={`mailto:${profile.contact_email}`}
-          className="bg-ink text-paper hover:bg-ink-muted flex h-11 cursor-pointer items-center justify-center rounded-[2px] text-sm font-medium transition-colors duration-(--duration-fast)"
-        >
+        <a href={`mailto:${profile.contact_email}`} className="btn-primary">
           Contact
         </a>
       )}

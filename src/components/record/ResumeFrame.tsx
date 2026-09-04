@@ -68,7 +68,11 @@ export function ResumeFrame({
     // Height comes from the page, which owns the viewport and any bar above
     // this. Setting `h-dvh` here too would stack a full viewport under that
     // bar and push the foot of the rail off screen.
-    <div className="flex flex-1 flex-col lg:min-h-0 lg:flex-row">
+    //
+    // The padding is load-bearing: it is where the desk shows around the
+    // sheets, which is what makes them read as objects with edges rather
+    // than screen regions.
+    <div className="flex flex-1 flex-col gap-3 p-3 sm:gap-4 sm:p-4 lg:min-h-0 lg:flex-row">
       <IdentityRail profile={profile} entryCount={entries.length} />
 
       {tabs.length > 0 ? (
@@ -138,12 +142,16 @@ function SectionPanel({
   }
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col lg:min-h-0">
+    <section className="sheet flex min-w-0 flex-1 flex-col overflow-hidden lg:min-h-0">
+      {/* The tab bar sits in a shallow well at the head of the sheet, and the
+          active tab is a raised chip inside it — pressed controls sit low,
+          the selected one sits proud. That physical statement replaces the
+          underline the flat system used. */}
       <div
         role="tablist"
         aria-label="Resume sections"
         onKeyDown={handleKeyDown}
-        className="border-rule-strong flex shrink-0 gap-6 overflow-x-auto border-b px-(--space-gutter)"
+        className="border-rule bg-paper-sunken/60 flex shrink-0 gap-1 overflow-x-auto border-b p-2"
       >
         {tabs.map((tab) => {
           const isActive = tab.id === active;
@@ -162,10 +170,10 @@ function SectionPanel({
               aria-controls={`panel-${tab.id}`}
               tabIndex={isActive ? 0 : -1}
               onClick={() => setActive(tab.id)}
-              className={`label -mb-px flex shrink-0 cursor-pointer items-center gap-2 border-b-2 py-4 whitespace-nowrap transition-colors duration-(--duration-fast) ${
+              className={`label flex shrink-0 cursor-pointer items-center gap-2 rounded-(--radius-raised) px-3.5 py-2.5 whitespace-nowrap transition-colors duration-(--duration-fast) ${
                 isActive
-                  ? "border-ink text-ink"
-                  : "hover:text-ink border-transparent text-ink-subtle"
+                  ? "bg-paper-raised text-ink shadow-[var(--edge-raised),var(--elev-xs)]"
+                  : "text-ink-subtle hover:text-ink hover:bg-paper-raised/50"
               }`}
             >
               {tab.label}
@@ -200,7 +208,7 @@ function SectionPanel({
 
 function EmptyResume() {
   return (
-    <div className="flex flex-1 items-center justify-center px-(--space-gutter) py-16">
+    <div className="sheet flex flex-1 items-center justify-center px-(--space-gutter) py-16">
       <div className="max-w-sm text-center">
         <p className="font-display text-display-sm">Nothing on the record yet.</p>
         <p className="text-ink-muted mt-3 text-sm leading-relaxed">

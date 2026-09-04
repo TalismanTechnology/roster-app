@@ -48,9 +48,12 @@ export function VerificationMark({ state }: { state: VerificationState }) {
 
   if (!presentation) return null;
 
+  // The stamp sits fractionally proud of the page: a hairline of its own
+  // colour and the smallest shadow in the system. Any more lift and a row of
+  // stamps would read as buttons.
   return (
     <span
-      className={`label inline-flex shrink-0 items-center gap-1.5 rounded-[2px] px-1.5 py-1 ${presentation.className}`}
+      className={`label inline-flex shrink-0 items-center gap-1.5 rounded-(--radius-chip) border border-current/15 px-2 py-1 shadow-xs ${presentation.className}`}
       title={presentation.description}
     >
       <VerificationGlyph state={state} />

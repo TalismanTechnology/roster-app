@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, Instrument_Serif } from "next/font/google";
+import { Anton, Inter, Instrument_Serif } from "next/font/google";
 
 import "./globals.css";
 
@@ -27,6 +27,20 @@ const instrument = Instrument_Serif({
   display: "swap",
 });
 
+/**
+ * The third face is the exception that proves the two-family rule: it appears
+ * exactly once, in the landing hero, and never inside the product. A record is
+ * set in a reading face; a name on a stadium is not. Anton is the free stand-in
+ * for the condensed grotesk the brand wants — if Druk or Founders Grotesk
+ * Condensed gets licensed, this is the only line that changes.
+ */
+const anton = Anton({
+  variable: "--font-anton",
+  subsets: ["latin"],
+  weight: "400",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
   title: {
     default: "Roster — The Athlete's Resume",
@@ -48,7 +62,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${inter.variable} ${instrument.variable} h-full antialiased`}
+      className={`${inter.variable} ${instrument.variable} ${anton.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">{children}</body>
     </html>

@@ -99,7 +99,7 @@ export default async function ResumeEditorPage() {
         </form>
       </header>
 
-      <div className="flex flex-col gap-12">
+      <div className="flex flex-col gap-5">
         <IdentitySection profile={profile} />
         <RecordSection entries={entriesResult.data ?? []} />
         <FilmSection clips={filmResult.data ?? []} />

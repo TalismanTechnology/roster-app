@@ -57,8 +57,8 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
         defaults={{ q, sport, level, gradYear, region, verifiedOnly }}
       />
 
-      <section aria-label="Results" className="mt-10">
-        <header className="border-rule-strong flex items-baseline justify-between border-b pb-3">
+      <section aria-label="Results" className="sheet mt-6 px-6 py-6 sm:px-8">
+        <header className="border-rule flex items-baseline justify-between border-b pb-3">
           <h2 className="label text-ink">Results</h2>
           <span className="label text-ink-subtle" data-numeric>
             {athletes === null
@@ -133,7 +133,10 @@ function SearchForm({ defaults }: { defaults: Filters }) {
     "placeholder:text-ink-subtle focus:border-ink focus:outline-none";
 
   return (
-    <form method="GET" className="mt-8 grid grid-cols-2 items-end gap-x-6 gap-y-5 sm:grid-cols-4">
+    <form
+      method="GET"
+      className="sheet mt-8 grid grid-cols-2 items-end gap-x-6 gap-y-5 px-6 py-6 sm:grid-cols-4 sm:px-8"
+    >
       <label className="col-span-2 block sm:col-span-4">
         <span className="label text-ink-muted">Name or handle</span>
         <input
@@ -205,10 +208,7 @@ function SearchForm({ defaults }: { defaults: Filters }) {
         <span className="text-sm">Verified records only</span>
       </label>
 
-      <button
-        type="submit"
-        className="bg-ink text-paper hover:bg-ink-muted flex h-11 cursor-pointer items-center justify-center rounded-[2px] px-6 text-sm font-medium transition-colors duration-(--duration-fast)"
-      >
+      <button type="submit" className="btn-primary">
         Search
       </button>
     </form>
@@ -229,7 +229,7 @@ function AthleteRow({ athlete }: { athlete: Profile }) {
     <li className="border-rule border-b">
       <Link
         href={`/${athlete.handle}`}
-        className="group grid cursor-pointer grid-cols-[1fr_auto] items-baseline gap-x-6 py-5"
+        className="group -mx-3 grid cursor-pointer grid-cols-[1fr_auto] items-baseline gap-x-6 rounded-(--radius-raised) px-3 py-5 transition-colors duration-(--duration-fast) hover:bg-paper-raised/60"
       >
         <div className="min-w-0">
           <p className="text-ink group-hover:text-ink-muted text-lg font-medium transition-colors duration-(--duration-fast)">
