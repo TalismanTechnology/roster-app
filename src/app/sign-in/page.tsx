@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { AuthForm } from "@/components/auth/AuthForm";
+import { AuthLayout } from "@/components/auth/AuthLayout";
 import { signIn } from "@/lib/actions/auth";
 import { getCurrentUser } from "@/lib/data/auth";
 
@@ -18,26 +19,20 @@ export default async function SignInPage({ searchParams }: PageProps<"/sign-in">
   const next = typeof params.next === "string" ? params.next : undefined;
 
   return (
-    <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-(--space-gutter) py-(--space-section)">
-      <p className="label text-ink-subtle">Roster</p>
-
-      <h1 className="font-display text-display mt-4 leading-[0.95] tracking-tight">
-        Sign in
-      </h1>
-
-      <div className="sheet mt-10 p-6 sm:p-8">
-        <AuthForm action={signIn} submitLabel="Sign in" next={next} />
-      </div>
-
-      <p className="text-ink-muted mt-8 text-sm">
-        New here?{" "}
-        <Link
-          href="/sign-up"
-          className="text-ink decoration-rule-strong hover:decoration-ink cursor-pointer underline underline-offset-4"
-        >
-          Create your resume
-        </Link>
-      </p>
-    </main>
+    <AuthLayout
+      label="Welcome back"
+      title="Sign in."
+      image="02"
+      below={
+        <>
+          New here?{" "}
+          <Link href="/sign-up" className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+            Create your resume
+          </Link>
+        </>
+      }
+    >
+      <AuthForm action={signIn} submitLabel="Sign in" next={next} />
+    </AuthLayout>
   );
 }

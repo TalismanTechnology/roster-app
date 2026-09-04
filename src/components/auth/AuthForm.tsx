@@ -21,14 +21,14 @@ export function AuthForm({
   next?: string;
 }) {
   const [state, formAction] = useActionState(action, { error: null });
+  const isSignUp = /create/i.test(submitLabel);
 
   if (state.confirmEmail) {
     return (
-      <div role="status" className="border-rule bg-paper-sunken border p-5">
+      <div role="status">
         <p className="font-display text-display-sm">Check your email.</p>
-        <p className="text-ink-muted mt-2 text-sm leading-relaxed">
-          We sent a confirmation link. Click it and you will land right back
-          here, signed in.
+        <p className="mt-2 text-sm leading-relaxed text-ink-muted">
+          We sent a confirmation link. Click it and you will land right back here, signed in.
         </p>
       </div>
     );
@@ -39,21 +39,21 @@ export function AuthForm({
       {next && <input type="hidden" name="next" value={next} />}
 
       <Field label="Email">
-        <TextInput name="email" type="email" autoComplete="email" required />
+        <TextInput name="email" type="email" autoComplete="email" required autoFocus />
       </Field>
 
-      <Field label="Password">
+      <Field label="Password" hint={isSignUp ? "At least 8 characters." : undefined}>
         <TextInput
           name="password"
           type="password"
-          autoComplete="current-password"
+          autoComplete={isSignUp ? "new-password" : "current-password"}
           minLength={8}
           required
         />
       </Field>
 
       {state.error && (
-        <p role="alert" className="text-disputed text-sm">
+        <p role="alert" className="text-sm text-disputed">
           {state.error}
         </p>
       )}
