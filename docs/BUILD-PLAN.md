@@ -118,7 +118,7 @@ Each milestone ends with the **verification protocol** (§5) and a commit.
 - [x] **M1 · Data layer (1:30)** — repository interface, local adapter, session, rules, seed (≥12 athletes across football/track/basketball/soccer, 1 coach, 1 recruiter), Supabase adapter moved, actions + pages rewired, `proxy.ts` local gating, `node:test` suite for rules/session/repository (target: the 28 schema checks that apply). `npm run test` script. `feat(data): repository interface with a local file-backed adapter`
 - [x] **M2 · Landing + shell + auth (0:45)** — port `landing/*` + `bits/*` from the prototype (next/link, next/image, `"use client"` where needed, dynamic-import motion). Signed-in/out header + footer. `/sign-in`, `/sign-up`. `feat(landing): port the dark landing and rebuild auth on it`
 - [x] **M3 · Onboarding (0:45)** — three-step flow with live handle check. `feat(onboarding): three-step claim flow`
-- [ ] **M4 · Public resume (1:30)** — `/[handle]` + `/preview` on shared `record/*` components; gating, metadata, print CSS. `feat(resume): the public resume on the dark identity`
+- [x] **M4 · Public resume (1:30)** — `/[handle]` + `/preview` on shared `record/*` components; gating, metadata, print CSS. `feat(resume): the public resume on the dark identity`
 - [ ] **M5 · Editor (1:30)** — `/resume` with rail, forms, live preview, share bar, requests inbox. `feat(editor): resume editor with live preview`
 - [ ] **M6 · Search (0:45)** — filters, results, empty state, pagination, add-to-list. `feat(search): discovery with URL-backed filters`
 - [ ] **M7 · Verification (1:00)** — request from editor → `/verify/[token]` → mark applied → inbox. `feat(verify): coach verification by link`

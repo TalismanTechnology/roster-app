@@ -48,7 +48,7 @@ export function AuthLayout({
         </section>
 
         <aside className="relative hidden lg:col-span-6 lg:block" aria-hidden>
-          <Img id={image} className="absolute inset-0" sizes="50vw" quiet imgClassName="opacity-80" />
+          <Img id={image} className="absolute inset-0" sizes="50vw" quiet priority imgClassName="opacity-80" />
           <div className="absolute inset-0 bg-gradient-to-r from-paper via-paper/20 to-transparent" />
           <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-paper to-transparent" />
         </aside>

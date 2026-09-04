@@ -1,21 +1,16 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { ResumeFrame } from "@/components/record/ResumeFrame";
-import { AppShell, SideCard } from "@/components/shell/AppShell";
-import {
-  previewCoaches,
-  previewEntries,
-  previewFilm,
-  previewProfile,
-} from "@/lib/fixtures";
+import { ResumeDocument } from "@/components/record/ResumeDocument";
+import { Site } from "@/components/shell/Site";
+import { previewCoaches, previewEntries, previewFilm, previewProfile } from "@/lib/fixtures";
 
 /**
  * A database-free view of the resume.
  *
- * Renders the same shell and profile column the live `/[handle]` route uses,
- * against fixtures. Useful for design review and for anyone who has cloned
- * the repo but not yet stood up a Supabase project.
+ * Renders exactly the component the live `/[handle]` route uses, against
+ * fixtures. Useful for design review and for anyone who has cloned the repo
+ * but not yet stood up a database.
  */
 export const metadata: Metadata = {
   title: "Interface preview",
@@ -24,25 +19,19 @@ export const metadata: Metadata = {
 
 export default function PreviewPage() {
   return (
-    <AppShell
-      right={
-        <SideCard title="This is a preview">
-          <p className="text-ink-muted text-sm leading-normal">
-            Sample data, no database. The live resume lives at{" "}
-            <code className="text-ink">/[handle]</code>.
-          </p>
-          <Link href="/sign-up" className="btn-primary mt-1 self-start px-5">
-            Create yours
-          </Link>
-        </SideCard>
-      }
-    >
-      <ResumeFrame
-        profile={previewProfile}
-        entries={previewEntries}
-        film={previewFilm}
-        coaches={previewCoaches}
-      />
-    </AppShell>
+    <Site>
+      <p
+        className="print-hidden label flex flex-wrap items-center justify-between gap-2 border-b border-rule bg-paper-raised/60 py-2 text-ink-muted"
+        style={{ paddingInline: "var(--pad-x)" }}
+      >
+        <span>Preview — sample data, no database. Every name here is fictional.</span>
+        <Link href="/sign-up" className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+          Create yours
+        </Link>
+      </p>
+      <main>
+        <ResumeDocument profile={previewProfile} entries={previewEntries} film={previewFilm} coaches={previewCoaches} />
+      </main>
+    </Site>
   );
 }

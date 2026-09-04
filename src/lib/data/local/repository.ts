@@ -629,6 +629,12 @@ export function toEntry(db: Db, a: AchievementRow): RecordEntry {
     org_logo_url: null,
     event_name: a.event_name,
     evidence_count: db.evidence.filter((e) => e.achievement_id === a.id).length,
+    verified_by:
+      a.verification === "verified"
+        ? (db.verifications
+            .filter((v) => v.achievement_id === a.id && v.outcome === "verified")
+            .sort((x, y) => y.created_at.localeCompare(x.created_at))[0]?.verifier_name ?? null)
+        : null,
   };
 }
 

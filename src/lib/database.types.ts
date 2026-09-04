@@ -135,6 +135,10 @@ export type RecordEntry = {
   org_logo_url: string | null;
   event_name: string | null;
   evidence_count: number;
+  /** "Tom Bradley, Head Coach" — who stood behind a verified entry. Not a
+   *  column on the view yet; the local adapter derives it from
+   *  `verifications`, Supabase leaves it undefined until the view grows it. */
+  verified_by?: string | null;
 };
 
 export type FilmClip = {

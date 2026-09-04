@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { ResumeFrame } from "@/components/record/ResumeFrame";
-import { AppShell, SideCard } from "@/components/shell/AppShell";
+import { ResumeDocument } from "@/components/record/ResumeDocument";
+import { Site } from "@/components/shell/Site";
 import { getRepository } from "@/lib/data";
 import { getCurrentUser } from "@/lib/data/auth";
-import { levelLabel, sportLabel } from "@/lib/format";
+import { levelLabel } from "@/lib/format";
+import { sportName } from "@/lib/sports";
 
 /**
  * An athlete's resume — the link they send a recruiter.
@@ -23,26 +23,27 @@ export async function generateMetadata({ params }: PageProps<"/[handle]">): Prom
   const profile = await repo.getProfileByHandle(handle, viewer?.id ?? null);
 
   if (!profile) {
-    return { title: "Not found" };
+    return { title: "Not found", robots: { index: false, follow: false } };
   }
 
-  const descriptor = [
-    levelLabel(profile.level),
-    sportLabel(profile.primary_sport),
-    profile.grad_year ? `Class of ${profile.grad_year}` : null,
-  ]
+  const descriptor = [levelLabel(profile.level), sportName(profile.primary_sport), profile.grad_year ? `Class of ${profile.grad_year}` : null]
     .filter(Boolean)
     .join(" · ");
+  const description = profile.bio ?? `${profile.display_name} on Roster. ${descriptor}`;
 
   return {
     title: profile.display_name,
-    description: profile.bio ?? `${profile.display_name} on Roster. ${descriptor}`,
+    description,
+    alternates: { canonical: `/${profile.handle}` },
+    openGraph: {
+      title: `${profile.display_name} — ${descriptor}`,
+      description,
+      type: "profile",
+      url: `/${profile.handle}`,
+    },
     // Only a public resume is indexable. Unlisted means "reachable by link but
     // not findable", and letting a crawler index it would break that promise.
-    robots:
-      profile.visibility === "public"
-        ? { index: true, follow: true }
-        : { index: false, follow: false },
+    robots: profile.visibility === "public" ? { index: true, follow: true } : { index: false, follow: false },
   };
 }
 
@@ -64,41 +65,14 @@ export default async function ResumePage({ params }: PageProps<"/[handle]">) {
     repo.listCoaches(profile.id, viewerId),
   ]);
 
-  const isOwner = viewerId === profile.id;
-
   // Fire-and-forget: the view counter must never delay or fail the render.
   void repo.recordView(profile.id, viewerId);
 
   return (
-    <AppShell
-      right={
-        isOwner ? (
-          <SideCard title="Your resume">
-            <p className="text-ink-muted text-sm leading-normal">
-              {profile.visibility === "public"
-                ? "Public — this is exactly what a recruiter sees."
-                : profile.visibility === "unlisted"
-                  ? "Unlisted — only people you send the link can see this."
-                  : "Private — only you can see this."}
-            </p>
-            <Link href="/resume" className="btn-pill mt-1 self-start px-5">
-              Edit resume
-            </Link>
-          </SideCard>
-        ) : (
-          <SideCard title="New to Roster?">
-            <p className="text-ink-muted text-sm leading-normal">
-              One link for your whole career — record, film, references,
-              verified by your coaches. Free for athletes.
-            </p>
-            <Link href="/sign-up" className="btn-primary mt-1 self-start px-5">
-              Create your resume
-            </Link>
-          </SideCard>
-        )
-      }
-    >
-      <ResumeFrame profile={profile} entries={entries} film={film} coaches={coaches} />
-    </AppShell>
+    <Site>
+      <main>
+        <ResumeDocument profile={profile} entries={entries} film={film} coaches={coaches} isOwner={viewerId === profile.id} />
+      </main>
+    </Site>
   );
 }
