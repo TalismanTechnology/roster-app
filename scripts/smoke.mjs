@@ -27,6 +27,11 @@ async function step(name, fn) {
   }
 }
 
+const shotsDir = process.argv.find((a) => a.startsWith("--shots="))?.split("=")[1];
+const shot = async (name) => {
+  if (shotsDir) await page.screenshot({ path: `${shotsDir}/${name}.png` });
+};
+
 const expectText = async (text) => {
   const found = await page.getByText(text, { exact: false }).first().isVisible().catch(() => false);
   if (!found) throw new Error(`expected to see "${text}"`);
@@ -84,7 +89,12 @@ await step("sign in as a seeded athlete lands in the editor", async () => {
 await step("adding an entry persists and shows on the public resume", async () => {
   const title = `Smoke entry ${stamp}`;
   await page.goto(`${base}/resume`, { waitUntil: "networkidle" });
-  const form = page.locator("form").filter({ has: page.locator('input[name="achieved_on"]') }).first();
+  // The add form is the one entry form without a hidden id (edit forms carry one).
+  const form = page
+    .locator("form")
+    .filter({ has: page.locator('input[name="achieved_on"]') })
+    .filter({ hasNot: page.locator('input[name="id"]') })
+    .first();
   await form.locator('input[name="title"]').fill(title);
   await form.locator('input[name="achieved_on"]').fill("2026-06-01");
   await form.locator('input[name="value_display"]').fill("11.11");
@@ -99,6 +109,26 @@ await step("adding an entry persists and shows on the public resume", async () =
   await expectText(title);
 });
 
+await step("editor shows the live preview and creates a verification link", async () => {
+  await page.goto(`${base}/resume`, { waitUntil: "networkidle" });
+  await expectText("Live preview");
+  await expectText("views this week");
+  await shot("editor");
+  // Open the first "Request verification" disclosure and create a link.
+  const summary = page.locator("summary", { hasText: "Request verification" }).first();
+  await summary.click();
+  const panel = summary.locator("xpath=ancestor::details[1]");
+  await panel.getByRole("button", { name: /create request link/i }).click();
+  // After the action the row re-renders as "submitted" and shows the link
+  // from server data, outside the disclosure.
+  const code = page.locator("code", { hasText: "/verify/" }).first();
+  await code.waitFor({ timeout: 20_000 });
+  const path = (await code.textContent())?.trim();
+  if (!path?.startsWith("/verify/")) throw new Error(`no link: ${path}`);
+  globalThis.__verifyPath = path;
+  await shot("editor-request");
+});
+
 await step("sign out clears the session", async () => {
   await page.goto(`${base}/resume`, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: /sign out/i }).click();
@@ -106,11 +136,6 @@ await step("sign out clears the session", async () => {
   await page.goto(`${base}/resume`, { waitUntil: "networkidle" });
   if (!page.url().includes("/sign-in")) throw new Error("still signed in");
 });
-
-const shotsDir = process.argv.find((a) => a.startsWith("--shots="))?.split("=")[1];
-const shot = async (name) => {
-  if (shotsDir) await page.screenshot({ path: `${shotsDir}/${name}.png` });
-};
 
 await step("sign up → three-step onboarding → editor", async () => {
   await page.goto(`${base}/sign-up`, { waitUntil: "networkidle" });

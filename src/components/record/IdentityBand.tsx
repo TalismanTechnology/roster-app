@@ -54,10 +54,10 @@ export function IdentityBand({
       </div>
 
       <div
-        className="relative z-10 grid gap-8 lg:grid-cols-12 lg:items-end"
+        className="relative z-10 grid gap-8 @3xl:grid-cols-12 @3xl:items-end"
         style={{ paddingInline: "var(--pad-x)", paddingBlock: "clamp(2rem, 6vh, 4.5rem)" }}
       >
-        <div className="lg:col-span-8">
+        <div className="@3xl:col-span-8">
           <p className="label flex items-center gap-2 text-ink-muted">
             <Corner d={CORNER.tl} />
             {label}
@@ -89,7 +89,7 @@ export function IdentityBand({
           )}
         </div>
 
-        <Frame as="aside" className="lifted lg:col-span-4" aria-label="At a glance">
+        <Frame as="aside" className="lifted @3xl:col-span-4" aria-label="At a glance">
           <div className="flex flex-col gap-5" style={{ padding: "var(--feature-pad)" }}>
             <dl className="grid grid-cols-3 gap-4">
               {stats.map((s) => (

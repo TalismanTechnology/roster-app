@@ -18,10 +18,13 @@ export function EditorForm({
   action,
   submitLabel,
   children,
+  compact = false,
 }: {
   action: (prev: FormState, formData: FormData) => Promise<FormState>;
   submitLabel: string;
   children: React.ReactNode;
+  /** Smaller submit, for inline edit forms inside a list row. */
+  compact?: boolean;
 }) {
   const [state, formAction] = useActionState(action, IDLE);
 
@@ -30,7 +33,7 @@ export function EditorForm({
       {children}
 
       <div className="flex items-center gap-4">
-        <SubmitButton>{submitLabel}</SubmitButton>
+        <SubmitButton className={compact ? "btn-outline min-h-9 px-4 text-sm" : undefined}>{submitLabel}</SubmitButton>
         <FormNotice ok={state.ok} error={state.error} />
       </div>
     </form>

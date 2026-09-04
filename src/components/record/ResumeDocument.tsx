@@ -40,7 +40,9 @@ export function ResumeDocument({
   ].filter((s) => s.show);
 
   return (
-    <article className="print-resume">
+    // @container: the document lays itself out by its own width, so it is
+    // correct at full page, inside the editor's preview column, and in print.
+    <article className="print-resume @container">
       <IdentityBand profile={profile} entries={entries} film={film} isOwner={isOwner} />
 
       {sections.length > 1 && (

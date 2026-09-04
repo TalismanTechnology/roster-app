@@ -38,7 +38,7 @@ export function Highlights({ entries }: { entries: RecordEntry[] }) {
   if (pinned.length === 0) return null;
 
   return (
-    <section aria-label="Highlights" className="grid gap-4 sm:grid-cols-3 lg:gap-6">
+    <section aria-label="Highlights" className="grid gap-4 @xl:grid-cols-3 @3xl:gap-6">
       {pinned.map((e) => {
         // A measurable leads with its number; an award or selection has no
         // number, so its title is the headline and the context sits under it.
@@ -110,7 +110,7 @@ export function RecordList({ entries, isOwner }: { entries: RecordEntry[]; isOwn
                 {year}
               </p>
             )}
-            <div className="grid grid-cols-[3.5rem_1fr_auto] items-start gap-x-4 py-4 sm:grid-cols-[4.5rem_1fr_auto]">
+            <div className="grid grid-cols-[3.5rem_1fr_auto] items-start gap-x-4 py-4 @md:grid-cols-[4.5rem_1fr_auto]">
               <time className="label pt-1 text-ink-muted" dateTime={e.achieved_on} title={fullDate(e.achieved_on)} data-numeric>
                 {recordDate(e.achieved_on).slice(0, 5)}
               </time>
@@ -170,12 +170,12 @@ export function FilmSection({ clips }: { clips: FilmClip[] }) {
   const rest = clips.filter((c) => c.id !== featured.id);
 
   return (
-    <div className="grid gap-6 lg:grid-cols-12">
-      <div className="lg:col-span-8">
+    <div className="grid gap-6 @3xl:grid-cols-12">
+      <div className="@3xl:col-span-8">
         <FilmPlayer clip={featured} />
       </div>
       {rest.length > 0 && (
-        <ol className="flex flex-col divide-y divide-rule border-y border-rule lg:col-span-4 lg:border-t-0">
+        <ol className="flex flex-col divide-y divide-rule border-y border-rule @3xl:col-span-4 @3xl:border-t-0">
           {rest.map((clip) => {
             const poster = posterFor(clip);
             return (
@@ -227,7 +227,7 @@ export function AcademicsSection({ profile }: { profile: Profile }) {
 
   return (
     <div>
-      <dl className="grid grid-cols-2 gap-px border border-rule bg-rule sm:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]">
+      <dl className="grid grid-cols-2 gap-px border border-rule bg-rule @xl:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]">
         {items.map((i) => (
           <div key={i.label} className="min-w-0 bg-paper" style={{ padding: "var(--feature-pad)" }}>
             <dt className="label text-ink-muted">{i.label}</dt>

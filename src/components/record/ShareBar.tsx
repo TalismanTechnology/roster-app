@@ -6,7 +6,7 @@ import { useState } from "react";
  * The two things a person does with a resume besides read it: send it and
  * print it. Copy takes the page's own URL so it is right on every host.
  */
-export function ShareBar({ handle }: { handle: string }) {
+export function ShareBar({ handle, print = true }: { handle: string; print?: boolean }) {
   const [isCopied, setIsCopied] = useState(false);
 
   async function copy() {
@@ -25,9 +25,11 @@ export function ShareBar({ handle }: { handle: string }) {
       <button type="button" onClick={copy} className="btn-outline min-h-9 px-4 text-sm" aria-live="polite">
         {isCopied ? "Copied" : "Copy link"}
       </button>
-      <button type="button" onClick={() => window.print()} className="btn-ghost min-h-9 px-3 text-sm">
-        Print / PDF
-      </button>
+      {print && (
+        <button type="button" onClick={() => window.print()} className="btn-ghost min-h-9 px-3 text-sm">
+          Print / PDF
+        </button>
+      )}
     </div>
   );
 }
