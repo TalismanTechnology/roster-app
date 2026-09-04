@@ -3,99 +3,91 @@
 /* ===========================================================================
    Roster design tokens
 
-   Direction: the X (x.com) design language, adopted wholesale. Pure black
-   and pure white chrome, one signal blue, bold tight system type, pill
-   buttons, rounded-16 cards, hairline dividers, and interaction states that
-   are washes of colour rather than shadows. Flat on purpose: X separates
-   surfaces with borders and luminance, and spends elevation on nothing but
-   popovers.
+   Direction: the dark identity from the landing hero. Charcoal paper, ink
+   type, hairline rules, corner brackets instead of cards, a checker and a
+   wireframe globe as the only ornament. Depth comes from overlap, shadow and
+   photography — never from borders, radii, or colour.
 
-   Token names stay app-semantic (paper/ink/rule) so components read as
-   Roster, not as a palette dump:
-     paper         — the canvas (#fff light, #000 "lights out" dark)
-     paper-raised  — elevated cards (sidebar modules, editor cards)
-     paper-sunken  — recessed fills (search pill, input backgrounds)
-     ink           — text; accent — the blue that means "action" and, here,
-                     "verified": on X the blue seal is the trust mark, and
-                     Roster's verification badge adopts it outright.
+   Dark only. There is no light theme: the product is photographed athletes on
+   black, and the interface is the same black so the photographs carry it.
+
+   Token names stay app-semantic (paper / ink / rule) so components read as
+   Roster, not as a palette dump.
    =========================================================================== */
 
 :root {
-  --paper: #ffffff;
-  --paper-raised: #f7f9f9;
-  --paper-sunken: #eff3f4;
+  color-scheme: dark;
 
-  --ink: #0f1419;
-  --ink-muted: #536471;
-  --ink-subtle: #8b98a5;
+  --paper: #000000;
+  --paper-raised: #16181c;
+  --paper-sunken: #202327;
 
-  --rule: #eff3f4;
-  --rule-strong: #cfd9de;
+  --ink: #e7e9ea;
+  --ink-muted: #71767b;
+  --ink-subtle: #5b6167;
 
-  /* The blue. Actions, links, focus, the active tab, and the verified seal. */
-  --accent: #1d9bf0;
-  --accent-hover: #1a8cd8;
-  --accent-wash: rgb(29 155 240 / 0.1);
+  --rule: #202327;
+  --rule-strong: #3e4247;
 
-  /* Interaction washes — X's hover language. A tint of the content colour,
-     never a border change, never a shadow. */
-  --wash: rgb(15 20 25 / 0.06);
-  --wash-strong: rgb(15 20 25 / 0.1);
+  /* Monochrome: "accent" is ink. Links, focus, the active tab, and the
+     verified mark are all the reading colour at full strength. The name is
+     kept so existing `text-accent` call sites keep meaning "emphasis". */
+  --accent: #e7e9ea;
+  --accent-hover: #ffffff;
+  --accent-wash: rgb(231 233 234 / 0.1);
 
-  /* Semantic state. Verified is the blue; the rest keep X's own signal
-     colours (its error red, its brand gold for "still cooking"). */
-  --state-verified: var(--accent);
+  --wash: rgb(231 233 234 / 0.06);
+  --wash-strong: rgb(231 233 234 / 0.12);
+
+  /* Semantic state — the only two colours on the site, both muted. */
+  --state-verified: var(--ink);
   --state-verified-bg: var(--accent-wash);
-  --state-pending: #a07a00;
-  --state-pending-bg: rgb(255 212 0 / 0.14);
+  --state-pending: #ffd400;
+  --state-pending-bg: rgb(255 212 0 / 0.12);
   --state-disputed: #f4212e;
   --state-disputed-bg: rgb(244 33 46 / 0.1);
 
-  --focus: var(--accent);
+  --focus: var(--ink);
 
-  /* Radii: two ideas only — the card and the pill. */
-  --radius-card: 1rem;
-  --radius-input: 0.5rem;
+  /* Radii: buttons and inputs are barely rounded; chips are pills; nothing
+     else is rounded — blocks are framed with brackets or hairlines. */
+  --radius-card: 0;
+  --radius-input: 0.375rem;
 
-  /* Type scale — X's ramp: 13 for meta, 15 for everything, 17 for inputs
-     and emphasis, 20 for column titles, then the display jumps. */
-  --text-micro: 0.8125rem;   /* 13px — meta, timestamps, labels */
-  --text-sm: 0.8125rem;      /* 13px */
-  --text-base: 0.9375rem;    /* 15px — the reading size */
-  --text-lg: 1.0625rem;      /* 17px */
-  --text-display-sm: 1.25rem;                          /* 20px — bar titles */
+  /* Type scale. Reading size is 15px; meta is fluid so it stays legible at
+     phone width without shouting at desktop. Display sizes are fluid. */
+  --text-micro: clamp(0.75rem, 0.25vw + 0.62rem, 0.8125rem);
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-lg: 1.0625rem;
+  --text-display-sm: 1.25rem;
   --text-display: clamp(1.9375rem, 1.5rem + 2vw, 2.5rem);
   --text-display-lg: clamp(2.5rem, 1.5rem + 4.5vw, 4rem);
+  --text-headline: clamp(2.5rem, 4.5vw + 0.75rem, 5.25rem);
+
+  /* Fluid layout — the landing's clamps, now app-wide. */
+  --pad-x: clamp(1.25rem, 4.5vw, 5rem);
+  --header-h: clamp(3.5rem, 6vh, 4.5rem);
+  --section-py: clamp(3rem, 8vh, 6rem);
+  --section-head-gap: clamp(1.5rem, 4vh, 3rem);
+  --feature-pad: clamp(1rem, 1.5vw, 1.75rem);
+  --btn-px: clamp(1.15rem, 1.4vw, 1.75rem);
+  --btn-py: clamp(0.6rem, 0.9vh, 0.85rem);
+  --btn-gap: clamp(0.5rem, 0.8vw, 0.75rem);
+  --corner: clamp(0.65rem, 0.4vw + 0.4rem, 0.95rem);
+  --checker-w: clamp(2.75rem, 4.5vw, 6.5rem);
+  --checker-h: clamp(1.35rem, 2.2vw, 3rem);
+  --globe: clamp(2.25rem, 2.5vw + 1rem, 3.25rem);
+  --icon: clamp(1rem, 0.6vw + 0.7rem, 1.35rem);
 
   --space-gutter: 1rem;
-  --space-section: clamp(2.5rem, 2rem + 2vw, 4rem);
+  --space-section: var(--section-py);
 
   --duration-fast: 140ms;
   --duration-normal: 240ms;
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
-}
 
-/* Lights out. Not charcoal: #000, with cards a bare step up and the same
-   blue doing the same jobs. */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper: #000000;
-    --paper-raised: #16181c;
-    --paper-sunken: #202327;
-
-    --ink: #e7e9ea;
-    --ink-muted: #71767b;
-    --ink-subtle: #5b6167;
-
-    --rule: #2f3336;
-    --rule-strong: #3e4247;
-
-    --wash: rgb(231 233 234 / 0.07);
-    --wash-strong: rgb(231 233 234 / 0.12);
-
-    --state-pending: #ffd400;
-    --state-pending-bg: rgb(255 212 0 / 0.12);
-  }
+  --shadow-lift: 0 48px 96px -24px rgb(0 0 0 / 0.9);
 }
 
 @theme inline {
@@ -126,8 +118,7 @@
   --radius-card: var(--radius-card);
   --radius-input: var(--radius-input);
 
-  /* Chirp is proprietary, so this is Chirp's own documented fallback chain —
-     which is what X actually renders in for most non-macOS visitors. */
+  /* No webfonts. Chirp's documented fallback chain — zero bytes, zero shift. */
   --font-sans:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
     sans-serif;
@@ -136,52 +127,59 @@
   --text-display-sm: var(--text-display-sm);
   --text-display: var(--text-display);
   --text-display-lg: var(--text-display-lg);
+  --text-headline: var(--text-headline);
+
+  --shadow-lift: var(--shadow-lift);
 }
 
 /* ===========================================================================
    Base
    =========================================================================== */
 
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: calc(var(--header-h) + 1rem);
+}
+
 body {
   background: var(--paper);
   color: var(--ink);
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
-    sans-serif;
+  font-family: var(--font-sans);
   font-size: var(--text-base);
-  line-height: 1.3125; /* X sets 15px/20px on body text */
+  line-height: 1.3125;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
 /* Every measurement on Roster — 10.42, 6-08.25, 2:14:03 — sits in a column
-   next to another measurement. Proportional figures make those columns ragged,
-   so tabular is the default and only prose opts out. */
+   next to another measurement. Tabular by default; only prose opts out. */
 :where(time, [data-numeric]) {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
 }
 
 ::selection {
-  background: var(--accent);
-  color: #ffffff;
+  background: var(--ink);
+  color: var(--paper);
 }
 
 /* A single visible focus treatment, never removed. */
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
   }
 }
 
@@ -189,39 +187,53 @@ body {
    Language utilities
    =========================================================================== */
 
-/* Display type: X has no serif — hierarchy is weight and tightness. */
+/* Display type: no serif — hierarchy is weight and tightness. */
 @utility font-display {
   font-weight: 800;
   letter-spacing: -0.01em;
 }
 
-/* Meta text: 13px, sentence case. (This replaces the old small-caps eyebrow —
-   X never shouts in uppercase; it mutes and shrinks instead.) */
+/* Meta text. Sentence case; never uppercase. */
 @utility label {
   font-size: var(--text-micro);
   font-weight: 400;
   line-height: 1.25;
 }
 
-/* The card: 16px corners, hairline border, flat. Sidebar modules and editor
-   sections use `raised` instead when they want X's grey module fill. */
+/* The corner bracket — the identity's frame mark. Pair with <Corner>. */
+@utility corner {
+  width: var(--corner);
+  height: var(--corner);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  flex-shrink: 0;
+}
+
+/* Surfaces. `sheet` is a hairline-bordered block on paper (formerly the
+   card); `raised` and `well` are the two fills. None are rounded. */
 @utility sheet {
   background: var(--paper);
   border: 1px solid var(--rule);
-  border-radius: var(--radius-card);
 }
 
 @utility raised {
   background: var(--paper-raised);
-  border-radius: var(--radius-card);
 }
 
 @utility well {
   background: var(--paper-sunken);
-  border-radius: var(--radius-card);
 }
 
-/* Rows and icons that respond to the pointer with a wash, X's only hover. */
+/* Lifted: the overlap surface — translucent paper, blur, deep shadow. */
+@utility lifted {
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-lift);
+}
+
+/* Rows and icons that respond to the pointer with a wash. */
 @utility wash-hover {
   transition: background-color var(--duration-fast) ease;
   &:hover {
@@ -229,25 +241,56 @@ body {
   }
 }
 
-/* Pill buttons. Three, exactly as X ships them:
-   btn-primary — the blue action;
-   btn-pill    — the inverted "Follow" pill (ink on paper);
-   btn-outline — the bordered secondary. */
+/* Buttons. Three, all `rounded-md`, all bold:
+   btn-primary — ink fill, paper text;
+   btn-outline — hairline, fills to ink on hover;
+   btn-pill    — the ink pill kept for the shell's one round action. */
 @utility btn-primary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: var(--btn-gap);
   min-height: 2.75rem;
-  padding-inline: 1.5rem;
+  padding: var(--btn-py) var(--btn-px);
   cursor: pointer;
-  border-radius: 9999px;
-  background: var(--accent);
-  color: #ffffff;
+  border-radius: var(--radius-input);
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
   font-size: var(--text-base);
   font-weight: 700;
-  transition: background-color var(--duration-fast) ease;
+  transition: opacity var(--duration-fast) ease;
   &:hover {
-    background: var(--accent-hover);
+    opacity: 0.9;
+  }
+  &:disabled {
+    cursor: default;
+    opacity: 0.5;
+  }
+}
+
+@utility btn-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--btn-gap);
+  min-height: 2.75rem;
+  padding: var(--btn-py) var(--btn-px);
+  cursor: pointer;
+  border-radius: var(--radius-input);
+  border: 1px solid var(--ink-muted);
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--text-base);
+  font-weight: 700;
+  transition:
+    background-color var(--duration-fast) ease,
+    color var(--duration-fast) ease,
+    border-color var(--duration-fast) ease;
+  &:hover {
+    background: var(--ink);
+    color: var(--paper);
+    border-color: var(--ink);
   }
   &:disabled {
     cursor: default;
@@ -273,26 +316,38 @@ body {
   }
 }
 
-@utility btn-outline {
+/* Ghost: text only, brightens. */
+@utility btn-ghost {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: var(--btn-gap);
   min-height: 2.75rem;
-  padding-inline: 1.5rem;
+  padding: var(--btn-py) var(--btn-px);
   cursor: pointer;
-  border-radius: 9999px;
-  border: 1px solid var(--rule-strong);
-  background: transparent;
-  color: var(--ink);
+  border-radius: var(--radius-input);
+  color: var(--ink-muted);
   font-size: var(--text-base);
   font-weight: 700;
-  transition: background-color var(--duration-fast) ease;
+  transition: color var(--duration-fast) ease;
   &:hover {
-    background-color: var(--wash);
+    color: var(--ink);
   }
 }
 
-/* The sticky column header: X's signature blurred glass bar. */
+/* Chip: the one pill shape — filters, tags, positions. */
+@utility chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  border: 1px solid var(--ink-muted);
+  font-size: var(--text-micro);
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+/* The glass bar: header and sticky column titles. */
 @utility bar-blur {
   background: color-mix(in srgb, var(--paper) 75%, transparent);
   backdrop-filter: blur(12px);
@@ -303,8 +358,6 @@ body {
   border-top: 1px solid var(--rule);
 }
 
-/* Screen-reader-only text, for the labels that carry meaning colour alone
-   would otherwise convey. */
 @utility sr-only-text {
   position: absolute;
   width: 1px;
@@ -315,4 +368,111 @@ body {
   clip-path: inset(50%);
   white-space: nowrap;
   border-width: 0;
+}
+
+/* Imagery placeholder — layered charcoal light on the identity's grid. */
+@utility placeholder {
+  background: radial-gradient(120% 90% at 25% 15%, #2a2d31 0%, #16181c 45%, #0a0b0c 100%);
+}
+
+@utility placeholder-sheen {
+  background: linear-gradient(115deg, transparent 35%, rgb(255 255 255 / 0.05) 50%, transparent 65%);
+}
+
+@utility bg-grid {
+  background-image:
+    linear-gradient(to right, rgb(100 116 139 / 0.18) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(100 116 139 / 0.18) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+/* ===========================================================================
+   Motion — compositor properties only; all off under reduced motion.
+   =========================================================================== */
+
+/* Scroll-in: pair with the <Reveal> component, which sets data-shown. */
+.reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition:
+    opacity 0.7s ease-out,
+    transform 0.7s var(--ease-out-expo);
+}
+.reveal[data-shown] {
+  opacity: 1;
+  transform: none;
+}
+
+/* Headline lines rise out of a clipped wrapper; the actions fade up after. */
+.hero-word {
+  animation: rise 1.1s var(--ease-out-expo) both;
+}
+.hero-cta {
+  animation: fade-up 0.9s var(--ease-out-expo) 0.6s both;
+}
+@keyframes rise {
+  from {
+    transform: translateY(110%);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .hero-word,
+  .hero-cta {
+    animation: none;
+  }
+}
+
+/* ===========================================================================
+   Print — a resume is a document. Public resume pages opt in with
+   `print-resume` on <main>; everything else prints as-is.
+   =========================================================================== */
+
+@media print {
+  :root {
+    --paper: #ffffff;
+    --paper-raised: #f5f5f5;
+    --paper-sunken: #e5e5e5;
+    --ink: #000000;
+    --ink-muted: #444444;
+    --ink-subtle: #777777;
+    --rule: #dddddd;
+    --rule-strong: #bbbbbb;
+    --accent: #000000;
+  }
+  body {
+    background: #fff;
+    color: #000;
+  }
+  .print-hidden {
+    display: none !important;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+  a {
+    text-decoration: none;
+    color: inherit;
+  }
 }

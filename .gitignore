@@ -44,3 +44,5 @@ next-env.d.ts
 
 # Visual-check screenshots (npm run shots)
 .shots/
+
+.data/

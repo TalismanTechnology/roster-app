@@ -1,12 +1,15 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 
 import "./globals.css";
 
 /**
  * No webfonts. The design language runs on Chirp's documented fallback stack
- * (declared in globals.css), which is what X itself renders in for most of
- * its visitors — and it costs zero bytes and zero layout shift. Hierarchy
+ * (declared in globals.css) — zero bytes and zero layout shift. Hierarchy
  * comes from weight (400 / 700 / 800) and tightness, not a second family.
+ *
+ * Dark only: the product is athletes photographed on black, and the interface
+ * is the same black so the photographs carry it. `color-scheme: dark` is set
+ * in CSS so native controls (selects, scrollbars) match.
  */
 
 export const metadata: Metadata = {
@@ -24,6 +27,11 @@ export const metadata: Metadata = {
   // indexed — auth, the editor, unlisted and private resumes — each say so in
   // their own metadata, which is the safer direction for a mistake to fail:
   // a forgotten override leaves a page findable, not an athlete invisible.
+};
+
+export const viewport: Viewport = {
+  themeColor: "#000000",
+  colorScheme: "dark",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
