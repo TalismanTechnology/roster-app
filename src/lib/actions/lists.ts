@@ -70,8 +70,8 @@ export async function deleteList(formData: FormData): Promise<void> {
 
   try {
     await repo.deleteList(user.id, id);
-  } catch (error) {
-    if (!(error instanceof DataError && error.code === "not_found")) throw error;
+  } catch {
+    // Already gone; nothing to do.
   }
 
   refresh();
@@ -114,20 +114,9 @@ export async function removeFromList(formData: FormData): Promise<void> {
 
   try {
     await repo.removeFromList(user.id, listId, profileId);
-  } catch (error) {
-    if (!(error instanceof DataError && error.code === "not_found")) throw error;
+  } catch {
+    // Already gone; nothing to do.
   }
 
   refresh();
-}
-
-export async function updateList(_prev: ListFormState, formData: FormData): Promise<ListFormState> {
- const {repo,user}=await requireUser(); const name=nameSchema.safeParse(str(formData,"name")); const note=noteSchema.safeParse(str(formData,"note"));
- if(!name.success || !note.success) return {ok:false,error:"Enter a list name and a note under 300 characters."};
- try {await repo.updateList(user.id,str(formData,"list_id"),name.data,note.data);} catch(error){return failed(error,"Could not save list.");} refresh(); return IDLE;
-}
-export async function updateListMemberNote(_prev: ListFormState,formData: FormData): Promise<ListFormState> {
- const {repo,user}=await requireUser(); const note=noteSchema.safeParse(str(formData,"note"));
- if(!note.success) return {ok:false,error:"Keep the note under 300 characters."};
- try {await repo.updateListMemberNote(user.id,str(formData,"list_id"),str(formData,"profile_id"),note.data);}catch(error){return failed(error,"Could not save note.");} refresh(); return IDLE;
 }

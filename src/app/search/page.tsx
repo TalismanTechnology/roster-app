@@ -38,7 +38,7 @@ type Filters = {
  * The repository applies the listing rule: public athletes only, verified
  * first. A signed-in recruiter can save any row to a list.
  */
-export default async function SearchPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+export default async function SearchPage({ searchParams }: PageProps<"/search">) {
   const params = await searchParams;
   const filters: Filters = {
     q: str(params.q),
@@ -74,7 +74,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
 
   return (
     <Site>
-      <main className="mx-auto w-full max-w-6xl px-4 sm:px-0">
+      <main style={{ paddingInline: "var(--pad-x)" }}>
         <header className="flex flex-col gap-4 py-8 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="label flex items-center gap-2 text-ink-muted">
@@ -91,7 +91,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
 
         <div className="grid gap-8 pb-16 lg:grid-cols-12">
           <Frame className="self-start lg:sticky lg:top-[calc(var(--header-h)+1rem)] lg:col-span-3">
-            <details open><summary className="min-h-11 cursor-pointer px-5 pt-4 text-sm font-semibold">Refine your search</summary><form method="GET" role="search" aria-label="Filters" className="flex flex-col gap-5" style={{ padding: "var(--feature-pad)" }}>
+            <form method="GET" role="search" aria-label="Filters" className="flex flex-col gap-5" style={{ padding: "var(--feature-pad)" }}>
               <Field label="Name or handle">
                 <TextInput name="q" type="search" defaultValue={filters.q ?? ""} placeholder="Reyes" />
               </Field>
@@ -125,7 +125,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
               </div>
               <Checkbox name="verified" value="1" defaultChecked={filters.verifiedOnly} label="Verified only" hint="At least one coach-verified entry." />
               <div className="flex items-center justify-between gap-3 border-t border-rule pt-4">
-                <button type="submit" className="btn-primary min-h-11 px-4 text-sm">
+                <button type="submit" className="btn-primary min-h-9 px-4 text-sm">
                   Search
                 </button>
                 {active.length > 0 && (
@@ -134,7 +134,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                   </Link>
                 )}
               </div>
-            </form></details>
+            </form>
           </Frame>
 
           <section aria-label="Results" className="min-w-0 lg:col-span-9">
@@ -145,7 +145,11 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
               </p>
               {active.length > 0 && (
                 <ul className="flex flex-wrap gap-2" aria-label="Active filters">
-                  {active.map(filter => <li key={filter.key}><Link className="chip inline-flex min-h-11 items-center gap-2" href={withoutFilter(filters, filter.key)} aria-label={`Remove ${filter.label} filter`}>{filter.label}<span aria-hidden>×</span></Link></li>)}
+                  {active.map((a) => (
+                    <li key={a} className="chip">
+                      {a}
+                    </li>
+                  ))}
                 </ul>
               )}
             </div>
@@ -239,14 +243,14 @@ function Pager({ page, hasMore, filters }: { page: number; hasMore: boolean; fil
   return (
     <nav aria-label="Pagination" className="flex justify-between border-t border-rule py-4">
       {page > 1 ? (
-        <Link href={to(page - 1)} className="btn-outline min-h-11 px-4 text-sm">
+        <Link href={to(page - 1)} className="btn-outline min-h-9 px-4 text-sm">
           Previous
         </Link>
       ) : (
         <span />
       )}
       {hasMore && (
-        <Link href={to(page + 1)} className="btn-outline min-h-11 px-4 text-sm">
+        <Link href={to(page + 1)} className="btn-outline min-h-9 px-4 text-sm">
           Next
         </Link>
       )}
@@ -254,17 +258,15 @@ function Pager({ page, hasMore, filters }: { page: number; hasMore: boolean; fil
   );
 }
 
-function describe(f: Filters): {key: keyof Filters; label: string}[] {
- const values: {key: keyof Filters; label: string | null | false}[] = [
-  {key:"q",label:f.q ? `“${f.q}”` : null},{key:"sport",label:f.sport ? sportName(f.sport) : null},{key:"level",label:f.level ? levelLabel(f.level as AthleteLevel) : null},{key:"gradYear",label:f.gradYear ? `Class of ${f.gradYear}` : null},{key:"region",label:f.region},{key:"verifiedOnly",label:f.verifiedOnly && "Verified only"}
- ];
- return values.filter((item): item is {key: keyof Filters; label: string} => Boolean(item.label));
-}
-function withoutFilter(filters: Filters, remove: keyof Filters) {
- const params = new URLSearchParams();
- const keys: Record<keyof Filters,string> = {q:"q",sport:"sport",level:"level",gradYear:"class",region:"state",verifiedOnly:"verified"};
- for (const key of Object.keys(keys) as (keyof Filters)[]) { if (key !== remove && filters[key]) params.set(keys[key],key==="verifiedOnly" ? "1" : String(filters[key])); }
- return `/search?${params.toString()}`;
+function describe(f: Filters): string[] {
+  return [
+    f.q && `“${f.q}”`,
+    f.sport && sportName(f.sport),
+    f.level && levelLabel(f.level as AthleteLevel),
+    f.gradYear && `Class of ${f.gradYear}`,
+    f.region,
+    f.verifiedOnly && "Verified only",
+  ].filter((x): x is string => Boolean(x));
 }
 
 function str(value: string | string[] | undefined): string | null {

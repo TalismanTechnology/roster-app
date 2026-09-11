@@ -20,11 +20,10 @@ import { isSupabaseConfigured } from "@/lib/supabase/config";
  */
 
 /** Routes that require a session. Everything else is public. */
-const PROTECTED_PATHS = ["/app", "/resume", "/settings", "/onboarding", "/lists"];
+const PROTECTED_PATHS = ["/resume", "/settings", "/onboarding", "/lists"];
 
 function localMode(): boolean {
   const forced = process.env.ROSTER_DATA;
-  if (process.env.NODE_ENV === "production" && (forced === "local" || !isSupabaseConfigured())) throw new Error("Production requires Supabase configuration.");
   if (forced === "local") return true;
   if (forced === "supabase") return false;
   return !isSupabaseConfigured();
@@ -80,8 +79,7 @@ function toSignIn(request: NextRequest, pathname: string) {
   const signIn = request.nextUrl.clone();
   signIn.pathname = "/sign-in";
   // Preserve where they were headed so sign-in can return them there.
-  signIn.search = "";
-  signIn.searchParams.set("next", pathname + request.nextUrl.search);
+  signIn.searchParams.set("next", pathname);
   return NextResponse.redirect(signIn);
 }
 

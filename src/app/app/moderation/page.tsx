@@ -1,9 +1,0 @@
-import { notFound } from "next/navigation";
-import { ReportEvidence } from "@/components/network/ReportEvidence";
-import { networkContext } from "@/components/network/server";
-import { EmptyState, PageHeading, Timestamp } from "@/components/network/primitives";
-import { ActionForm } from "@/components/network/ActionForm";
-export default async function ModerationPage() {
- const { repo } = await networkContext(); if (!await repo.isModerator()) notFound(); const reports = await repo.getReports();
- return <div className="network-page"><PageHeading eyebrow="COMMUNITY CARE / STAFF" title="Review reports.">Every action needs a reason. Content can be restored after review.</PageHeading>{!reports.length && <EmptyState title="No reports to review.">Reports from the community appear here.</EmptyState>}<div className="network-feed">{reports.map(report => <article className="network-panel network-moderation" key={report.id}><div className="network-row"><span className="network-eyebrow">{report.targetType} · {report.resolvedAt ? "Resolved" : "Needs review"}</span><Timestamp value={report.createdAt} /></div><h2>{report.reason}</h2><details><summary>Review evidence</summary><ReportEvidence report={report} /></details><ActionForm operation="moderate" fields={{ id: report.targetId, targetType: report.targetType, reportId: report.id }} label="Apply decision" confirm="Apply this moderation decision? This action is recorded."><label className="network-label">Decision<select name="decision"><option value="remove">{report.targetType === "member" ? "Suspend member" : "Remove content"}</option><option value="restore">{report.targetType === "member" ? "Restore member" : "Restore content"}</option><option value="resolve">Resolve report without changing content</option></select></label><label className="network-label">Reason<textarea name="reason" required minLength={5} maxLength={1000} rows={2} /></label></ActionForm></article>)}</div></div>;
-}

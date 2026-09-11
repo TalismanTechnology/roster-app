@@ -49,7 +49,7 @@ export function IdentityBand({
   return (
     <section className="relative overflow-hidden border-b border-rule" aria-label="Identity">
       <div className="print-hidden absolute inset-0" aria-hidden>
-        {profile.cover_url ? <img src={profile.cover_url} alt="" className="absolute inset-0 size-full object-cover opacity-50" /> : <Img id="10" className="absolute inset-0" imgClassName="opacity-30" sizes="100vw" quiet />}
+        <Img id="10" className="absolute inset-0" imgClassName="opacity-30" sizes="100vw" quiet />
         <div className="absolute inset-0 bg-gradient-to-b from-paper/60 via-paper/70 to-paper" />
       </div>
 
@@ -58,7 +58,6 @@ export function IdentityBand({
         style={{ paddingInline: "var(--pad-x)", paddingBlock: "clamp(2rem, 6vh, 4.5rem)" }}
       >
         <div className="@3xl:col-span-8">
-          {profile.avatar_url && <img src={profile.avatar_url} alt={`${profile.display_name} profile photo`} width={96} height={96} className="mb-5 size-24 rounded-full border-2 border-rule-strong object-cover" />}
           <p className="label flex items-center gap-2 text-ink-muted">
             <Corner d={CORNER.tl} />
             {label}
@@ -69,7 +68,7 @@ export function IdentityBand({
             {profile.identity_verified_at && <Verified className="text-[0.5em]" label="Identity verified" />}
           </h1>
 
-          <p className="mt-2 text-ink-muted">@{profile.handle}</p>
+          <p className="mt-2 text-ink-muted">roster.us/{profile.handle}</p>
 
           {roster.length > 0 && <p className="mt-5 text-lg font-bold">{roster.join(" · ")}</p>}
           {context.length > 0 && <p className="mt-1 text-ink-muted">{context.join(" · ")}</p>}
@@ -109,7 +108,7 @@ export function IdentityBand({
                   Contact
                 </a>
               )}
-              {profile.visibility !== "private" && <ShareBar handle={profile.handle} />}
+              <ShareBar handle={profile.handle} />
             </div>
           </div>
         </Frame>

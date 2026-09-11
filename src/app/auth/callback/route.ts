@@ -13,8 +13,8 @@ export async function GET(request: NextRequest) {
 
   // Relative continue-path only — same reasoning as the sign-in action: this
   // URL arrives from an email and must not become an open redirect.
-  const rawNext = searchParams.get("next") ?? "/app";
-  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") && !/[\\\r\n]/.test(rawNext) ? rawNext : "/app";
+  const rawNext = searchParams.get("next") ?? "/onboarding";
+  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/onboarding";
 
   if (code) {
     const supabase = await createClient();

@@ -13,8 +13,6 @@ export type DataMode = "local" | "supabase";
  */
 export function dataMode(): DataMode {
   const forced = process.env.ROSTER_DATA;
-  if (forced === "local" && process.env.NODE_ENV === "production") throw new Error("Local data mode is disabled in production.");
-  if (process.env.NODE_ENV === "production" && !isSupabaseConfigured()) throw new Error("Supabase configuration is required in production.");
   if (forced === "local" || forced === "supabase") return forced;
   return isSupabaseConfigured() ? "supabase" : "local";
 }

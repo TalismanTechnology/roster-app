@@ -1,8 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
-
-import { useFormDraft } from "@/components/ui/useFormDraft";
+import { useActionState, useEffect, useState, useTransition } from "react";
 
 import { checkHandle, completeOnboarding, type FormState } from "@/lib/actions/resume";
 import { Field, Select, TextInput } from "@/components/ui/fields";
@@ -14,7 +12,7 @@ import { SPORTS } from "@/lib/sports";
 
 const IDLE: FormState = { ok: false, error: null };
 
-type Availability = "error" | "idle" | "checking" | "available" | "taken" | "invalid";
+type Availability = "idle" | "checking" | "available" | "taken" | "invalid";
 
 const STEPS = [
   { n: "01", title: "Claim your handle" },
@@ -28,49 +26,40 @@ const STEPS = [
  * nothing the server would have refused anyway. The handle is checked live
  * against the repository as the athlete types.
  */
-export function OnboardingForm({next = "/app"}: {next?: string}) {
-  const [state, formAction, pending] = useActionState(completeOnboarding, IDLE);
-  const form = useRef<HTMLFormElement>(null);
-  const captureDraft = useFormDraft(form, state, pending, Boolean(state.error));
+export function OnboardingForm() {
+  const [state, formAction] = useActionState(completeOnboarding, IDLE);
   const [step, setStep] = useState(0);
   const [handle, setHandle] = useState("");
-  const [kind, setKind] = useState("athlete");
-  const [school, setSchool] = useState("");
-  const [retry, setRetry] = useState(0);
   const [name, setName] = useState("");
-  const [checkedHandle, setCheckedHandle] = useState<{handle: string; retry: number; result: Availability} | null>(null);
-  const normalizedHandle = handle.trim().toLowerCase();
-  const validHandle = HANDLE_PATTERN.test(normalizedHandle) && !isReservedHandle(normalizedHandle);
-  const availability: Availability = !normalizedHandle ? "idle" : !validHandle ? "invalid" :
-    checkedHandle?.handle === normalizedHandle && checkedHandle.retry === retry ? checkedHandle.result : "checking";
+  const [availability, setAvailability] = useState<Availability>("idle");
+  const [, startCheck] = useTransition();
 
-  // The current input derives idle/invalid/checking immediately; only matching
-  // asynchronous responses can update the availability result.
+  // Debounced live availability. Local validation first so the common
+  // typos never hit the server.
   useEffect(() => {
-    if (!validHandle) return;
-    let cancelled = false;
-    const timer = setTimeout(async () => {
-      try {
-        const result = await checkHandle(normalizedHandle);
-        if (!cancelled) setCheckedHandle({handle: normalizedHandle, retry, result});
-      } catch {
-        if (!cancelled) setCheckedHandle({handle: normalizedHandle, retry, result: "error"});
-      }
+    const h = handle.trim().toLowerCase();
+    if (h === "") {
+      setAvailability("idle");
+      return;
+    }
+    if (!HANDLE_PATTERN.test(h) || isReservedHandle(h)) {
+      setAvailability("invalid");
+      return;
+    }
+    setAvailability("checking");
+    const t = setTimeout(() => {
+      startCheck(async () => {
+        const result = await checkHandle(h);
+        setAvailability(result);
+      });
     }, 350);
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [normalizedHandle, validHandle, retry]);
+    return () => clearTimeout(t);
+  }, [handle]);
 
-  const canAdvance = step === 0 ? availability === "available" : step === 1 ? name.trim().length >= 2 && (kind === "athlete" || school.trim().length > 0) : true;
+  const canAdvance = step === 0 ? availability === "available" : step === 1 ? name.trim().length >= 2 : true;
 
   return (
-    <form ref={form} onSubmit={event => captureDraft(event.currentTarget)} onReset={event=>event.preventDefault()} onInvalidCapture={event => {
-      event.preventDefault();
-      const field = event.target as HTMLInputElement;
-      const targetStep = field.closest<HTMLElement>("[data-step]")?.dataset.step;
-      if (targetStep !== undefined) setStep(Number(targetStep));
-      requestAnimationFrame(() => field.focus());
-    }} action={formAction} className="flex flex-col gap-8">
-      <input type="hidden" name="next" value={next} />
+    <form action={formAction} className="flex flex-col gap-8">
       {/* Progress: the numerals, the current one in ink. */}
       <ol className="flex items-center gap-4" aria-label="Steps">
         {STEPS.map((s, i) => (
@@ -89,12 +78,11 @@ export function OnboardingForm({next = "/app"}: {next?: string}) {
       <h2 className="font-display text-display leading-none tracking-tight">{STEPS[step].title}</h2>
 
       {/* Step 01 — handle. Kept mounted at every step so the value posts. */}
-      <div data-step="0" className={step === 0 ? "flex flex-col gap-6" : "hidden"}>
+      <div className={step === 0 ? "flex flex-col gap-6" : "hidden"}>
         <Field label="Handle" hint="Your resume's address. Lowercase letters, numbers, underscores.">
           <div className="relative">
-            <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-lg text-ink-subtle">@</span>
+            <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-lg text-ink-subtle">roster.us/</span>
             <TextInput
-              data-controlled="true"
               name="handle"
               value={handle}
               onChange={(e) => setHandle(e.target.value)}
@@ -104,17 +92,16 @@ export function OnboardingForm({next = "/app"}: {next?: string}) {
               autoCorrect="off"
               spellCheck={false}
               autoFocus
-              style={{ paddingLeft: "2.5rem" }}
+              style={{ paddingLeft: "6.1rem" }}
               aria-describedby="handle-status"
             />
           </div>
         </Field>
         <p id="handle-status" role="status" className="label flex min-h-5 items-center gap-1.5">
-          {availability === "error" && <span>Could not check this handle. <button type="button" className="underline" onClick={()=>setRetry(value=>value+1)}>Retry</button></span>}
           {availability === "checking" && <span className="text-ink-muted">Checking…</span>}
           {availability === "available" && (
             <>
-              <Verified label="Available" /> <span>@{handle.trim().toLowerCase()} is available.</span>
+              <Verified /> <span>roster.us/{handle.trim().toLowerCase()} is yours.</span>
             </>
           )}
           {availability === "taken" && <span className="text-disputed">That handle is taken.</span>}
@@ -125,12 +112,9 @@ export function OnboardingForm({next = "/app"}: {next?: string}) {
       </div>
 
       {/* Step 02 — identity */}
-      <div data-step="1" className={step === 1 ? "flex flex-col gap-6" : "hidden"}>
-        <Field label="Account type"><Select data-controlled="true" name="account_kind" value={kind} onChange={e=>setKind(e.target.value)}><option value="athlete">Athlete</option><option value="coach">Coach</option><option value="recruiter">Recruiter</option></Select></Field>
-        <Field label="School or organization"><TextInput data-controlled="true" name="school" value={school} onChange={event=>setSchool(event.target.value)} required={kind !== "athlete"} /></Field>
+      <div className={step === 1 ? "flex flex-col gap-6" : "hidden"}>
         <Field label="Your name">
           <TextInput
-            data-controlled="true"
             name="display_name"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -140,9 +124,9 @@ export function OnboardingForm({next = "/app"}: {next?: string}) {
             maxLength={80}
           />
         </Field>
-        <div className={kind === "athlete" ? "grid gap-6 sm:grid-cols-2" : "hidden"}>
+        <div className="grid gap-6 sm:grid-cols-2">
           <Field label="Sport">
-            <Select disabled={kind !== "athlete"} name="primary_sport" defaultValue="football">
+            <Select name="primary_sport" defaultValue="football">
               {SPORTS.map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
@@ -151,7 +135,7 @@ export function OnboardingForm({next = "/app"}: {next?: string}) {
             </Select>
           </Field>
           <Field label="Level">
-            <Select disabled={kind !== "athlete"} name="level" required={kind === "athlete"} defaultValue="high_school">
+            <Select name="level" required defaultValue="high_school">
               {LEVEL_OPTIONS.map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
@@ -160,13 +144,13 @@ export function OnboardingForm({next = "/app"}: {next?: string}) {
             </Select>
           </Field>
         </div>
-        {kind === "athlete" && <Field label="Class of" hint="The year you graduate. Recruiters filter on it.">
+        <Field label="Class of" hint="The year you graduate. Recruiters filter on it.">
           <TextInput name="grad_year" type="number" min={1950} max={2100} inputMode="numeric" placeholder="2027" />
-        </Field>}
+        </Field>
       </div>
 
       {/* Step 03 — visibility */}
-      <div data-step="2" className={step === 2 ? "flex flex-col gap-4" : "hidden"}>
+      <div className={step === 2 ? "flex flex-col gap-4" : "hidden"}>
         {(
           [
             ["public", "Public", "In search, open to anyone. This is how you get found."],
@@ -187,9 +171,6 @@ export function OnboardingForm({next = "/app"}: {next?: string}) {
             {i === 0 && <span className="label absolute top-4 right-4 text-ink-muted">Recommended</span>}
           </label>
         ))}
-        <Field label="Date of birth" hint="Private. Used to check eligibility for the network."><TextInput name="date_of_birth" type="date" required /></Field>
-        <p className="text-sm leading-relaxed text-ink-muted">Share work you have the right to share, respect other members, and keep personal information private. Harassment, impersonation, and unsafe content are not allowed. You can block members and report content from the app.</p>
-        <label className="flex gap-3"><input type="checkbox" name="accept_network" required /> I accept the network rules and agree to join the Roster network.</label>
         <p className="label mt-2 text-ink-muted">You can change this any time from your resume.</p>
       </div>
 
@@ -213,7 +194,7 @@ export function OnboardingForm({next = "/app"}: {next?: string}) {
             Continue
           </button>
         ) : (
-          <SubmitButton pendingLabel="Creating…">{kind === "athlete" ? "Create my resume" : "Create my profile"}</SubmitButton>
+          <SubmitButton pendingLabel="Creating…">Create my resume</SubmitButton>
         )}
       </div>
 

@@ -7,7 +7,11 @@ import { getRepository } from "@/lib/data";
 import { getCurrentUser } from "@/lib/data/auth";
 import { DataError } from "@/lib/data/types";
 
-/** Identity is checked again inside the repository and the atomic database RPC. */
+/**
+ * A coach's answer to a verification request. No account required: the
+ * token in the link is the authority, and the repository refuses the
+ * athlete's own session, a used link, and an expired one.
+ */
 
 export type VerifyFormState = { ok: boolean; error: string | null; outcome?: "verified" | "disputed" };
 

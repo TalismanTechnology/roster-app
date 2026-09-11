@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { Verified } from "@/components/ui/marks";
 import type { CoachContact, FilmClip, Profile, RecordEntry } from "@/lib/database.types";
 
 export type SectionId = "identity" | "record" | "film" | "academics" | "references" | "contact" | "visibility" | "requests";
@@ -29,7 +30,7 @@ export function buildChecklist(profile: Profile, entries: RecordEntry[], film: F
       id: "record",
       label: "Record",
       isDone: entries.length >= 3,
-      why: "Add three results, achievements, or milestones to tell your story.",
+      why: "Three entries is the minimum that reads as a record, not a claim.",
     },
     {
       id: "film",
@@ -41,7 +42,7 @@ export function buildChecklist(profile: Profile, entries: RecordEntry[], film: F
       id: "academics",
       label: "Academics",
       isDone: profile.gpa !== null,
-      why: "Help coaches understand your academic fit.",
+      why: "A coach who can't qualify you academically stops reading.",
     },
     {
       id: "references",
@@ -55,7 +56,12 @@ export function buildChecklist(profile: Profile, entries: RecordEntry[], film: F
       isDone: Boolean(profile.contact_email),
       why: "Without it a recruiter who likes what they see can't reach you.",
     },
-
+    {
+      id: "visibility",
+      label: "Visibility",
+      isDone: profile.visibility === "public" && profile.is_recruitable,
+      why: "Only a public, recruitable resume is listed in search with your contact details.",
+    },
   ];
 }
 
@@ -63,10 +69,74 @@ export function firstUnfinished(items: ChecklistItem[]): SectionId {
   return items.find((i) => !i.isDone)?.id ?? "record";
 }
 
-/** Completeness measures content, independently of publication settings. */
-export function Checklist({ items }: { items: ChecklistItem[]; active?: SectionId; pendingRequests?: number }) {
-  const done = items.filter(item => item.isDone).length;
-  const pct = Math.round(done / items.length * 100);
-  const next = items.find(item => !item.isDone);
-  return <section className="workspace-checklist" aria-label="Resume completeness"><div><p className="text-sm font-semibold">{done} of {items.length} content sections ready</p><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-paper-sunken" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Content completeness"><div className="h-full bg-ink" style={{ width: `${pct}%` }} /></div><p className="mt-2 text-xs text-ink-muted">Publishing is your choice and does not affect completeness.</p></div><div>{next ? <><p className="text-xs font-bold uppercase tracking-wider text-ink-muted">Suggested next step</p><Link href={`/resume?section=${next.id}`} className="mt-1 inline-flex min-h-11 items-center text-sm font-semibold">Add {next.label.toLowerCase()} →</Link><p className="text-xs leading-relaxed text-ink-muted">{next.why}</p></> : <p className="text-sm text-ink-muted">Your content is ready. Keep your record current as your season develops.</p>}</div></section>;
+/** The checklist as a strip: a progress bar, then each item as a link. */
+export function Checklist({ items, active, pendingRequests = 0 }: { items: ChecklistItem[]; active: SectionId; pendingRequests?: number }) {
+  const done = items.filter((i) => i.isDone).length;
+  const pct = Math.round((done / items.length) * 100);
+  const next = items.find((i) => !i.isDone);
+
+  return (
+    <section aria-label="Resume checklist" className="panel">
+      <div className="flex flex-col gap-4" style={{ padding: "var(--feature-pad)" }}>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+          <p className="font-display text-display-sm">
+            {pct === 100 ? "Your resume is complete." : `${done} of ${items.length} sections done.`}
+          </p>
+          {next ? (
+            <p className="text-sm text-ink-muted">
+              Next:{" "}
+              <Link href={`/resume?section=${next.id}`} className="font-bold text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+                {next.label}
+              </Link>{" "}
+              — {next.why}
+            </p>
+          ) : (
+            <p className="text-sm text-ink-muted">Keep it current: new results, new film, every season.</p>
+          )}
+        </div>
+
+        <div className="h-1.5 w-full overflow-hidden bg-paper-sunken" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Completeness">
+          <div className="h-full bg-ink transition-[width] duration-(--duration-normal)" style={{ width: `${pct}%` }} />
+        </div>
+
+        <ol className="-mx-1 flex flex-wrap gap-1">
+          {items.map((i) => (
+            <li key={i.id}>
+              <Link
+                href={`/resume?section=${i.id}`}
+                aria-current={i.id === active ? "page" : undefined}
+                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-bold transition-colors ${
+                  i.id === active ? "bg-ink text-paper" : "text-ink-muted hover:bg-wash hover:text-ink"
+                }`}
+              >
+                {i.isDone ? (
+                  <Verified className={i.id === active ? "text-paper" : ""} label="Done" />
+                ) : (
+                  <span className="size-[1em] rounded-full border border-current opacity-60" aria-label="Not done" role="img" />
+                )}
+                {i.label}
+              </Link>
+            </li>
+          ))}
+          {/* Not a completeness item, but the phone has no other way to it. */}
+          <li className="lg:hidden">
+            <Link
+              href="/resume?section=requests"
+              aria-current={active === "requests" ? "page" : undefined}
+              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-bold transition-colors ${
+                active === "requests" ? "bg-ink text-paper" : "text-ink-muted hover:bg-wash hover:text-ink"
+              }`}
+            >
+              Requests
+              {pendingRequests > 0 && (
+                <span className="rounded-full bg-pending-bg px-1.5 text-pending" data-numeric>
+                  {pendingRequests}
+                </span>
+              )}
+            </Link>
+          </li>
+        </ol>
+      </div>
+    </section>
+  );
 }

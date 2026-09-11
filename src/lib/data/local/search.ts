@@ -46,9 +46,7 @@ export function searchProfiles(profiles: Profile[], params: SearchParams): Profi
   });
 
   const start = (page - 1) * pageSize;
-  return matches.slice(start, start + pageSize).map(profile => profile.is_recruitable
-    ? profile
-    : {...profile, contact_email: null, phone: null});
+  return matches.slice(start, start + pageSize);
 }
 
 function bigrams(text: string): Map<string, number> {

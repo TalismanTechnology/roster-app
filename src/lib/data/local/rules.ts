@@ -64,17 +64,20 @@ export function canSeeCoachContact(
   );
 }
 
-/** Basic request lifecycle checks; repository additionally verifies coach role and invited email. */
+/**
+ * `verifications_insert`, adapted to the by-link flow: whoever holds a live
+ * token may decide — except the athlete, who can never verify their own
+ * record no matter how they got the link.
+ */
 export function canRespondToRequest(
   request: VerificationRequest,
   responderUserId: string | null,
   now = new Date(),
-): { ok: true } | { ok: false; reason: "used" | "expired" | "self" | "signed_out" } {
+): { ok: true } | { ok: false; reason: "used" | "expired" | "self" } {
   if (request.status !== "pending") return { ok: false, reason: "used" };
-  if (new Date(request.expires_at) <= now) return { ok: false, reason: "expired" };
+  if (new Date(request.expires_at) < now) return { ok: false, reason: "expired" };
   if (responderUserId !== null && responderUserId === request.profile_id) {
     return { ok: false, reason: "self" };
   }
-  if (!responderUserId) return {ok:false,reason:"signed_out"};
   return { ok: true };
 }

@@ -4,9 +4,6 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
-import { eligibleAge } from "@/lib/age";
-import { safeAuthReturn } from "@/lib/auth-return";
-import { getNetworkRepository } from "@/lib/network";
 import { getRepository } from "@/lib/data";
 import { getCurrentUser } from "@/lib/data/auth";
 import { DataError } from "@/lib/data/types";
@@ -82,8 +79,6 @@ const LEVELS: AthleteLevel[] = [
 ];
 
 const onboardingSchema = z.object({
-  account_kind: z.enum(["athlete", "coach", "recruiter"]),
-  school: optionalText,
   handle: z
     .string()
     .trim()
@@ -91,7 +86,7 @@ const onboardingSchema = z.object({
     .regex(HANDLE_PATTERN, "Handles are 3–30 characters: lowercase letters, numbers, underscores.")
     .refine((handle) => !isReservedHandle(handle), "That handle is reserved."),
   display_name: z.string().trim().min(2, "Enter your name.").max(80),
-  level: z.enum(LEVELS as [AthleteLevel, ...AthleteLevel[]]).nullable(),
+  level: z.enum(LEVELS as [AthleteLevel, ...AthleteLevel[]]),
   primary_sport: optionalText,
   grad_year: optionalNumber(z.number().int().min(1950).max(2100)),
   visibility: z.enum(["private", "unlisted", "public"] satisfies ProfileVisibility[]).default("public"),
@@ -101,13 +96,11 @@ export async function completeOnboarding(_prev: FormState, formData: FormData): 
   const { repo, user } = await requireUser();
 
   const parsed = onboardingSchema.safeParse({
-    account_kind: str(formData,"account_kind") || "athlete",
-    school: str(formData,"school"),
     handle: str(formData, "handle"),
     display_name: str(formData, "display_name"),
-    level: str(formData,"account_kind") === "athlete" ? str(formData,"level") : null,
-    primary_sport: str(formData,"account_kind") === "athlete" ? str(formData,"primary_sport") : "",
-    grad_year: str(formData,"account_kind") === "athlete" ? str(formData,"grad_year") : "",
+    level: str(formData, "level"),
+    primary_sport: str(formData, "primary_sport"),
+    grad_year: str(formData, "grad_year"),
     visibility: str(formData, "visibility") || "public",
   });
 
@@ -115,19 +108,13 @@ export async function completeOnboarding(_prev: FormState, formData: FormData): 
     return { ok: false, error: firstIssue(parsed.error) };
   }
 
-  if (parsed.data.account_kind === "athlete" && (!parsed.data.level || !parsed.data.primary_sport)) return {ok:false,error:"Choose your sport and level."};
-  if (parsed.data.account_kind !== "athlete" && !parsed.data.school) return {ok:false,error:"Enter your school or organization."};
-  if (str(formData,"accept_network") !== "on" || !eligibleAge(str(formData,"date_of_birth"))) return {ok:false,error:"Enter an eligible date of birth (13 or older) and accept the network rules."};
   try {
-    const {school,...profile} = parsed.data;
-    if (!(await repo.getProfileById(user.id))) await repo.createProfile({ id: user.id, ...profile });
-    if (school) await repo.updateProfile(user.id,{school});
-    await (await getNetworkRepository()).joinNetwork(str(formData,"date_of_birth"));
+    await repo.createProfile({ id: user.id, ...parsed.data });
   } catch (error) {
-    return failed(error, "Could not create your profile. Try again.");
+    return failed(error, "Could not create your resume. Try again.");
   }
 
-  redirect(safeAuthReturn(formData.get("next")));
+  redirect("/resume");
 }
 
 /** Live availability for the onboarding form. Read-only; safe to call freely. */
@@ -358,8 +345,8 @@ export async function deleteAchievement(formData: FormData): Promise<void> {
 
   try {
     await repo.deleteEntry(user.id, id.data);
-  } catch (error) {
-    if (!(error instanceof DataError && error.code === "not_found")) throw error;
+  } catch {
+    // A stale form pointing at a deleted row: nothing to do.
   }
 
   revalidatePath("/resume");
@@ -442,8 +429,8 @@ export async function deleteFilm(formData: FormData): Promise<void> {
 
   try {
     await repo.deleteFilm(user.id, id.data);
-  } catch (error) {
-    if (!(error instanceof DataError && error.code === "not_found")) throw error;
+  } catch {
+    // Stale form; nothing to do.
   }
 
   revalidatePath("/resume");
@@ -456,8 +443,8 @@ export async function featureFilm(formData: FormData): Promise<void> {
 
   try {
     await repo.featureFilm(user.id, id.data);
-  } catch (error) {
-    if (!(error instanceof DataError && error.code === "not_found")) throw error;
+  } catch {
+    // Stale form; nothing to do.
   }
 
   revalidatePath("/resume");
@@ -509,27 +496,9 @@ export async function deleteCoach(formData: FormData): Promise<void> {
 
   try {
     await repo.deleteCoach(user.id, id.data);
-  } catch (error) {
-    if (!(error instanceof DataError && error.code === "not_found")) throw error;
+  } catch {
+    // Stale form; nothing to do.
   }
 
   revalidatePath("/resume");
-}
-
-export async function editFilm(_prev: FormState, formData: FormData): Promise<FormState> {
-  const {repo,user} = await requireUser();
-  const id = str(formData,"id");
-  const parsed = filmSchema.safeParse({title:str(formData,"title"), url:str(formData,"url"), season:str(formData,"season")});
-  if (!id || !parsed.success) return {ok:false,error:!parsed.success ? firstIssue(parsed.error) : "Item not found."};
-  try { await repo.updateFilm(user.id,id,parsed.data); } catch(error) {return failed(error,"Could not save.");}
-  revalidatePath("/resume"); revalidatePath("/app/resume"); return IDLE;
-}
-
-export async function editCoach(_prev: FormState, formData: FormData): Promise<FormState> {
-  const {repo,user} = await requireUser();
-  const id = str(formData,"id");
-  const parsed = coachSchema.safeParse({name:str(formData,"name"), role:str(formData,"role"), org_name:str(formData,"org_name"), email:str(formData,"email"), phone:str(formData,"phone")});
-  if (!id || !parsed.success) return {ok:false,error:!parsed.success ? firstIssue(parsed.error) : "Item not found."};
-  try { await repo.updateCoach(user.id,id,parsed.data); } catch(error) {return failed(error,"Could not save.");}
-  revalidatePath("/resume"); revalidatePath("/app/resume"); return IDLE;
 }

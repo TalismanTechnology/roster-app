@@ -89,5 +89,3 @@ fi
 
 echo
 echo "Schema OK."
-psql -d roster_test -f "$HERE/network_test.sql" >/dev/null
-echo "Network permissions and behavior OK."

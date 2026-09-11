@@ -1,4 +1,3 @@
-import type { RecruiterList, VerificationRequest, VerificationRequestDetail } from "./data/types";
 /**
  * Database types.
  *
@@ -218,9 +217,6 @@ type Row<T> = {
 export type Database = {
   public: {
     Tables: {
-      recruiter_lists: Row<Omit<RecruiterList, "member_count">>;
-      recruiter_list_members: Row<{list_id: string; profile_id: string; note: string | null; added_at: string}>;
-      verification_requests: Row<Omit<VerificationRequest, "token"> & {token_hash: string}>;
       profiles: Row<Profile>;
       achievements: Row<Achievement>;
       organizations: Row<Organization>;
@@ -234,13 +230,6 @@ export type Database = {
       record_entries: { Row: RecordEntry; Relationships: [] };
     };
     Functions: {
-      get_profile: {Args: {target_id?: string; target_handle?: string}; Returns: Profile[]};
-      create_verification_request: {Args: {achievement: string; coach: string; token_digest: string}; Returns: VerificationRequest};
-      verification_request_detail: {Args: {token_digest: string}; Returns: VerificationRequestDetail | null};
-      respond_verification_request: {Args: {token_digest: string; decision: string; response_note: string | null}; Returns: void};
-      coach_verification_requests: {Args: Record<string, never>; Returns: VerificationRequest[]};
-      feature_film: {Args: {clip: string}; Returns: void};
-      handle_available: {Args: {candidate: string}; Returns: boolean};
       record_profile_view: { Args: { target: string }; Returns: void };
       search_athletes: {
         Args: {

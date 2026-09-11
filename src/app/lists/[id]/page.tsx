@@ -2,8 +2,6 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
-import { RowAction } from "@/components/editor/EditorForm";
-import { EditListForm, MemberNoteForm } from "@/components/lists/ListForms";
 import { Site } from "@/components/shell/Site";
 import { Corner, CORNER, Verified } from "@/components/ui/marks";
 import { deleteList, removeFromList } from "@/lib/actions/lists";
@@ -18,7 +16,7 @@ export const metadata: Metadata = {
 };
 
 /** One list: the athletes on it, each a row like search, with a remove. */
-export default async function ListPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ListPage({ params }: PageProps<"/lists/[id]">) {
   const { id } = await params;
   const user = await getCurrentUser();
   if (!user) redirect("/sign-in?next=/lists");
@@ -31,7 +29,7 @@ export default async function ListPage({ params }: { params: Promise<{ id: strin
 
   return (
     <Site>
-      <main className="mx-auto w-full max-w-4xl py-6 pb-16">
+      <main className="mx-auto w-full max-w-4xl" style={{ paddingInline: "var(--pad-x)", paddingBlock: "var(--section-py)" }}>
         <header className="flex flex-col gap-4 pb-8 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="label flex items-center gap-2 text-ink-muted">
@@ -44,11 +42,13 @@ export default async function ListPage({ params }: { params: Promise<{ id: strin
             <h1 className="font-display text-display-lg mt-4 leading-[0.95] tracking-tight">{list.name}</h1>
             {list.note && <p className="mt-3 max-w-xl text-ink-muted">{list.note}</p>}
           </div>
-          <RowAction action={deleteList} fields={{ list_id: list.id }} label="Delete list" confirm={`Delete “${list.name}” and its private notes? Athletes’ profiles will not be deleted.`} />
+          <form action={deleteList}>
+            <input type="hidden" name="list_id" value={list.id} />
+            <button type="submit" className="label cursor-pointer text-ink-subtle underline decoration-transparent underline-offset-4 transition-colors hover:text-disputed hover:decoration-disputed">
+              Delete list
+            </button>
+          </form>
         </header>
-
-        <details className="mb-8 rounded-xl border border-rule bg-paper-raised p-5"><summary className="min-h-11 cursor-pointer text-sm font-semibold">Edit list name and note</summary><div className="mt-4"><EditListForm id={list.id} name={list.name} note={list.note} /></div></details>
-        <div className="mb-4 flex items-center justify-between"><p className="text-sm text-ink-muted">{members.length} visible {members.length === 1 ? "athlete" : "athletes"}</p><Link className="btn-outline min-h-11 text-sm" href="/search">Add athletes ↗</Link></div>
 
         {members.length === 0 ? (
           <p className="border-y border-rule py-8 text-ink-muted">
@@ -77,8 +77,13 @@ export default async function ListPage({ params }: { params: Promise<{ id: strin
                   <p className="label flex items-center gap-1.5 whitespace-nowrap" data-numeric>
                     <Verified className={a.verified_count > 0 ? "" : "opacity-30"} /> {a.verified_count} verified
                   </p>
-                  <RowAction action={removeFromList} fields={{ list_id: list.id, profile_id: a.id }} label="Remove" confirm={`Remove ${a.display_name} from this list and delete your note?`} />
-                  <details className="col-span-full rounded-lg border border-rule bg-paper-raised p-4"><summary className="min-h-11 cursor-pointer text-sm text-ink-muted">{a.list_note ? "Edit your private note" : "Add private note"}</summary>{a.list_note && <p className="mb-4 whitespace-pre-wrap text-sm text-ink-muted">{a.list_note}</p>}<MemberNoteForm listId={list.id} profileId={a.id} note={a.list_note} /></details>
+                  <form action={removeFromList} className="col-span-full sm:col-span-1">
+                    <input type="hidden" name="list_id" value={list.id} />
+                    <input type="hidden" name="profile_id" value={a.id} />
+                    <button type="submit" className="label cursor-pointer text-ink-subtle underline decoration-transparent underline-offset-4 transition-colors hover:text-ink hover:decoration-ink">
+                      Remove
+                    </button>
+                  </form>
                 </li>
               );
             })}

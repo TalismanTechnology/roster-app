@@ -29,7 +29,7 @@ export default async function ListsPage() {
 
   return (
     <Site>
-      <main className="mx-auto w-full max-w-4xl py-6 pb-16">
+      <main className="mx-auto w-full max-w-4xl" style={{ paddingInline: "var(--pad-x)", paddingBlock: "var(--section-py)" }}>
         <header className="flex flex-col gap-4 pb-8 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="label flex items-center gap-2 text-ink-muted">
@@ -44,7 +44,7 @@ export default async function ListsPage() {
 
         {lists.length === 0 ? (
           <p className="border-y border-rule py-8 text-ink-muted">
-            Your next recruiting class starts here. Create a private list below, then save athletes from search.
+            No lists yet. Create one below, or save an athlete from search and name the list there.
           </p>
         ) : (
           <ol className="divide-y divide-rule border-y border-rule">
@@ -72,7 +72,7 @@ export default async function ListsPage() {
           <h2 id="new-list" className="font-display text-display-sm">
             New list
           </h2>
-          <div className="mt-5 rounded-xl border border-rule bg-paper-raised" style={{ padding: "clamp(1.25rem, 2.5vw, 2rem)" }}>
+          <div className="panel mt-5" style={{ padding: "clamp(1.25rem, 2.5vw, 2rem)" }}>
             <CreateListForm />
           </div>
         </section>

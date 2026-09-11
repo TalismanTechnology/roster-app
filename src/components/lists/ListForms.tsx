@@ -1,13 +1,31 @@
 "use client";
-import { createList, updateList, updateListMemberNote } from "@/lib/actions/lists";
-import { EditorForm } from "@/components/editor/EditorForm";
-import { Field, TextInput, TextArea } from "@/components/ui/fields";
+
+import { useActionState } from "react";
+
+import { createList, type ListFormState } from "@/lib/actions/lists";
+import { Field, FormNotice, TextInput } from "@/components/ui/fields";
+import { SubmitButton } from "@/components/ui/SubmitButton";
+
+const IDLE: ListFormState = { ok: false, error: null };
+
 export function CreateListForm() {
- return <EditorForm action={createList} submitLabel="Create list"><div className="grid gap-5 sm:grid-cols-2"><Field label="Name" hint="Class of 2027 receivers, spring visits"><TextInput name="name" required minLength={2} maxLength={60} /></Field><Field label="Note"><TextInput name="note" maxLength={300} placeholder="Optional" /></Field></div></EditorForm>;
-}
-export function EditListForm({ id, name, note }: { id: string; name: string; note: string | null }) {
- return <EditorForm action={updateList} submitLabel="Save list" compact><input type="hidden" name="list_id" value={id} /><Field label="List name"><TextInput name="name" required minLength={2} maxLength={60} defaultValue={name} /></Field><Field label="List note"><TextArea name="note" maxLength={300} rows={2} defaultValue={note ?? ""} /></Field></EditorForm>;
-}
-export function MemberNoteForm({ listId, profileId, note }: { listId: string; profileId: string; note: string | null }) {
- return <EditorForm action={updateListMemberNote} submitLabel="Save private note" compact><input type="hidden" name="list_id" value={listId} /><input type="hidden" name="profile_id" value={profileId} /><Field label="Your private scouting note" hint="Only you can see this note."><TextArea name="note" maxLength={300} rows={2} defaultValue={note ?? ""} /></Field></EditorForm>;
+  const [state, formAction] = useActionState(createList, IDLE);
+  return (
+    <form action={formAction} className="flex flex-col gap-5">
+      <div className="grid gap-5 sm:grid-cols-2">
+        <Field label="Name" hint="“Class of 2027 receivers”, “Spring visits”">
+          <TextInput name="name" required minLength={2} maxLength={60} />
+        </Field>
+        <Field label="Note">
+          <TextInput name="note" maxLength={300} placeholder="Optional" />
+        </Field>
+      </div>
+      <div className="flex items-center gap-4">
+        <SubmitButton className="btn-outline" pendingLabel="Creating…">
+          Create list
+        </SubmitButton>
+        <FormNotice ok={state.ok} error={state.error} />
+      </div>
+    </form>
+  );
 }

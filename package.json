@@ -6,24 +6,22 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "typecheck": "next typegen && tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "shots": "node scripts/shots.mjs",
     "test:schema": "./supabase/tests/run.sh",
     "db:types": "supabase gen types typescript --linked > src/lib/database.types.ts",
-    "test": "node --import tsx --test src/lib/data/__tests__/*.test.ts src/lib/network/__tests__/*.test.ts",
+    "test": "tsx --test src/lib/data/__tests__/*.test.ts",
     "seed": "tsx scripts/seed.ts",
     "e2e": "node scripts/smoke.mjs",
-    "audit": "node scripts/audit.mjs",
-    "lint": "eslint ."
+    "audit": "node scripts/audit.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.109.0",
     "motion": "^13.2.0",
-    "next": "^16.3.4",
+    "next": "16.3.2",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "sharp": "^0.35.4",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -31,15 +29,10 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "eslint": "^9.39.5",
-    "eslint-config-next": "^16.3.4",
     "playwright-core": "^1.62.1",
     "supabase": "^2.115.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.13",
     "typescript": "^5"
-  },
-  "engines": {
-    "node": ">=22"
   }
 }

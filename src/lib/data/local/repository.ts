@@ -53,7 +53,7 @@ export class LocalRepository implements Repository {
         created_at: now(),
       };
       db.users.push(user);
-      return { id: user.id, email: user.email, emailConfirmed: true };
+      return { id: user.id, email: user.email };
     });
   }
 
@@ -61,12 +61,12 @@ export class LocalRepository implements Repository {
     const normalized = email.trim().toLowerCase();
     const user = readDb().users.find((u) => u.email === normalized);
     if (!user || !verifyPassword(password, user.password_hash)) return null;
-    return { id: user.id, email: user.email, emailConfirmed: true };
+    return { id: user.id, email: user.email };
   }
 
   async getUser(userId: string): Promise<AuthUser | null> {
     const user = readDb().users.find((u) => u.id === userId);
-    return user ? { id: user.id, email: user.email, emailConfirmed: true } : null;
+    return user ? { id: user.id, email: user.email } : null;
   }
 
   async updateEmail(userId: string, email: string): Promise<void> {
@@ -98,7 +98,7 @@ export class LocalRepository implements Repository {
       db.memberships = db.memberships.filter((m) => m.profile_id !== userId);
       db.achievements = db.achievements.filter((a) => a.profile_id !== userId);
       db.evidence = db.evidence.filter((e) => !mine.has(e.achievement_id));
-      db.verifications = db.verifications.filter((v) => !mine.has(v.achievement_id)).map(v => v.verifier_id === userId ? {...v, verifier_id: null} : v);
+      db.verifications = db.verifications.filter((v) => !mine.has(v.achievement_id));
       db.verification_requests = db.verification_requests.filter((r) => r.profile_id !== userId);
       db.film_clips = db.film_clips.filter((f) => f.profile_id !== userId);
       db.coach_contacts = db.coach_contacts.filter((c) => c.profile_id !== userId);
@@ -121,10 +121,7 @@ export class LocalRepository implements Repository {
     const db = readDb();
     const target = db.profiles.find((p) => p.handle === handle.toLowerCase());
     const viewer = viewerId ? db.profiles.find((p) => p.id === viewerId) : null;
-    if (!target || !canViewProfile(target, viewerId, viewer)) return null;
-    return (target.is_recruitable && target.visibility === "public") || target.id === viewerId || viewer?.account_kind === "staff"
-      ? target
-      : {...target, contact_email: null, phone: null};
+    return canViewProfile(target, viewerId, viewer) ? (target ?? null) : null;
   }
 
   async isHandleAvailable(handle: string): Promise<boolean> {
@@ -134,7 +131,6 @@ export class LocalRepository implements Repository {
   }
 
   async createProfile(input: NewProfile): Promise<Profile> {
-    if (input.account_kind && !["athlete", "coach", "recruiter"].includes(input.account_kind)) throw new DataError("forbidden", "Choose an athlete, coach, or recruiter account.");
     const handle = input.handle.toLowerCase();
     if (!HANDLE_PATTERN.test(handle)) throw new DataError("invalid", "That handle is not valid.");
     if (isReservedHandle(handle)) throw new DataError("invalid", "That handle is reserved.");
@@ -156,8 +152,8 @@ export class LocalRepository implements Repository {
     return mutate((db) => {
       const profile = requireProfile(db, id);
       // Handles and counters are not editable through this path.
-      const { id: _id, handle: _handle, entry_count: _e, verified_count: _v, created_at: _c, account_kind: _kind, identity_verified_at: _verified, suspended_at: _suspended, ...safe } = patch;
-      void _kind; void _verified; void _suspended; void _id; void _handle; void _e; void _v; void _c;
+      const { id: _id, handle: _handle, entry_count: _e, verified_count: _v, created_at: _c, ...safe } = patch;
+      void _id; void _handle; void _e; void _v; void _c;
       Object.assign(profile, safe, { updated_at: now() });
       return profile;
     });
@@ -211,16 +207,13 @@ export class LocalRepository implements Repository {
   async updateEntry(profileId: string, entryId: string, patch: Partial<NewEntry>): Promise<RecordEntry> {
     return mutate((db) => {
       const row = requireOwned(db.achievements, entryId, profileId, "entry");
-      Object.assign(row, patch, { updated_at: now(), verification: "unverified", verified_at: null });
-      for (const request of db.verification_requests) if (request.achievement_id === entryId && request.status === "pending") request.status = "expired";
-      syncCounts(db, profileId);
+      Object.assign(row, patch, { updated_at: now() });
       return toEntry(db, row);
     });
   }
 
   async deleteEntry(profileId: string, entryId: string): Promise<void> {
     mutate((db) => {
-      if (!db.achievements.some(a => a.id === entryId)) return;
       requireOwned(db.achievements, entryId, profileId, "entry");
       db.achievements = db.achievements.filter((a) => a.id !== entryId);
       db.evidence = db.evidence.filter((e) => e.achievement_id !== entryId);
@@ -282,7 +275,6 @@ export class LocalRepository implements Repository {
 
   async deleteFilm(profileId: string, clipId: string): Promise<void> {
     mutate((db) => {
-      if (!db.film_clips.some(f => f.id === clipId)) return;
       requireOwned(db.film_clips, clipId, profileId, "clip");
       db.film_clips = db.film_clips.filter((f) => f.id !== clipId);
     });
@@ -337,7 +329,6 @@ export class LocalRepository implements Repository {
 
   async deleteCoach(profileId: string, coachId: string): Promise<void> {
     mutate((db) => {
-      if (!db.coach_contacts.some(c => c.id === coachId)) return;
       requireOwned(db.coach_contacts, coachId, profileId, "reference");
       db.coach_contacts = db.coach_contacts.filter((c) => c.id !== coachId);
     });
@@ -352,8 +343,7 @@ export class LocalRepository implements Repository {
   ): Promise<VerificationRequest> {
     return mutate((db) => {
       const entry = requireOwned(db.achievements, achievementId, profileId, "entry");
-      const coach = requireOwned(db.coach_contacts, coachContactId, profileId, "reference");
-      if (!coach.email) throw new DataError("invalid", "Add the coach’s email before requesting verification.");
+      requireOwned(db.coach_contacts, coachContactId, profileId, "reference");
 
       // One live request per entry; re-requesting supersedes the old link.
       for (const r of db.verification_requests) {
@@ -363,8 +353,6 @@ export class LocalRepository implements Repository {
       const request: VerificationRequest = {
         id: randomUUID(),
         token: randomBytes(24).toString("base64url"),
-        recipient_email: coach.email.trim().toLowerCase(),
-        achievement_revision: entry.updated_at,
         achievement_id: achievementId,
         profile_id: profileId,
         coach_contact_id: coachContactId,
@@ -378,19 +366,20 @@ export class LocalRepository implements Repository {
       };
       db.verification_requests.push(request);
       entry.verification = "submitted";
+      entry.updated_at = now();
       return request;
     });
   }
 
   async getVerificationRequest(token: string): Promise<VerificationRequestDetail | null> {
     const db = readDb();
-    const request = db.verification_requests.find((r) => r.token === token || r.id === token);
+    const request = db.verification_requests.find((r) => r.token === token);
     if (!request) return null;
     const row = db.achievements.find((a) => a.id === request.achievement_id);
     const athlete = db.profiles.find((p) => p.id === request.profile_id);
     const coach = db.coach_contacts.find((c) => c.id === request.coach_contact_id);
     if (!row || !athlete || !coach) return null;
-    return { ...request, status: request.status === "pending" && Date.parse(request.expires_at) <= Date.now() ? "expired" : request.status, entry: toEntry(db, row), athlete: {id: athlete.id, handle: athlete.handle, display_name: athlete.display_name}, coach: {id: coach.id, name: coach.name, role: coach.role} };
+    return { ...request, entry: toEntry(db, row), athlete, coach };
   }
 
   async respondToVerification(
@@ -401,16 +390,12 @@ export class LocalRepository implements Repository {
     responderUserId: string | null,
   ): Promise<void> {
     mutate((db) => {
-      const request = db.verification_requests.find((r) => r.token === token || r.id === token);
+      const request = db.verification_requests.find((r) => r.token === token);
       if (!request) throw new DataError("not_found", "That verification link is not valid.");
 
-      const user = db.users.find((u) => u.id === responderUserId);
-      const coachProfile = db.profiles.find((p) => p.id === responderUserId);
-      if (!user || coachProfile?.account_kind !== "coach" || user.email.toLowerCase() !== request.recipient_email) throw new DataError("forbidden", "Sign in with the invited coach’s confirmed email address.");
       const allowed = canRespondToRequest(request, responderUserId);
       if (!allowed.ok) {
         const copy = {
-          signed_out: "Sign in with the invited coach account.",
           used: "This link has already been used.",
           expired: "This link has expired. Ask the athlete to send a new one.",
           self: "You can't verify your own record.",
@@ -421,7 +406,6 @@ export class LocalRepository implements Repository {
       const entry = db.achievements.find((a) => a.id === request.achievement_id);
       if (!entry) throw new DataError("not_found", "That entry no longer exists.");
 
-      if (request.achievement_revision !== entry.updated_at) throw new DataError("forbidden", "The entry changed. Ask for a new verification request.");
       const at = now();
       db.verifications.push({
         id: randomUUID(),
@@ -431,7 +415,7 @@ export class LocalRepository implements Repository {
         outcome,
         method: "coach_attestation",
         note,
-        verifier_name: coachProfile!.display_name,
+        verifier_name: verifier.name,
         created_at: at,
       });
 
@@ -442,8 +426,8 @@ export class LocalRepository implements Repository {
 
       request.status = outcome;
       request.note = note;
-      request.verifier_name = coachProfile!.display_name;
-      request.verifier_role = "Coach";
+      request.verifier_name = verifier.name;
+      request.verifier_role = verifier.role;
       request.responded_at = at;
 
       syncCounts(db, entry.profile_id);
@@ -454,23 +438,6 @@ export class LocalRepository implements Repository {
     return readDb()
       .verification_requests.filter((r) => r.profile_id === profileId)
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
-  }
-
-  async updateFilm(profileId: string, clipId: string, patch: Partial<NewFilm>): Promise<FilmClip> {
-    return mutate(db => { const clip = requireOwned(db.film_clips, clipId, profileId, "clip"); const media = patch.url ? parseFilmUrl(patch.url) : null; Object.assign(clip, patch, media ?? {}, media ? { thumbnail_url: media.provider === "youtube" && media.external_id ? `https://i.ytimg.com/vi/${media.external_id}/hqdefault.jpg` : null } : {}, {updated_at: now()}); return clip; });
-  }
-  async updateCoach(profileId: string, coachId: string, patch: Partial<NewCoach>): Promise<CoachContact> {
-    return mutate(db => { const coach = requireOwned(db.coach_contacts, coachId, profileId, "reference"); Object.assign(coach, patch); return coach; });
-  }
-  async updateList(ownerId: string, listId: string, name: string, note: string | null): Promise<RecruiterList> {
-    return mutate(db => { const list = requireList(db, ownerId, listId); if (db.recruiter_lists.some(l => l.id !== listId && l.owner_id === ownerId && l.name === name)) throw new DataError("conflict", "That list name is already used."); Object.assign(list, {name, note, updated_at: now()}); return withCount(db, list); });
-  }
-  async updateListMemberNote(ownerId: string, listId: string, profileId: string, note: string | null): Promise<void> {
-    mutate(db => { const list = requireList(db, ownerId, listId); const member = db.recruiter_list_members.find(m => m.list_id === listId && m.profile_id === profileId); if (!member) throw new DataError("not_found", "That saved athlete was not found."); member.note = note; list.updated_at = now(); });
-  }
-  async listCoachVerificationRequests(userId: string): Promise<VerificationRequest[]> {
-    const db = readDb(); const user = requireUser(db, userId);
-    return db.verification_requests.filter(r => r.recipient_email === user.email.toLowerCase()).sort((a,b) => b.created_at.localeCompare(a.created_at));
   }
 
   // --- signals ------------------------------------------------------------
@@ -555,7 +522,6 @@ export class LocalRepository implements Repository {
 
   async deleteList(ownerId: string, listId: string): Promise<void> {
     mutate((db) => {
-      if (!db.recruiter_lists.some(l => l.id === listId)) return;
       requireList(db, ownerId, listId);
       db.recruiter_lists = db.recruiter_lists.filter((l) => l.id !== listId);
       db.recruiter_list_members = db.recruiter_list_members.filter((m) => m.list_id !== listId);

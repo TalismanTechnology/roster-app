@@ -32,7 +32,7 @@ export function RequestVerification({ entryId, coaches }: { entryId: string; coa
     return (
       <div className="flex flex-col gap-3" role="status">
         <p className="text-sm">
-          Link created. No email has been sent. Share this link with your coach; it works once and expires in 30 days.
+          Send this link to your coach. It works once and expires in 30 days.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <code className="label max-w-full truncate border border-rule bg-paper-raised/60 px-2 py-1.5 text-ink-muted">
@@ -58,7 +58,7 @@ export function RequestVerification({ entryId, coaches }: { entryId: string; coa
           ))}
         </Select>
       </label>
-      <SubmitButton className="btn-outline min-h-11 px-4 text-sm" pendingLabel="Creating…">
+      <SubmitButton className="btn-outline min-h-9 px-4 text-sm" pendingLabel="Creating…">
         Create request link
       </SubmitButton>
       {state.error && (
