@@ -1,13 +1,7 @@
 import type { Metadata } from "next";
 
-import { FinalCta } from "@/components/landing/FinalCta";
-import { ForCoaches } from "@/components/landing/ForCoaches";
 import { Hero } from "@/components/landing/Hero";
-import { HowItWorks } from "@/components/landing/HowItWorks";
-import { ResumeDemo } from "@/components/landing/ResumeDemo";
-import { Sports } from "@/components/landing/Sports";
-import { Ticker } from "@/components/landing/Ticker";
-import { Visibility } from "@/components/landing/Visibility";
+import { ProductStory } from "@/components/landing/ProductStory";
 import { SiteFooter } from "@/components/shell/SiteFooter";
 import { SiteHeader } from "@/components/shell/SiteHeader";
 import { currentHeaderUser } from "@/components/shell/Site";
@@ -30,13 +24,7 @@ export default async function HomePage() {
       <SiteHeader user={user} variant="landing" />
       <main>
         <Hero />
-        <Ticker />
-        <ResumeDemo />
-        <HowItWorks />
-        <Sports />
-        <ForCoaches />
-        <Visibility />
-        <FinalCta signedIn={user !== null} />
+        <ProductStory signedIn={user !== null} />
       </main>
       <SiteFooter />
     </>

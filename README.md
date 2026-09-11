@@ -1,141 +1,70 @@
 # Roster
 
-A digital resume for athletes. Every PR, result, award, and clip of film —
-verified by coaches — at one link a recruiter can open without an account.
-Think Hudl's profile page, taken seriously: the record is verifiable, the
-academics are on it, and the coach a recruiter would call is listed.
+**Last updated: 2026-09-11**
 
-Marketing site: [myroster.us](https://myroster.us)
+Roster is a web application for athletes, coaches, and recruiters age 13 and older. It combines a shareable athletic resume with a signed-in network: posts, discovery, follows, introduction requests, conversations, notifications, coach verification, recruiting lists, and moderation. The existing landing hero is preserved.
 
-## The product in one loop
+This rebuild is implemented and validated locally. Hosted deployment remains gated on credentials, schema reconciliation, full Supabase integration tests, and operating setup. See the [release handoff](docs/release/README.md) for exact evidence and outstanding work.
 
-1. An athlete signs up and claims `roster.us/<handle>`.
-2. They build the resume: record entries, film links, academics, references.
-3. They send a coach a verification link; the coach answers with one tap and
-   their name goes on the entry. The verified count is the resume's credibility.
-4. Recruiters find athletes at `/search` — by sport, level, class year,
-   state — or open the link the athlete sent them. No recruiter account needed.
-   Signed-in recruiters keep lists.
+## Local preview
 
-Visibility is the athlete's call: **public** (listed in search, indexable),
-**unlisted** (anyone with the link, findable by no one), or **private**.
-Coach contact details additionally require the resume to be public and the
-athlete to be open to recruiting.
+Use Node.js 22 or newer; the recorded release build used Node 22.23.2.
 
-## Stack
-
-- **Next.js 16** (App Router, Turbopack) + **React 19** — Server Components
-  and Server Actions throughout; the public pages ship almost no client JS.
-- **A repository interface** with two adapters: **Supabase** (Postgres, auth,
-  RLS) for production and a **local file-backed adapter** for development.
-- **Tailwind CSS 4** with the design tokens in `src/app/globals.css` — dark
-  only, hairlines and corner brackets, system type, no webfonts.
-
-> Next.js 16 renamed `middleware.ts` to `proxy.ts`. Session handling and the
-> (small) authenticated surface live in `src/proxy.ts` — the site is public by
-> default and only `/resume`, `/settings`, `/lists`, and `/onboarding` require
-> a session.
-
-## Getting started
-
-Requires **Node 22+** (`@supabase/supabase-js` has deprecated Node 20; Node 20
-works with warnings).
-
-```bash
-npm install
-npm run dev
+```sh
+npm ci
+ROSTER_DATA=local npm run dev -- --port 3000
 ```
 
-That's it. **Without Supabase credentials the app runs in local mode**: the
-whole product works against `.data/roster.json`, seeded on first run with a
-fictional roster across four sports.
+Open `http://localhost:3000`. If the development server already occupies port 3000, use that server rather than starting another. Local data is created on first use under `.data/`; no hosted credentials are required. `ROSTER_DATA=local` explicitly selects fixtures even if Supabase environment values exist. Production runtime deliberately rejects local data mode.
 
-| Sign in as | Email | Password |
-|---|---|---|
-| any seeded athlete | `<handle>@roster.local` — e.g. `jordanreyes@roster.local`, `avareyes@roster.local` | `roster-demo` |
-| a recruiter (has lists) | `recruiter@roster.local` | `roster-demo` |
-| a coach | `coach@roster.local` | `roster-demo` |
+| Local identity | Email | Password |
+| --- | --- | --- |
+| Athlete | `jordanreyes@roster.local` or another seeded `<handle>@roster.local` | `roster-demo` |
+| Coach | `coach@roster.local` | `roster-demo` |
+| Recruiter | `recruiter@roster.local` | `roster-demo` |
 
-`npm run seed` rebuilds the local database from `src/lib/data/local/seed-data.ts`.
-Every name in it is fictional.
+All fixture identities are fictional. Existing accounts may be asked to enroll in the network with a date of birth at `/app/setup`. Fresh signup collects DOB and then completes role-specific onboarding. Public resume examples are available at `/jordanreyes` and `/preview`.
 
-### Supabase mode
+`npm run seed` resets the local core database, including account records; existing cookies may refer to removed accounts. It is destructive to local edits and does not reset all network/media state. For a fresh isolated demo, start the server with a new `ROSTER_DATA_DIR` outside version control. Never use local fixture accounts against a hosted database.
 
-Copy `.env.example` to `.env.local`, fill in the project values, and the app
-switches to the Supabase adapter automatically (`ROSTER_DATA=local|supabase`
-forces either). Apply the migrations in order — the SQL editor works, or link
-the CLI and `supabase db push`:
+## Product and architecture
 
-```
-supabase/migrations/
-├── 0001_foundation.sql   extensions, enums, sports reference data
-├── 0002_identity.sql     profiles, reserved handles, organizations
-├── 0003_record.sql       achievements, evidence, verifications  ← the product
-├── 0004_film.sql         film clips, coach references
-├── 0005_signals.sql      profile views, recruiter lists
-├── 0006_security.sql     every RLS policy, in one auditable file
-└── 0007_triggers.sql     counters, film-URL parsing, athlete search
-```
+Public resumes support public, unlisted, and private visibility. Search lists public athletes. Signed-in users enter `/app`; athlete editing remains at `/resume`, recruiter lists at `/lists`, and account controls at `/settings`. Verification links require a confirmed, matching coach identity; owning a link alone does not authorize an attestation.
 
-Then regenerate types so the client matches the database:
+The stack is Next.js 16.3.4, React 19.2.8, Tailwind CSS 4, and TypeScript. Server Actions use core and network repository interfaces with local and Supabase implementations. Supabase mode uses Auth, Postgres authorization, identity-bound RPCs, and private Storage. Uploaded photos are normalized to WebP and served through authorized application routes.
 
-```bash
-npm run db:types      # requires a linked Supabase project
-```
+| Area | Source |
+| --- | --- |
+| Landing and public resume | `src/app/page.tsx`, `src/app/[handle]/`, `src/components/record/` |
+| Member workspace | `src/app/app/`, `src/components/network/` |
+| Core data and authentication | `src/lib/data/`, `src/lib/actions/`, `src/lib/supabase/` |
+| Network repositories and operations | `src/lib/network/` |
+| Media and moderation evidence | `src/lib/media.ts`, `src/lib/network/evidence.ts`, `src/app/api/` |
+| Session refresh and protected routes | `src/proxy.ts` |
+| Database definitions and authorization tests | `supabase/migrations/`, `supabase/tests/` |
 
-The Supabase adapter (`src/lib/data/supabase/repository.ts`) compiles
-against the hand-written types but has not been exercised against a live
-project since the local adapter landed. Verification-by-link and recruiter
-lists need small additions there (see the comments in that file).
+Read the installed Next.js guides in `node_modules/next/dist/docs/` before changing framework code, as required by [AGENTS.md](AGENTS.md). See [architecture](docs/release/architecture.md) for data flow and security boundaries.
 
-## Scripts
+## Checks
 
-| Script | What it does |
-|---|---|
-| `npm run dev` | Dev server on :3000 |
-| `npm run build` / `npm run typecheck` | Production build / `tsc --noEmit` |
-| `npm test` | Unit tests for the data layer: the visibility rules, the local adapter, sessions, film URLs |
-| `npm run e2e` | Drives the whole product loop in a browser against a dev server — 16 steps, both account kinds, the coach link |
-| `npm run audit` | Every route at 320/375/768/1024/1440 + print: overflow, console errors, alt text, control names, labels, heading order |
-| `npm run shots [route]` | Screenshots one route at four widths into `.shots/` |
-| `npm run seed` | Rebuild `.data/roster.json` |
-| `npm run test:schema` | Schema tests against a local PostgreSQL (`brew install postgresql@16`) |
-
-## Where things live
-
-```
-src/
-├── proxy.ts                    session check + the authenticated surface
-├── app/
-│   ├── page.tsx                the landing
-│   ├── [handle]/               the public resume
-│   ├── preview/                the resume against fixtures, no database
-│   ├── search/                 discovery (filters live in the URL)
-│   ├── resume/                 the athlete's editor, with live preview
-│   ├── verify/[token]/         a coach's verification page (no account)
-│   ├── lists/                  recruiter lists
-│   ├── settings/               account
-│   └── sign-in | sign-up | onboarding | auth/
-├── components/
-│   ├── landing/                the landing sections
-│   ├── record/                 the resume document (shared by /[handle], /preview, the editor's preview)
-│   ├── editor/                 editor sections and forms
-│   ├── search/ · lists/ · account/ · verify/ · auth/
-│   ├── shell/                  header, footer, Site wrapper
-│   ├── bits/                   React Bits pieces used on the landing (client-only)
-│   └── ui/                     marks (brackets, checker, globe, verified), buttons, fields, images
-└── lib/
-    ├── data/
-    │   ├── repository.ts       the interface every page and action uses
-    │   ├── local/              file-backed adapter: store, session, rules (RLS mirrored), seed
-    │   ├── supabase/           the Supabase adapter
-    │   └── auth.ts             getCurrentUser / sign in / sign out, in whichever mode is running
-    ├── actions/                every Server Action (auth, resume, verify, lists, account)
-    ├── handles.ts              reserved-handle mirror of migration 0002
-    └── sports.ts · format.ts · film.ts
+```sh
+npm test
+npm run lint -- --max-warnings=0
+npm run typecheck
+ROSTER_NEXT_OUTPUT=.next-release npm run build
+npm run test:schema
 ```
 
-The visibility model has exactly one definition per adapter:
-`supabase/migrations/0006_security.sql` for Postgres and
-`src/lib/data/local/rules.ts` for local mode. They must answer "who can see
-this" identically; `npm test` checks the local one.
+The schema runner needs PostgreSQL tools (validated with PostgreSQL 16); set `PGBIN` if automatic discovery fails. It creates a disposable local database with Auth/Storage shims. It does not validate the full Supabase service stack. A separate build output keeps the development server's `.next` directory intact.
+
+`npm run e2e -- --base=http://127.0.0.1:3000` is the local-only smoke runner and requires installed Chromium for `playwright-core`. Its rewritten journeys have not yet been validated as a complete CLI run. The [browser evidence record](docs/testing/e2e-local-2026-09-11.md) lists observed passes and unverified journeys. `npm run audit` and `npm run shots -- /preview` provide additional developer browser checks; their existence is not evidence that the current release passed them.
+
+## Supabase setup
+
+Use [environment.example](docs/release/environment.example) as a placeholder template for an ignored `.env.local`. Supply verified project values through your secret manager. Configuration detection checks value shape; it does not prove credentials work. The runtime requires `NEXT_PUBLIC_SUPABASE_ANON_KEY` for the public client key and `SUPABASE_SERVICE_ROLE_KEY` only on trusted servers/jobs.
+
+Do not blindly run `supabase db push` against the existing project. Read-only inspection confirmed remote migrations `0001`–`0009`; the two previously missing baseline files are now restored, and new work is numbered `0010`–`0012`. The complete hosted schema and service behavior still require staging verification. See the [remote observations](docs/release/remote-schema-observation.md). Follow the [migration and rollback procedure](docs/release/README.md#database-preflight-and-rollout) first. No hosted migration was applied during this rebuild.
+
+The release also requires `0012_profile_privacy.sql`: the Supabase adapter reads profiles through its `get_profile` RPC, which enforces visibility and masks contact fields. Deploy the reconciled migrations through `0012` together with this application.
+
+The final unit suite passed 57 tests in 16 suites. For local HTTP image validation against the running fixture server, run `ROSTER_DATA=local node --import tsx scripts/media-smoke.ts` with the same data directory/session configuration as the server. Nine HTTP status checks and image-normalization/header assertions passed; manual cropping UI remains unverified.

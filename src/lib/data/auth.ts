@@ -28,7 +28,7 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  return user ? { id: user.id, email: user.email ?? "" } : null;
+  return user ? { id: user.id, email: user.email ?? "", emailConfirmed: Boolean(user.email_confirmed_at) } : null;
 }
 
 export type SignInResult = { error: string | null };
@@ -36,7 +36,8 @@ export type SignUpResult = { error: string | null; confirmEmail?: boolean };
 
 export async function signInWithPassword(email: string, password: string): Promise<SignInResult> {
   const repo = await getRepository();
-  const user = await repo.signIn(email, password);
+  let user;
+  try { user = await repo.signIn(email, password); } catch(error) { return {error: error instanceof DataError ? error.message : "Sign-in is temporarily unavailable."}; }
 
   // The generic message is deliberate: "no such account" versus "wrong
   // password" tells an attacker which emails have accounts.
@@ -46,11 +47,11 @@ export async function signInWithPassword(email: string, password: string): Promi
   return { error: null };
 }
 
-export async function signUpWithPassword(email: string, password: string): Promise<SignUpResult> {
+export async function signUpWithPassword(email: string, password: string, next?: string): Promise<SignUpResult> {
   const repo = await getRepository();
 
   try {
-    const user = await repo.signUp(email, password);
+    const user = await repo.signUp(email, password, next);
     if (isLocalMode()) {
       await issueSession(user.id);
       return { error: null };
@@ -73,7 +74,8 @@ export async function signOutEverywhere(): Promise<void> {
     return;
   }
   const supabase = await createClient();
-  await supabase.auth.signOut();
+  const {error} = await supabase.auth.signOut();
+  if (error) throw new DataError("unavailable", "Could not sign out. Try again.");
 }
 
 async function issueSession(userId: string): Promise<void> {

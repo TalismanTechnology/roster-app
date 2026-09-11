@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  distDir: process.env.ROSTER_NEXT_OUTPUT || ".next",
+  experimental: { proxyClientMaxBodySize: "11mb" },
   // Pin the workspace root. Without it Turbopack walks up and finds the
   // stray package-lock.json in the home directory, then warns on every build.
   turbopack: {

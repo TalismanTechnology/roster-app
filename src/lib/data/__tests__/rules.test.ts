@@ -71,8 +71,8 @@ describe("verification by link", () => {
     status: "pending", note: null, verifier_name: null, verifier_role: null,
     created_at: "", responded_at: null, expires_at: new Date(Date.now() + 86_400_000).toISOString(),
   };
-  it("an anonymous holder of a live link may respond", () => {
-    assert.deepEqual(canRespondToRequest(base, null), { ok: true });
+  it("an anonymous holder of a live link cannot respond", () => {
+    assert.deepEqual(canRespondToRequest(base, null), { ok: false, reason: "signed_out" });
   });
   it("the athlete cannot verify their own entry", () => {
     assert.deepEqual(canRespondToRequest(base, "p1"), { ok: false, reason: "self" });

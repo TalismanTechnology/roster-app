@@ -1,18 +1,14 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { eligibleAge } from "@/lib/age";
+import { safeAuthReturn } from "@/lib/auth-return";
 import { z } from "zod";
 
-import { getRepository } from "@/lib/data";
-import { getCurrentUser, signInWithPassword, signOutEverywhere, signUpWithPassword } from "@/lib/data/auth";
+import { signInWithPassword, signOutEverywhere, signUpWithPassword } from "@/lib/data/auth";
 
 /** Where a fresh session lands: athletes in the editor, recruiters at their lists. */
-async function homeFor(): Promise<string> {
-  const user = await getCurrentUser();
-  if (!user) return "/resume";
-  const profile = await (await getRepository()).getProfileById(user.id);
-  return profile?.account_kind === "recruiter" ? "/lists" : "/resume";
-}
+async function homeFor(): Promise<string> { return "/app"; }
 
 /**
  * Auth actions. Sign-up is open — the invite gate went out with the pivot to
@@ -37,7 +33,7 @@ const credentialsSchema = z.object({
  *  link could bounce a fresh session to their own domain. */
 function safeNext(raw: FormDataEntryValue | null, fallback: string): string {
   const next = typeof raw === "string" ? raw : "";
-  return next.startsWith("/") && !next.startsWith("//") ? next : fallback;
+  return next.startsWith("/") && !next.startsWith("//") && !/[\\\r\n]/.test(next) ? next : fallback;
 }
 
 export async function signIn(_prev: AuthFormState, formData: FormData): Promise<AuthFormState> {
@@ -66,11 +62,14 @@ export async function signUp(_prev: AuthFormState, formData: FormData): Promise<
     return { error: parsed.error.issues[0].message };
   }
 
-  const result = await signUpWithPassword(parsed.data.email, parsed.data.password);
+  if (!eligibleAge(formData.get("date_of_birth"))) return {error: "Enter a valid date of birth. You must be at least 13 to create an account."};
+  const next = safeAuthReturn(formData.get("next"));
+  const onboarding = `/onboarding?next=${encodeURIComponent(next)}`;
+  const result = await signUpWithPassword(parsed.data.email, parsed.data.password, onboarding);
   if (result.error) return { error: result.error };
   if (result.confirmEmail) return { error: null, confirmEmail: true };
 
-  redirect("/onboarding");
+  redirect(onboarding);
 }
 
 export async function signOut(): Promise<void> {

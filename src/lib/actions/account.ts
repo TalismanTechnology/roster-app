@@ -3,7 +3,11 @@
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
-import { getRepository } from "@/lib/data";
+import { finalizeDeletedLocalNetworkAccount } from "@/lib/network/local";
+import { getNetworkRepository } from "@/lib/network";
+import { removeLocalAccountMedia } from "@/lib/media";
+import { deleteAccountInOrder } from "@/lib/data/account-cleanup";
+import { getRepository, isLocalMode } from "@/lib/data";
 import { getCurrentUser, signOutEverywhere } from "@/lib/data/auth";
 import { DataError } from "@/lib/data/types";
 
@@ -83,7 +87,15 @@ export async function deleteAccount(_prev: AccountFormState, formData: FormData)
   }
 
   try {
-    await repo.deleteAccount(user.id);
+    const network = await getNetworkRepository();
+    await deleteAccountInOrder({
+      removeNetwork: () => network.deleteAccountData(),
+      removeMedia: async () => { if (isLocalMode()) await removeLocalAccountMedia(user.id); },
+      removeAccount: async () => {
+        await repo.deleteAccount(user.id);
+        if (isLocalMode()) await finalizeDeletedLocalNetworkAccount(user.id);
+      },
+    });
   } catch (error) {
     return failed(error, "Could not delete the account.");
   }

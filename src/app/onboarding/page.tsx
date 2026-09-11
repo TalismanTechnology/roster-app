@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { AuthLayout } from "@/components/auth/AuthLayout";
 import { OnboardingForm } from "@/components/auth/OnboardingForm";
+import { safeAuthReturn } from "@/lib/auth-return";
 import { getRepository } from "@/lib/data";
 import { getCurrentUser } from "@/lib/data/auth";
 
@@ -17,16 +18,17 @@ export const metadata: Metadata = {
  * see it — because every extra field here is a place to abandon; the rest
  * is filled in from the editor.
  */
-export default async function OnboardingPage() {
+export default async function OnboardingPage({searchParams}: {searchParams: Promise<{next?: string}>}) {
+  const next = safeAuthReturn((await searchParams).next);
   const user = await getCurrentUser();
-  if (!user) redirect("/sign-in");
+  if (!user) redirect(`/sign-in?next=${encodeURIComponent(`/onboarding?next=${encodeURIComponent(next)}`)}`);
 
   const repo = await getRepository();
-  if (await repo.getProfileById(user.id)) redirect("/resume");
+  if (await repo.getProfileById(user.id)) redirect(next);
 
   return (
     <AuthLayout label="Almost there" title="Claim your page." image="03">
-      <OnboardingForm />
+      <OnboardingForm next={next} />
     </AuthLayout>
   );
 }

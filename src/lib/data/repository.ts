@@ -30,7 +30,7 @@ import type {
 export interface Repository {
   // --- accounts -----------------------------------------------------------
   /** Creates the account. Throws `conflict` when the email is taken. */
-  signUp(email: string, password: string): Promise<AuthUser>;
+  signUp(email: string, password: string, next?: string): Promise<AuthUser>;
   /** Null on a bad email/password pair — never says which. */
   signIn(email: string, password: string): Promise<AuthUser | null>;
   getUser(userId: string): Promise<AuthUser | null>;
@@ -59,6 +59,7 @@ export interface Repository {
   // --- film ---------------------------------------------------------------
   listFilm(profileId: string): Promise<FilmClip[]>;
   addFilm(profileId: string, input: NewFilm): Promise<FilmClip>;
+  updateFilm(profileId: string, clipId: string, patch: Partial<NewFilm>): Promise<FilmClip>;
   deleteFilm(profileId: string, clipId: string): Promise<void>;
   featureFilm(profileId: string, clipId: string): Promise<void>;
 
@@ -66,6 +67,7 @@ export interface Repository {
   /** Contact details are stripped unless the viewer may see them. */
   listCoaches(profileId: string, viewerId: string | null): Promise<CoachContact[]>;
   addCoach(profileId: string, input: NewCoach): Promise<CoachContact>;
+  updateCoach(profileId: string, coachId: string, patch: Partial<NewCoach>): Promise<CoachContact>;
   deleteCoach(profileId: string, coachId: string): Promise<void>;
 
   // --- verification -------------------------------------------------------
@@ -83,6 +85,7 @@ export interface Repository {
     verifier: { name: string; role: string | null },
     responderUserId: string | null,
   ): Promise<void>;
+  listCoachVerificationRequests(userId: string): Promise<VerificationRequest[]>;
   listVerificationRequests(profileId: string): Promise<VerificationRequest[]>;
 
   // --- signals ------------------------------------------------------------
@@ -96,6 +99,8 @@ export interface Repository {
   listLists(ownerId: string): Promise<RecruiterList[]>;
   getList(ownerId: string, listId: string): Promise<RecruiterListDetail | null>;
   createList(ownerId: string, name: string, note: string | null): Promise<RecruiterList>;
+  updateList(ownerId: string, listId: string, name: string, note: string | null): Promise<RecruiterList>;
+  updateListMemberNote(ownerId: string, listId: string, profileId: string, note: string | null): Promise<void>;
   deleteList(ownerId: string, listId: string): Promise<void>;
   addToList(ownerId: string, listId: string, profileId: string, note: string | null): Promise<void>;
   removeFromList(ownerId: string, listId: string, profileId: string): Promise<void>;

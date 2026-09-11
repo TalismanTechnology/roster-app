@@ -1,3 +1,4 @@
+import { ProfileMedia } from "@/components/media/ProfileMedia";
 import type { Profile } from "@/lib/database.types";
 import { updateAcademics, updateContact, updateIdentity, updateVisibility } from "@/lib/actions/resume";
 import { EditorForm } from "@/components/editor/EditorForm";
@@ -26,7 +27,7 @@ export function EditorSection({
   children: React.ReactNode;
 }) {
   return (
-    <section id={id} aria-labelledby={`${id}-heading`} className="scroll-mt-[calc(var(--header-h)+1rem)]">
+    <section id={`editor-${id}`} aria-labelledby={`${id}-heading`} className="scroll-mt-[calc(var(--header-h)+1rem)]">
       <div className="flex items-center gap-3">
         <Corner d={CORNER.tl} className="text-ink-muted" />
         <h2 id={`${id}-heading`} className="font-display flex items-baseline gap-3 text-display leading-tight tracking-tight">
@@ -56,6 +57,7 @@ export function Panel({ children, className = "" }: { children: React.ReactNode;
 export function IdentitySection({ profile }: { profile: Profile }) {
   return (
     <EditorSection id="identity" title="Identity" lede="Name, sport, school, and the two sentences a recruiter reads first.">
+      <ProfileMedia avatarUrl={profile.avatar_url} coverUrl={profile.cover_url} />
       <Panel>
         <EditorForm action={updateIdentity} submitLabel="Save identity">
           <Field label="Name">

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import { getRepository } from "@/lib/data";
 import { getCurrentUser } from "@/lib/data/auth";
+import { AppShell } from "@/components/app/AppShell";
 
 import { SiteFooter } from "./SiteFooter";
 import { SiteHeader, type HeaderUser } from "./SiteHeader";
@@ -20,6 +21,11 @@ export async function Site({
   variant?: "landing" | "app";
   footer?: boolean;
 }) {
+  if (variant === "app") {
+    const account = await getCurrentUser();
+    const profile = account ? await (await getRepository()).getProfileById(account.id) : null;
+    if (profile) return <AppShell profile={profile}>{children}</AppShell>;
+  }
   const user = await currentHeaderUser();
 
   return (

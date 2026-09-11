@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-
 import { buildChecklist, Checklist, firstUnfinished, type SectionId } from "@/components/editor/Checklist";
 import { AcademicsSection, ContactSection, IdentitySection, VisibilitySection } from "@/components/editor/ProfileSections";
 import { CoachSection, FilmSection, RecordSection } from "@/components/editor/RecordSections";
@@ -9,191 +8,24 @@ import { RequestsSection } from "@/components/editor/RequestsSection";
 import { ResumeDocument } from "@/components/record/ResumeDocument";
 import { ShareBar } from "@/components/record/ShareBar";
 import { Site } from "@/components/shell/Site";
-import { Corner, CORNER } from "@/components/ui/marks";
 import { getRepository } from "@/lib/data";
 import { getCurrentUser } from "@/lib/data/auth";
-
-export const metadata: Metadata = {
-  title: "Edit your resume",
-  robots: { index: false, follow: false },
-};
-
-const SECTIONS: { id: SectionId; label: string }[] = [
-  { id: "identity", label: "Identity" },
-  { id: "record", label: "Record" },
-  { id: "film", label: "Film" },
-  { id: "academics", label: "Academics" },
-  { id: "references", label: "References" },
-  { id: "contact", label: "Contact" },
-  { id: "visibility", label: "Visibility" },
-  { id: "requests", label: "Requests" },
-];
-
-const SECTION_IDS = new Set<string>(SECTIONS.map((s) => s.id));
-
-/**
- * The athlete's workspace. One section at a time — the section lives in the
- * URL so Back works and a link can point at "add your film" — chosen by a
- * checklist of what a recruiter would notice missing. A live preview of the
- * public resume sits beside it on wide screens, rendered by the same
- * component a recruiter gets and refreshed after every save.
- */
-export default async function ResumeEditorPage({ searchParams }: PageProps<"/resume">) {
-  const user = await getCurrentUser();
-  if (!user) redirect("/sign-in");
-
-  const repo = await getRepository();
-  const profile = await repo.getProfileById(user.id);
-
-  // Signed in but no profile yet: onboarding was abandoned partway.
-  if (!profile) redirect("/onboarding");
-  // A recruiter has no resume to edit; their workspace is their lists.
-  if (profile.account_kind === "recruiter") redirect("/lists");
-
-  const [entries, film, coaches, publicCoaches, requests, weekViews, params] = await Promise.all([
-    repo.listEntries(profile.id),
-    repo.listFilm(profile.id),
-    repo.listCoaches(profile.id, user.id),
-    // What a recruiter gets — present only when public + recruitable.
-    repo.listCoaches(profile.id, null),
-    repo.listVerificationRequests(profile.id),
-    repo.weeklyViews(profile.id),
-    searchParams,
-  ]);
-
-  const checklist = buildChecklist(profile, entries, film, coaches);
-  const requested = typeof params.section === "string" && SECTION_IDS.has(params.section) ? (params.section as SectionId) : null;
-  const active: SectionId = requested ?? firstUnfinished(checklist);
-  const visibility = { public: "Public", unlisted: "Unlisted", private: "Private" }[profile.visibility];
-  const pendingCount = requests.filter((r) => r.status === "pending").length;
-
-  return (
-    <Site>
-      <main className="flex flex-col gap-6 pb-16" style={{ paddingInline: "var(--pad-x)", paddingTop: "1.5rem" }}>
-        {/* Share bar: the link, the numbers, and the door to the public page. */}
-        <section aria-label="Your resume" className="panel">
-          <div className="flex flex-wrap items-center gap-x-8 gap-y-4" style={{ padding: "var(--feature-pad)" }}>
-            <div className="min-w-0 basis-full sm:flex-1 sm:basis-auto">
-              <p className="flex items-center gap-2 whitespace-nowrap text-sm text-ink-muted">
-                <Corner d={CORNER.tl} /> Your resume ·{" "}
-                <span className={profile.visibility === "public" ? "font-bold text-ink" : "font-bold text-pending"}>{visibility}</span>
-              </p>
-              <p className="font-display mt-1 truncate text-display-sm">{profile.display_name}</p>
-              <p className="truncate text-sm text-ink-muted">roster.us/{profile.handle}</p>
-            </div>
-
-            <dl className="flex gap-8">
-              {[
-                [weekViews, "views this week"],
-                [profile.verified_count, "verified"],
-                [entries.length, entries.length === 1 ? "entry" : "entries"],
-              ].map(([value, label]) => (
-                <div key={String(label)}>
-                  <dd className="font-display text-3xl leading-none tracking-tight" data-numeric>
-                    {value}
-                  </dd>
-                  <dt className="mt-1 text-sm text-ink-muted">{label}</dt>
-                </div>
-              ))}
-            </dl>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <ShareBar handle={profile.handle} print={false} />
-              <Link href={`/${profile.handle}`} className="btn-primary min-h-10 px-4 text-sm">
-                View as a recruiter
-              </Link>
-            </div>
-          </div>
-        </section>
-
-        <Checklist items={checklist} active={active} pendingRequests={pendingCount} />
-
-        <div className="grid min-w-0 gap-8 lg:grid-cols-12">
-          {/* Section nav — desktop only; on phones the checklist chips navigate. */}
-          <nav aria-label="Sections" className="print-hidden hidden min-w-0 lg:col-span-2 lg:block">
-            <ol className="-mx-2 flex gap-1 overflow-x-auto px-2 pb-1 lg:sticky lg:top-[calc(var(--header-h)+1rem)] lg:mx-0 lg:flex-col lg:gap-1 lg:px-0">
-              {SECTIONS.map((s) => {
-                const isActive = s.id === active;
-                const item = checklist.find((c) => c.id === s.id);
-                return (
-                  <li key={s.id}>
-                    <Link
-                      href={`/resume?section=${s.id}`}
-                      aria-current={isActive ? "page" : undefined}
-                      className={`flex items-center justify-between gap-3 whitespace-nowrap rounded-md px-3 py-2.5 text-base font-bold transition-colors ${
-                        isActive ? "bg-ink text-paper" : "text-ink-muted hover:bg-wash hover:text-ink"
-                      }`}
-                    >
-                      {s.label}
-                      {s.id === "requests" && pendingCount > 0 && (
-                        <span className={`rounded-full px-2 text-sm ${isActive ? "bg-paper/20" : "bg-pending-bg text-pending"}`} data-numeric>
-                          {pendingCount}
-                        </span>
-                      )}
-                      {item && !item.isDone && s.id !== "requests" && (
-                        <span className={`size-2 rounded-full ${isActive ? "bg-paper/60" : "bg-pending"}`} aria-label="Not done" role="img" />
-                      )}
-                    </Link>
-                  </li>
-                );
-              })}
-            </ol>
-          </nav>
-
-          {/* The active section */}
-          <div className="min-w-0 lg:col-span-6">
-            {active === "identity" && <IdentitySection profile={profile} />}
-            {active === "record" && <RecordSection entries={entries} coaches={coaches} requests={requests} />}
-            {active === "film" && <FilmSection clips={film} />}
-            {active === "academics" && <AcademicsSection profile={profile} />}
-            {active === "references" && <CoachSection coaches={coaches} />}
-            {active === "contact" && <ContactSection profile={profile} />}
-            {active === "visibility" && <VisibilitySection profile={profile} />}
-            {active === "requests" && <RequestsSection requests={requests} entries={entries} coaches={coaches} />}
-
-            <SectionPager active={active} />
-          </div>
-
-          {/* Live preview — the real page, as a recruiter sees it. */}
-          <aside className="hidden lg:col-span-4 lg:block" aria-label="Live preview">
-            <div className="sticky top-[calc(var(--header-h)+1rem)]">
-              <p className="mb-2 flex items-center justify-between text-sm text-ink-muted">
-                <span className="font-bold text-ink">Live preview</span>
-                <span>As a recruiter sees it · updates on save</span>
-              </p>
-              <div className="max-h-[calc(100svh-var(--header-h)-4.5rem)] overflow-y-auto border border-rule bg-paper">
-                <div style={{ zoom: 0.55 }}>
-                  <ResumeDocument profile={profile} entries={entries} film={film} coaches={publicCoaches} />
-                </div>
-              </div>
-            </div>
-          </aside>
-        </div>
-      </main>
-    </Site>
-  );
-}
-
-/** Previous / next section, so the editor reads like a form with steps. */
-function SectionPager({ active }: { active: SectionId }) {
-  const index = SECTIONS.findIndex((s) => s.id === active);
-  const prev = SECTIONS[index - 1];
-  const next = SECTIONS[index + 1];
-
-  return (
-    <nav aria-label="Previous and next section" className="mt-10 flex items-center justify-between gap-4 border-t border-rule pt-6">
-      {prev ? (
-        <Link href={`/resume?section=${prev.id}`} className="btn-ghost -ml-4">
-          ← {prev.label}
-        </Link>
-      ) : (
-        <span />
-      )}
-      {next && (
-        <Link href={`/resume?section=${next.id}`} className="btn-outline">
-          {next.label} →
-        </Link>
-      )}
-    </nav>
-  );
+import "@/components/editor/workspace.css";
+export const metadata: Metadata = { title: "Your athlete workspace", robots: { index: false, follow: false } };
+const SECTIONS: { id: SectionId; label: string }[] = [{id:"identity",label:"Identity"},{id:"record",label:"Record"},{id:"film",label:"Film"},{id:"academics",label:"Academics"},{id:"references",label:"References"},{id:"contact",label:"Contact"},{id:"visibility",label:"Visibility"},{id:"requests",label:"Requests"}];
+export default async function ResumeEditorPage({ searchParams }: { searchParams: Promise<{ section?: string; view?: string }> }) {
+ const user = await getCurrentUser(); if (!user) redirect("/sign-in?next=/resume");
+ const repo = await getRepository(); const profile = await repo.getProfileById(user.id); if (!profile) redirect("/onboarding");
+ if (profile.account_kind !== "athlete") redirect(profile.account_kind === "coach" ? "/app/coaching" : "/lists");
+ const [entries,film,coaches,publicCoaches,requests,weekViews,params] = await Promise.all([repo.listEntries(user.id),repo.listFilm(user.id),repo.listCoaches(user.id,user.id),repo.listCoaches(user.id,null),repo.listVerificationRequests(user.id),repo.weeklyViews(user.id),searchParams]);
+ const checklist = buildChecklist(profile,entries,film,coaches);
+ const active = SECTIONS.some(section => section.id === params.section) ? params.section as SectionId : firstUnfinished(checklist);
+ const preview = params.view === "preview";
+ const pending = requests.filter(request => request.status === "pending" && new Date(request.expires_at).getTime() > Date.now()).length;
+ return <Site><main className="resume-workspace"><header className="workspace-heading"><div><p className="text-xs font-bold uppercase tracking-widest text-ink-muted">ATHLETE WORKSPACE</p><h1>Your story, on the record.</h1><p className="text-sm text-ink-muted">Make every result, milestone, and season count.</p></div><div className="workspace-publication"><span className="workspace-status">{profile.visibility} résumé</span><p className="text-xs text-ink-muted">{weekViews} views this week · {entries.length} {entries.length === 1 ? "entry" : "entries"}</p>{profile.visibility !== "private" ? <ShareBar handle={profile.handle} print={false} /> : <Link href="/resume?section=visibility" className="btn-outline min-h-11 text-sm">Manage visibility</Link>}</div></header>
+ {!preview && <Checklist items={checklist} />}
+ <nav className="workspace-view-tabs" aria-label="Workspace view"><Link href={`/resume?section=${active}`} aria-current={!preview ? "page" : undefined}>Edit</Link><Link href={`/resume?section=${active}&view=preview`} aria-current={preview ? "page" : undefined}>Preview</Link></nav>
+ <div className={`workspace-editor-grid ${preview ? "is-preview" : ""}`}><nav className="workspace-sections" aria-label="Resume sections">{SECTIONS.map(section => <Link key={section.id} href={`/resume?section=${section.id}`} aria-current={section.id===active ? "page" : undefined}>{section.label}{section.id==="requests" && pending>0 && <span>{pending}</span>}</Link>)}</nav>
+ <div className="workspace-active-section" key={active}>{active==="identity" && <IdentitySection profile={profile} />}{active==="record" && <RecordSection entries={entries} coaches={coaches} requests={requests} />}{active==="film" && <FilmSection clips={film} />}{active==="academics" && <AcademicsSection profile={profile} />}{active==="references" && <CoachSection coaches={coaches} />}{active==="contact" && <ContactSection profile={profile} />}{active==="visibility" && <VisibilitySection profile={profile} />}{active==="requests" && <RequestsSection requests={requests} entries={entries} coaches={coaches} />}</div>
+ <aside className="workspace-preview" aria-label="Resume preview"><div className="workspace-preview-header"><h2>Saved résumé preview</h2><p>Updates after you save. {profile.visibility==="private" ? "Only you can open your private résumé." : "Contact details follow your visibility settings."}</p><Link href={`/${profile.handle}`} className="btn-ghost min-h-11 text-sm">Open full preview ↗</Link></div><div className="workspace-preview-document"><ResumeDocument profile={profile} entries={entries} film={film} coaches={publicCoaches} /></div></aside></div></main></Site>;
 }

@@ -15,7 +15,7 @@ import type {
  * list views, and the one error type actions map to copy.
  */
 
-export type AuthUser = { id: string; email: string };
+export type AuthUser = { id: string; email: string; emailConfirmed: boolean };
 
 export type NewProfile = Pick<Profile, "id" | "handle" | "display_name" | "level"> &
   Partial<Pick<Profile, "primary_sport" | "grad_year" | "visibility" | "account_kind">>;
@@ -63,12 +63,14 @@ export type VerificationRequest = {
   created_at: string;
   responded_at: string | null;
   expires_at: string;
+  recipient_email?: string;
+  achievement_revision?: string;
 };
 
 export type VerificationRequestDetail = VerificationRequest & {
   entry: RecordEntry;
-  athlete: Profile;
-  coach: CoachContact;
+  athlete: Pick<Profile, "id" | "handle" | "display_name">;
+  coach: Pick<CoachContact, "id" | "name" | "role">;
 };
 
 export type RecruiterList = {

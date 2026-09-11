@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { EntryFields } from "./EntryFields";
 import type { CoachContact, FilmClip, RecordEntry } from "@/lib/database.types";
 import {
   addAchievement,
@@ -7,16 +9,18 @@ import {
   deleteCoach,
   deleteFilm,
   featureFilm,
+  editFilm,
+  editCoach,
   togglePinned,
   updateAchievement,
 } from "@/lib/actions/resume";
-import { EditorForm } from "@/components/editor/EditorForm";
+import { EditorForm, RowAction as ActionControl } from "@/components/editor/EditorForm";
 import { EditorSection, Panel } from "@/components/editor/ProfileSections";
 import { VerificationMark } from "@/components/record/VerificationMark";
-import { Field, Select, TextArea, TextInput } from "@/components/ui/fields";
+import { Field, TextInput } from "@/components/ui/fields";
 import { Unverified } from "@/components/ui/marks";
 import type { VerificationRequest } from "@/lib/data/types";
-import { KIND_OPTIONS, kindLabel, recordDate } from "@/lib/format";
+import { kindLabel, recordDate } from "@/lib/format";
 import { providerLabel } from "@/lib/film";
 
 import { CopyButton } from "./CopyButton";
@@ -40,14 +44,7 @@ function RowAction({
   label: string;
   destructive?: boolean;
 }) {
-  return (
-    <form action={action}>
-      <input type="hidden" name="id" value={id} />
-      <button type="submit" className={`btn-row ${destructive ? "btn-row-danger" : ""}`}>
-        {label}
-      </button>
-    </form>
-  );
+  return <ActionControl action={action} fields={{ id }} label={label} confirm={destructive ? "Delete this item? This cannot be undone." : undefined} />;
 }
 
 function Disclosure({ summary, children }: { summary: string; children: React.ReactNode }) {
@@ -82,58 +79,6 @@ function AddPanel({ title, children }: { title: string; children: React.ReactNod
 // Record entries
 // ---------------------------------------------------------------------------
 
-function EntryFields({ entry }: { entry?: RecordEntry }) {
-  return (
-    <>
-      <div className="grid gap-6 sm:grid-cols-2">
-        <Field label="Type">
-          <Select name="kind" defaultValue={entry?.kind ?? "personal_record"} required>
-            {KIND_OPTIONS.map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-
-        <Field label="Date">
-          <TextInput name="achieved_on" type="date" defaultValue={entry?.achieved_on ?? ""} required />
-        </Field>
-      </div>
-
-      <Field label="Title" hint="“400m Personal Best”, “All-Conference First Team”">
-        <TextInput name="title" defaultValue={entry?.title ?? ""} required minLength={3} maxLength={120} />
-      </Field>
-
-      <div className="grid gap-6 sm:grid-cols-2">
-        <Field label="Mark" hint="As the sport writes it: 53.94, 6-08.25, 58 rec · 912 yds">
-          <TextInput name="value_display" defaultValue={entry?.value_display ?? ""} maxLength={20} />
-        </Field>
-
-        <Field label="Competition">
-          <TextInput name="competition" defaultValue={entry?.competition ?? ""} maxLength={120} />
-        </Field>
-
-        <Field label="Placement">
-          <TextInput name="placement" type="number" min={1} defaultValue={entry?.placement ?? ""} />
-        </Field>
-
-        <Field label="Field size" hint="Out of how many">
-          <TextInput name="field_size" type="number" min={1} defaultValue={entry?.field_size ?? ""} />
-        </Field>
-
-        <Field label="Location">
-          <TextInput name="location" defaultValue={entry?.location ?? ""} maxLength={120} />
-        </Field>
-      </div>
-
-      <Field label="Detail">
-        <TextArea name="detail" defaultValue={entry?.detail ?? ""} maxLength={500} rows={2} />
-      </Field>
-    </>
-  );
-}
-
 export function RecordSection({
   entries,
   coaches,
@@ -145,7 +90,7 @@ export function RecordSection({
 }) {
   // A pending request's link lives on the row, rendered from the server, so
   // it is there the moment the request is made and on every visit after.
-  const pendingByEntry = new Map(requests.filter((r) => r.status === "pending").map((r) => [r.achievement_id, r]));
+  const pendingByEntry = new Map(requests.filter((r) => r.status === "pending" && new Date(r.expires_at).getTime() > Date.now()).map((r) => [r.achievement_id, r]));
   const coachById = new Map(coaches.map((c) => [c.id, c]));
 
   return (
@@ -199,23 +144,24 @@ export function RecordSection({
                       <EntryFields entry={entry} />
                     </EditorForm>
                   </Disclosure>
-                  {(entry.verification === "unverified" || entry.verification === "disputed") && (
+                  {(entry.verification === "unverified" || entry.verification === "disputed" || (entry.verification === "submitted" && !pending)) && (
                     <Disclosure summary="Request verification">
                       <RequestVerification entryId={entry.id} coaches={coaches} />
                     </Disclosure>
                   )}
+                  <Link className="btn-row min-h-11" href={`/app?share=${encodeURIComponent(entry.id)}`}>Share achievement</Link>
                   <RowAction action={deleteAchievement} id={entry.id} label="Delete" destructive />
                 </div>
 
                 {entry.verification === "submitted" && pending && (
                   <div className="flex basis-full flex-wrap items-center gap-3 border-t border-rule pt-4" role="status">
                     <span className="text-sm text-ink-muted">
-                      Sent to {coachById.get(pending.coach_contact_id)?.name ?? "your coach"} — send them this link:
+                      Request created for {coachById.get(pending.coach_contact_id)?.name ?? "your coach"}. Send them this link yourself:
                     </span>
-                    <code className="max-w-full truncate border border-rule bg-paper-sunken px-2 py-1.5 text-sm text-ink-muted">
+                    {pending.token ? <><code className="max-w-full truncate border border-rule bg-paper-sunken px-2 py-1.5 text-sm text-ink-muted">
                       /verify/{pending.token}
                     </code>
-                    <CopyButton value={`/verify/${pending.token}`} label="Copy link" className="btn-row" />
+                    <CopyButton value={`/verify/${pending.token}`} label="Copy link" className="btn-row" /></> : <p className="text-xs text-ink-muted">For security, the share link was shown only when this request was created. Your coach can review the request in their coaching workspace.</p>}
                   </div>
                 )}
               </li>
@@ -261,7 +207,8 @@ export function FilmSection({ clips }: { clips: FilmClip[] }) {
                 </p>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex basis-full flex-wrap items-center gap-2">
+                <Disclosure summary="Edit"><EditorForm action={editFilm} submitLabel="Save clip" compact><input type="hidden" name="id" value={clip.id} /><FilmFields clip={clip} /></EditorForm></Disclosure>
                 {!clip.is_featured && <RowAction action={featureFilm} id={clip.id} label="Feature" />}
                 <RowAction action={deleteFilm} id={clip.id} label="Delete" destructive />
               </div>
@@ -272,19 +219,7 @@ export function FilmSection({ clips }: { clips: FilmClip[] }) {
 
       <AddPanel title="Add a clip">
         <EditorForm action={addFilm} submitLabel="Add clip">
-          <Field label="Title" hint="“Junior season highlights”, “Full game vs. Central”">
-            <TextInput name="title" required minLength={3} maxLength={120} />
-          </Field>
-
-          <div className="grid gap-6 sm:grid-cols-2">
-            <Field label="Link">
-              <TextInput name="url" type="url" required placeholder="https://" />
-            </Field>
-
-            <Field label="Season">
-              <TextInput name="season" maxLength={40} placeholder="2026" />
-            </Field>
-          </div>
+          <FilmFields />
         </EditorForm>
       </AddPanel>
     </EditorSection>
@@ -316,7 +251,7 @@ export function CoachSection({ coaches }: { coaches: CoachContact[] }) {
                 </p>
               </div>
 
-              <RowAction action={deleteCoach} id={coach.id} label="Delete" destructive />
+              <div className="flex basis-full flex-wrap gap-2"><Disclosure summary="Edit"><EditorForm action={editCoach} submitLabel="Save reference" compact><input type="hidden" name="id" value={coach.id} /><CoachFields coach={coach} /></EditorForm></Disclosure><RowAction action={deleteCoach} id={coach.id} label="Delete" destructive /></div>
             </li>
           ))}
         </ol>
@@ -324,29 +259,16 @@ export function CoachSection({ coaches }: { coaches: CoachContact[] }) {
 
       <AddPanel title="Add a reference">
         <EditorForm action={addCoach} submitLabel="Add reference">
-          <div className="grid gap-6 sm:grid-cols-2">
-            <Field label="Name">
-              <TextInput name="name" required minLength={2} maxLength={80} />
-            </Field>
-
-            <Field label="Role">
-              <TextInput name="role" maxLength={80} placeholder="Head Coach" />
-            </Field>
-
-            <Field label="School or club">
-              <TextInput name="org_name" maxLength={120} />
-            </Field>
-
-            <Field label="Email">
-              <TextInput name="email" type="email" />
-            </Field>
-
-            <Field label="Phone">
-              <TextInput name="phone" type="tel" maxLength={25} />
-            </Field>
-          </div>
+          <CoachFields />
         </EditorForm>
       </AddPanel>
     </EditorSection>
   );
+}
+
+function FilmFields({ clip }: { clip?: FilmClip }) {
+ return <><Field label="Title" hint="Junior season highlights, full game vs. Central"><TextInput name="title" required minLength={3} maxLength={120} defaultValue={clip?.title ?? ""} /></Field><div className="grid gap-5 sm:grid-cols-2"><Field label="Link"><TextInput name="url" type="url" required placeholder="https://" defaultValue={clip?.url ?? ""} /></Field><Field label="Season"><TextInput name="season" maxLength={40} defaultValue={clip?.season ?? ""} placeholder="2026" /></Field></div></>;
+}
+function CoachFields({ coach }: { coach?: CoachContact }) {
+ return <div className="grid gap-5 sm:grid-cols-2"><Field label="Name"><TextInput name="name" required minLength={2} maxLength={80} defaultValue={coach?.name ?? ""} /></Field><Field label="Role"><TextInput name="role" maxLength={80} defaultValue={coach?.role ?? ""} placeholder="Head Coach" /></Field><Field label="School or club"><TextInput name="org_name" maxLength={120} defaultValue={coach?.org_name ?? ""} /></Field><Field label="Email"><TextInput name="email" type="email" defaultValue={coach?.email ?? ""} /></Field><Field label="Phone"><TextInput name="phone" type="tel" maxLength={25} defaultValue={coach?.phone ?? ""} /></Field></div>;
 }

@@ -65,8 +65,8 @@ export default async function ResumePage({ params }: PageProps<"/[handle]">) {
     repo.listCoaches(profile.id, viewerId),
   ]);
 
-  // Fire-and-forget: the view counter must never delay or fail the render.
-  void repo.recordView(profile.id, viewerId);
+  // A metrics outage must not turn an otherwise readable resume into an error.
+  await repo.recordView(profile.id, viewerId).catch(() => console.warn("Roster: profile view could not be recorded."));
 
   return (
     <Site>

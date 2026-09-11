@@ -1,0 +1,9 @@
+import Link from "next/link";
+import { networkContext } from "@/components/network/server";
+import { Avatar, EmptyState, PageHeading, Timestamp } from "@/components/network/primitives";
+import { ActionForm, RefreshControl } from "@/components/network/ActionForm";
+const labels = { follow: "started following you", like: "liked your post", comment: "commented on your post", message: "sent you a message", request: "sent a message request", verification_request: "requested verification of a record", verification_verified: "confirmed a record", verification_disputed: "responded to a verification request" };
+export default async function NotificationsPage() {
+ const { repo } = await networkContext(); const notifications = await repo.getNotifications();
+ return <div className="network-page"><PageHeading eyebrow="IN YOUR CIRCLE" title="Activity.">The latest connections and conversations around your work.</PageHeading><div className="network-row"><RefreshControl />{notifications.some(item => !item.read) && <ActionForm quiet operation="notifications" label="Mark all as read" />}</div>{notifications.length ? <div className="network-panel network-inbox">{notifications.map(item => <Link className={`network-inbox-row ${item.read ? "" : "network-notification-new"}`} key={item.id} href={item.href ?? (item.kind === "follow" ? `/app/people/${item.actor.handle}` : item.kind === "message" || item.kind === "request" ? `/app/messages/${item.targetId}` : `/app/posts/${item.targetId}`)}><Avatar member={item.actor} /><div className="network-inbox-copy"><p><strong>{item.actor.name}</strong> {labels[item.kind]}.</p><Timestamp value={item.createdAt} /></div>{!item.read && <span className="network-dot" aria-label="Unread" />}</Link>)}</div> : <EmptyState title="You’re all caught up.">New follows, likes, comments, and messages will appear here.</EmptyState>}</div>;
+}
