@@ -21,7 +21,7 @@
 | 6 | `66bb74e` | done | lists CRUD, admin deleteUser, password re-auth, email pending, forgot/reset, feature_film RPC, search positions+ILIKE escape, handle rate-limit; unit 175; e2e all pass |
 | 7 | `8115fb3` | done | OG/Twitter cards, JSON-LD, sitemap shards, print QR, verification provenance, unlisted X-Robots-Tag, avatars (local+/0019), Suspense header, proxy cookie skip; unit 193; e2e 33/33 |
 | 8 | `de9640e` | done | recruiter/coach onboarding, imperial measurables, sport events, film/coach edit, expired resend, search filters/sort, list notes/CSV, saved searches, viewer summary, richer rows; unit 224 |
-| 9 | `c521c79` | done | rate limiting, privacy/terms, minors consent + contact masking, profile reporting/moderation, health/logger/Sentry hooks, launch checklist; unit 251; e2e all pass; audit no findings |
+| 9 | `0018b0a` | done | rate limiting, privacy/terms, minors consent + contact masking, profile reporting/moderation, health/logger/Sentry hooks, launch checklist; unit 251; e2e all pass; audit no findings |
 
 ## Baseline health (captured this session)
 
@@ -307,7 +307,7 @@ All **118** improvements are implemented on `feat/roster-improvements`.
 | 6 | `66bb74e` | lists CRUD, account lifecycle, password reset, search parity |
 | 7 | `8115fb3` | OG/Twitter cards, JSON-LD, print QR, avatars, Suspense header, proxy perf |
 | 8 | `de9640e` | recruiter/coach onboarding, imperial measurables, sport events, search filters, list notes/CSV |
-| 9 | `c521c79` | rate limiting, privacy/terms, minors consent, profile reporting, health/logger, launch docs |
+| 9 | `0018b0a` | rate limiting, privacy/terms, minors consent, profile reporting, health/logger, launch docs |
 
 **Final verification (local, Wave 9):** `npm run typecheck` ✓ · `npm run lint` ✓ · `npm test` **251/251** · `npm run build` ✓ · `npm run e2e` all steps ✓ · `npm run audit` **no findings** · migrations `0008`–`0021` in git.
 
