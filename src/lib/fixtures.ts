@@ -16,6 +16,7 @@ export const previewProfile: Profile = {
   account_kind: "athlete",
   visibility: "public",
   display_name: "Ava Reyes",
+  title: null,
   avatar_url: null,
   cover_url: null,
   bio: "400m / 4x400. Chasing 53 flat before outdoor states. Recruiting class of 2027 — open to conversations.",
@@ -45,6 +46,9 @@ export const previewProfile: Profile = {
   verified_count: 6,
   identity_verified_at: "2026-03-02T00:00:00Z",
   suspended_at: null,
+  viewer_summary_opt_in: false,
+  age_consent: "adult",
+  consent_at: "2026-01-01T00:00:00.000Z",
   created_at: "2026-01-14T00:00:00Z",
   updated_at: "2026-08-01T00:00:00Z",
 };
@@ -69,6 +73,8 @@ function entry(
     org_logo_url: null,
     event_name: null,
     evidence_count: 0,
+    verified_by: null,
+    value_numeric: null,
     ...partial,
   };
 }

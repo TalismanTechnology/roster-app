@@ -8,7 +8,9 @@ import {
   useTransform,
   useMotionValue,
   useVelocity,
-  useAnimationFrame
+  useAnimationFrame,
+  useInView,
+  useReducedMotion
 } from 'motion/react';
 
 interface VelocityMapping {
@@ -109,6 +111,12 @@ export const ScrollVelocity: React.FC<ScrollVelocityProps> = ({
     const copyRef = useRef<HTMLSpanElement>(null);
     const copyWidth = useElementWidth(copyRef);
 
+    // Reduced motion renders the row static; offscreen rows stop ticking so
+    // the landing isn't spending frames on something nobody can see.
+    const rowRef = useRef<HTMLDivElement>(null);
+    const isInView = useInView(rowRef);
+    const prefersReduced = useReducedMotion();
+
     function wrap(min: number, max: number, v: number): number {
       const range = max - min;
       const mod = (((v - min) % range) + range) % range;
@@ -122,6 +130,7 @@ export const ScrollVelocity: React.FC<ScrollVelocityProps> = ({
 
     const directionFactor = useRef<number>(1);
     useAnimationFrame((t, delta) => {
+      if (prefersReduced || !isInView) return;
       let moveBy = directionFactor.current * baseVelocity * (delta / 1000);
 
       if (velocityFactor.get() < 0) {
@@ -144,7 +153,7 @@ export const ScrollVelocity: React.FC<ScrollVelocityProps> = ({
     }
 
     return (
-      <div className={`${parallaxClassName} relative overflow-hidden`} style={parallaxStyle}>
+      <div ref={rowRef} className={`${parallaxClassName} relative overflow-hidden`} style={parallaxStyle}>
         <motion.div
           className={`${scrollerClassName} flex whitespace-nowrap`}
           style={{ x, ...scrollerStyle }}

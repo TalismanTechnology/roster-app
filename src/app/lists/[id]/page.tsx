@@ -2,12 +2,19 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
+import { ListNoteForm, RenameListForm } from "@/components/lists/ListForms";
+import { Avatar } from "@/components/record/Avatar";
 import { Site } from "@/components/shell/Site";
 import { Corner, CORNER, Verified } from "@/components/ui/marks";
-import { deleteList, removeFromList } from "@/lib/actions/lists";
+import { homePathFor } from "@/lib/accounts";
+import { deleteList, moveToList, removeFromList } from "@/lib/actions/lists";
+import { idSchema } from "@/lib/actions/schemas";
 import { getRepository } from "@/lib/data";
-import { getCurrentUser } from "@/lib/data/auth";
+import { getCurrentProfile, getCurrentUser } from "@/lib/data/auth";
+import { isRecruiterKind } from "@/lib/data/rules";
 import { fullDate, levelLabel } from "@/lib/format";
+import { heightLabel, weightLabel } from "@/lib/measurables";
+import { signInHref } from "@/lib/safe-next";
 import { sportName } from "@/lib/sports";
 
 export const metadata: Metadata = {
@@ -15,17 +22,26 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-/** One list: the athletes on it, each a row like search, with a remove. */
+/**
+ * One list: the athletes on it, each a row like search with the recruiter's
+ * note inline (#86), a move to another list and a remove (#89), and the
+ * whole list as a CSV.
+ */
 export default async function ListPage({ params }: PageProps<"/lists/[id]">) {
   const { id } = await params;
   const user = await getCurrentUser();
-  if (!user) redirect("/sign-in?next=/lists");
+  if (!user) redirect(signInHref(`/lists/${id}`));
+  const viewer = await getCurrentProfile();
+  if (!viewer) redirect("/onboarding");
+  if (!isRecruiterKind(viewer.account_kind)) redirect(homePathFor(viewer.account_kind));
+  if (!idSchema.safeParse(id).success) notFound();
 
   const repo = await getRepository();
-  const detail = await repo.getList(user.id, id);
+  const [detail, lists] = await Promise.all([repo.getList(user.id, id), repo.listLists(user.id)]);
   if (!detail) notFound();
 
   const { list, members } = detail;
+  const others = lists.filter((l) => l.id !== list.id);
 
   return (
     <Site>
@@ -42,13 +58,30 @@ export default async function ListPage({ params }: PageProps<"/lists/[id]">) {
             <h1 className="font-display text-display-lg mt-4 leading-[0.95] tracking-tight">{list.name}</h1>
             {list.note && <p className="mt-3 max-w-xl text-ink-muted">{list.note}</p>}
           </div>
-          <form action={deleteList}>
-            <input type="hidden" name="list_id" value={list.id} />
-            <button type="submit" className="label cursor-pointer text-ink-subtle underline decoration-transparent underline-offset-4 transition-colors hover:text-disputed hover:decoration-disputed">
-              Delete list
-            </button>
-          </form>
+          <div className="flex items-center gap-5">
+            {members.length > 0 && (
+              // A plain link: the route answers with an attachment.
+              <a href={`/lists/${list.id}/export`} download className="btn-outline min-h-9 whitespace-nowrap px-4 text-sm">
+                Export CSV
+              </a>
+            )}
+            <form action={deleteList}>
+              <input type="hidden" name="list_id" value={list.id} />
+              <button type="submit" className="label cursor-pointer whitespace-nowrap text-ink-subtle underline decoration-transparent underline-offset-4 transition-colors hover:text-disputed hover:decoration-disputed">
+                Delete list
+              </button>
+            </form>
+          </div>
         </header>
+
+        <details className="mb-8 border-t border-rule pt-4">
+          <summary className="label w-fit cursor-pointer text-ink-subtle underline decoration-transparent underline-offset-4 transition-colors hover:text-ink hover:decoration-ink">
+            Rename list
+          </summary>
+          <div className="mt-4 max-w-md">
+            <RenameListForm listId={list.id} name={list.name} />
+          </div>
+        </details>
 
         {members.length === 0 ? (
           <p className="border-y border-rule py-8 text-ink-muted">
@@ -62,9 +95,12 @@ export default async function ListPage({ params }: PageProps<"/lists/[id]">) {
           <ol className="divide-y divide-rule border-y border-rule">
             {members.map((a) => {
               const line = [a.positions.join(" / "), a.school ?? a.location, a.grad_year ? `Class of ${a.grad_year}` : null].filter(Boolean).join(" · ");
-              const meta = [levelLabel(a.level), sportName(a.primary_sport), a.region].filter(Boolean).join(" · ");
+              const meta = [levelLabel(a.level), sportName(a.primary_sport), a.region, heightLabel(a.height_cm), weightLabel(a.weight_kg)]
+                .filter(Boolean)
+                .join(" · ");
               return (
-                <li key={a.id} className="grid grid-cols-[1fr_auto] items-center gap-x-6 gap-y-2 py-4 sm:grid-cols-[1.6fr_auto_auto]">
+                <li key={a.id} className="grid grid-cols-[auto_1fr_auto] items-center gap-x-5 gap-y-2 py-4 sm:grid-cols-[auto_1.6fr_auto_auto]">
+                  <Avatar url={a.avatar_url} name={a.display_name} className="size-12" sizes="48px" />
                   <div className="min-w-0">
                     <Link href={`/${a.handle}`} className="font-bold hover:underline">
                       {a.display_name}
@@ -84,6 +120,31 @@ export default async function ListPage({ params }: PageProps<"/lists/[id]">) {
                       Remove
                     </button>
                   </form>
+                  <div className="col-span-full flex flex-wrap items-center gap-x-6 gap-y-2 sm:col-start-2">
+                    <div className="min-w-0 flex-1 basis-72">
+                      <ListNoteForm listId={list.id} profileId={a.id} note={a.list_note} athleteName={a.display_name} />
+                    </div>
+                    {others.length > 0 && (
+                      <form action={moveToList} className="flex items-center gap-2">
+                        <input type="hidden" name="list_id" value={list.id} />
+                        <input type="hidden" name="profile_id" value={a.id} />
+                        <select
+                          name="to_list_id"
+                          aria-label={`Move ${a.display_name} to`}
+                          className="label cursor-pointer rounded-(--radius-input) border border-rule-strong bg-paper-raised/60 px-2 py-1.5 text-ink focus:border-ink focus:outline-none"
+                        >
+                          {others.map((l) => (
+                            <option key={l.id} value={l.id}>
+                              {l.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button type="submit" className="label cursor-pointer text-ink-subtle underline decoration-transparent underline-offset-4 hover:text-ink hover:decoration-ink">
+                          Move
+                        </button>
+                      </form>
+                    )}
+                  </div>
                 </li>
               );
             })}

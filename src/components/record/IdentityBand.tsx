@@ -1,11 +1,16 @@
 import Link from "next/link";
 
 import { Img } from "@/components/ui/Img";
-import { Corner, CORNER, Frame, Verified } from "@/components/ui/marks";
+import { ArrowUpRight, Corner, CORNER, Frame, Verified } from "@/components/ui/marks";
+import { contactGate, type ContactGate } from "@/lib/contact";
 import type { FilmClip, Profile, RecordEntry } from "@/lib/database.types";
 import { heightLabel, levelLabel, weightLabel } from "@/lib/format";
+import { recordLinks, socialLinks } from "@/lib/links";
+import { signInHref } from "@/lib/safe-next";
+import { siteHost } from "@/lib/site";
 import { sportName } from "@/lib/sports";
 
+import { Avatar } from "./Avatar";
 import { ShareBar } from "./ShareBar";
 
 /**
@@ -18,11 +23,14 @@ export function IdentityBand({
   entries,
   film,
   isOwner,
+  contact,
 }: {
   profile: Profile;
   entries: RecordEntry[];
   film: FilmClip[];
   isOwner: boolean;
+  /** What "Contact" may show this viewer (lib/contact.ts). Omitted: the profile as given, revealed. */
+  contact?: ContactGate;
 }) {
   const roster = [
     profile.positions.length > 0 ? profile.positions.join(" / ") : null,
@@ -38,7 +46,13 @@ export function IdentityBand({
   ].filter(Boolean);
 
   const label = [levelLabel(profile.level), sportName(profile.primary_sport)].filter(Boolean).join(" · ") || "Athlete";
-  const isContactable = profile.is_recruitable && profile.visibility === "public" && Boolean(profile.contact_email);
+  // Same gate as the contact email and the references: open to recruiting,
+  // on a public resume. Hudl and results pages are the record itself, so
+  // they show whenever the resume does.
+  const isRecruitingOpen = profile.is_recruitable && profile.visibility === "public";
+  // Signed-out visitors and athletes get a masked hint, never the address (#44).
+  const gate = contact ?? contactGate(profile, { id: profile.id, account_kind: profile.account_kind });
+  const links = [...recordLinks(profile), ...(isRecruitingOpen ? socialLinks(profile) : [])];
 
   const stats = [
     { value: profile.verified_count, label: "Verified" },
@@ -63,16 +77,39 @@ export function IdentityBand({
             {label}
           </p>
 
-          <h1 className="font-display text-display-lg mt-4 flex flex-wrap items-center gap-x-3 leading-[0.95] tracking-tight">
-            {profile.display_name}
-            {profile.identity_verified_at && <Verified className="text-[0.5em]" label="Identity verified" />}
-          </h1>
+          <div className="mt-4 flex items-end gap-5">
+            {profile.avatar_url && <Avatar url={profile.avatar_url} name={profile.display_name} className="size-20 @xl:size-28" sizes="112px" />}
+            <div className="min-w-0">
+              <h1 className="font-display text-display-lg flex flex-wrap items-center gap-x-3 leading-[0.95] tracking-tight">
+                {profile.display_name}
+                {profile.identity_verified_at && <Verified className="text-[0.5em]" label="Identity verified" />}
+              </h1>
 
-          <p className="mt-2 text-ink-muted">roster.us/{profile.handle}</p>
+              <p className="mt-2 text-ink-muted">
+                {siteHost()}/{profile.handle}
+              </p>
+            </div>
+          </div>
 
           {roster.length > 0 && <p className="mt-5 text-lg font-bold">{roster.join(" · ")}</p>}
           {context.length > 0 && <p className="mt-1 text-ink-muted">{context.join(" · ")}</p>}
           {profile.bio && <p className="mt-5 max-w-2xl whitespace-pre-line leading-relaxed">{profile.bio}</p>}
+
+          {links.length > 0 && (
+            <ul className="mt-5 flex flex-wrap gap-2" aria-label="Links">
+              {links.map((link) => (
+                <li key={link.kind}>
+                  {/* rel=me ties the account to this page; nofollow because
+                      the athlete, not Roster, vouches for the destination. */}
+                  <a href={link.href} rel="me nofollow noopener noreferrer" target="_blank" className="chip group transition-colors hover:border-ink hover:text-ink">
+                    {link.label}
+                    <ArrowUpRight className="!size-3 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                  </a>
+                  <span className="hidden print:inline"> {link.href}</span>
+                </li>
+              ))}
+            </ul>
+          )}
 
           {isOwner && (
             <p className="print-hidden label mt-6 flex flex-wrap items-center gap-x-3 gap-y-1 text-ink-muted">
@@ -103,13 +140,30 @@ export function IdentityBand({
             </dl>
 
             <div className="print-hidden flex flex-wrap items-center gap-2 border-t border-rule pt-4">
-              {isContactable && (
-                <a href={`mailto:${profile.contact_email}`} className="btn-primary min-h-9 px-4 text-sm">
+              {gate.state === "revealed" && gate.email && (
+                <a href={`mailto:${gate.email}`} className="btn-primary min-h-9 px-4 text-sm">
                   Contact
                 </a>
               )}
+              {gate.state === "revealed" && gate.phone && (
+                <a href={`tel:${gate.phone}`} className="btn-outline min-h-9 px-4 text-sm">
+                  Call
+                </a>
+              )}
+              {gate.state === "gated" && (
+                <Link href={signInHref(`/${profile.handle}`)} className="btn-primary min-h-9 px-4 text-sm" data-contact-gate>
+                  Request contact
+                </Link>
+              )}
               <ShareBar handle={profile.handle} />
             </div>
+            {gate.state === "gated" && (
+              <p className="print-hidden label -mt-2 text-ink-muted">
+                <span className="text-ink-subtle">{[gate.maskedEmail, gate.maskedPhone].filter(Boolean).join(" · ")}</span>
+                <br />
+                Contact details open to signed-in recruiters and coaches.
+              </p>
+            )}
           </div>
         </Frame>
       </div>

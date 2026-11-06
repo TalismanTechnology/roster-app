@@ -93,13 +93,17 @@ lists need small additions there (see the comments in that file).
 | Script | What it does |
 |---|---|
 | `npm run dev` | Dev server on :3000 |
-| `npm run build` / `npm run typecheck` | Production build / `tsc --noEmit` |
+| `npm run build` / `npm run typecheck` | Production build / `next typegen && tsc --noEmit` |
+| `npm run lint` | ESLint (flat config, `eslint-config-next` + TypeScript rules) |
 | `npm test` | Unit tests for the data layer: the visibility rules, the local adapter, sessions, film URLs |
 | `npm run e2e` | Drives the whole product loop in a browser against a dev server — 16 steps, both account kinds, the coach link |
 | `npm run audit` | Every route at 320/375/768/1024/1440 + print: overflow, console errors, alt text, control names, labels, heading order |
-| `npm run shots [route]` | Screenshots one route at four widths into `.shots/` |
+| `npm run shots [route]` | Screenshots one route at four widths into `.shots/` (`--section=film`, `--base=url` or `BASE_URL`/`PORT`) |
 | `npm run seed` | Rebuild `.data/roster.json` |
+| `npm run moderate -- reports \| suspend <handle> \| reinstate <handle>` | Local-mode moderation: open reports, suspend or reinstate a resume |
 | `npm run test:schema` | Schema tests against a local PostgreSQL (`brew install postgresql@16`) |
+
+Going live: [`docs/LAUNCH-CHECKLIST.md`](docs/LAUNCH-CHECKLIST.md) — migrations, domain, env vars, auth redirects, email, backups, moderation. `GET /api/health` reports readiness as JSON.
 
 ## Where things live
 

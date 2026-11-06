@@ -5,6 +5,8 @@ const LINKS: [string, string][] = [
   ["Sign in", "/sign-in"],
   ["Create your resume", "/sign-up"],
   ["Preview a resume", "/preview"],
+  ["Privacy", "/privacy"],
+  ["Terms", "/terms"],
 ];
 
 export function SiteFooter() {

@@ -1,7 +1,7 @@
 /**
  * Database types.
  *
- * Hand-authored to cover the tables the app currently reads. Once the Supabase
+ * Hand-authored to cover the schema through migration 0016. Once the Supabase
  * CLI is linked to the project, replace this file wholesale with:
  *
  *   npx supabase gen types typescript --linked > src/lib/database.types.ts
@@ -41,13 +41,42 @@ export type VerificationState =
   | "disputed"
   | "rejected";
 
+export type VerifierKind = "roster_staff" | "coach" | "organization" | "integration";
+
 export type ProfileVisibility = "private" | "unlisted" | "public";
+
+/** `profiles.age_consent` (0021). */
+export type AgeConsent = "adult" | "guardian";
 
 export type AccountKind = "athlete" | "coach" | "recruiter" | "brand" | "staff";
 
 export type MembershipRole = "athlete" | "captain" | "coach" | "staff" | "admin";
 
+export type OrgKind = "school" | "club" | "team" | "league" | "governing_body";
+
+export type MeasureDirection = "lower_is_better" | "higher_is_better";
+
 export type FilmProvider = "youtube" | "vimeo" | "hudl";
+
+/** Leftover from a reverted social PR (0010); client access revoked in 0015. */
+export type PostAnchor = "achievement" | "film";
+
+export type Sport = {
+  slug: string;
+  name: string;
+  category: string;
+  is_timed: boolean;
+  created_at: string;
+};
+
+export type SportEvent = {
+  id: string;
+  sport_slug: string;
+  slug: string;
+  name: string;
+  unit: string;
+  direction: MeasureDirection;
+};
 
 export type Profile = {
   id: string;
@@ -55,6 +84,8 @@ export type Profile = {
   account_kind: AccountKind;
   visibility: ProfileVisibility;
   display_name: string;
+  /** "Head Coach", "Assistant Coach" — free text, not coach-only (0008). */
+  title: string | null;
   avatar_url: string | null;
   cover_url: string | null;
   bio: string | null;
@@ -84,6 +115,12 @@ export type Profile = {
   verified_count: number;
   identity_verified_at: string | null;
   suspended_at: string | null;
+  /** The athlete opted into "viewed by N recruiters this week" (0020). */
+  viewer_summary_opt_in: boolean;
+  /** Onboarding attestation (0021): 18 or older, or a parent / guardian agreed. Null for accounts made before it. */
+  age_consent: AgeConsent | null;
+  /** When `age_consent` was given (0021). */
+  consent_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -135,10 +172,49 @@ export type RecordEntry = {
   org_logo_url: string | null;
   event_name: string | null;
   evidence_count: number;
-  /** "Tom Bradley, Head Coach" — who stood behind a verified entry. Not a
-   *  column on the view yet; the local adapter derives it from
-   *  `verifications`, Supabase leaves it undefined until the view grows it. */
-  verified_by?: string | null;
+  /** "Tom Bradley, Head Coach" — who stood behind a verified entry. Null
+   *  unless the entry is currently verified (view column since 0016; the
+   *  local adapter derives it the same way). */
+  verified_by: string | null;
+  /** The mark in `unit` (view column since 0020). */
+  value_numeric: number | null;
+};
+
+export type AchievementEvidence = {
+  id: string;
+  achievement_id: string;
+  kind: string;
+  url: string;
+  storage_path: string | null;
+  caption: string | null;
+  submitted_by: string | null;
+  created_at: string;
+};
+
+/** The append-only audit trail behind `achievements.verification`. */
+export type Verification = {
+  id: string;
+  achievement_id: string;
+  verifier_id: string | null;
+  verifier_kind: VerifierKind;
+  outcome: "verified" | "disputed" | "rejected";
+  method: string | null;
+  note: string | null;
+  source_url: string | null;
+  /** Name and role as given at verification time (0016). */
+  verifier_name: string | null;
+  verifier_role: string | null;
+  created_at: string;
+};
+
+export type CoachEndorsement = {
+  id: string;
+  profile_id: string;
+  endorser_id: string;
+  org_id: string | null;
+  body: string;
+  is_visible: boolean;
+  created_at: string;
 };
 
 export type FilmClip = {
@@ -176,7 +252,7 @@ export type Organization = {
   id: string;
   slug: string;
   name: string;
-  kind: "school" | "club" | "team" | "league" | "governing_body";
+  kind: OrgKind;
   level: AthleteLevel | null;
   logo_url: string | null;
   city: string | null;
@@ -197,6 +273,9 @@ export type Membership = {
   started_on: string;
   ended_on: string | null;
   is_current: boolean;
+  /** Set by a verified coach at the same org, or staff (0008). */
+  verified_at: string | null;
+  verified_by: string | null;
   created_at: string;
 };
 
@@ -206,6 +285,99 @@ export type ProfileView = {
   viewed_on: string;
   view_count: number;
 };
+
+export type RecruiterList = {
+  id: string;
+  owner_id: string;
+  name: string;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** 0020. A recruiter's saved /search filters, owner-only under RLS. */
+export type SavedSearchRow = {
+  id: string;
+  owner_id: string;
+  name: string;
+  query: string;
+  digest: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+/** `profile_reports` (0021). Staff-readable only; written through `report_profile()`. */
+export type ProfileReportRow = {
+  id: string;
+  profile_id: string;
+  reporter_id: string | null;
+  reason: "impersonation" | "false_record" | "inappropriate" | "minor_safety" | "spam" | "other";
+  detail: string | null;
+  status: "open" | "actioned" | "dismissed";
+  created_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+};
+
+export type RecruiterListMember = {
+  list_id: string;
+  profile_id: string;
+  note: string | null;
+  added_at: string;
+};
+
+export type AccessRequest = {
+  id: string;
+  full_name: string;
+  email: string;
+  level: AthleteLevel | null;
+  sport: string | null;
+  organization: string | null;
+  instagram: string | null;
+  results_url: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+};
+
+export type ReservedHandle = { handle: string; reason: string };
+
+export type Post = {
+  id: string;
+  author_id: string;
+  anchor_kind: PostAnchor;
+  achievement_id: string | null;
+  film_id: string | null;
+  caption: string | null;
+  created_at: string;
+};
+
+export type PostReaction = {
+  post_id: string;
+  profile_id: string;
+  created_at: string;
+};
+
+/**
+ * `verification_requests` (0017) as the athlete may read it — every column
+ * but `token_hash`, which API roles cannot select. Writes go through the
+ * functions below; there are no client INSERT/UPDATE grants.
+ */
+export type VerificationRequestRecord = {
+  id: string;
+  achievement_id: string;
+  profile_id: string;
+  coach_contact_id: string;
+  status: "pending" | "verified" | "disputed" | "expired";
+  note: string | null;
+  verifier_name: string | null;
+  verifier_role: string | null;
+  flagged_unknown_athlete: boolean;
+  created_at: string;
+  responded_at: string | null;
+  expires_at: string;
+};
+
+export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
 type Row<T> = {
   Row: T;
@@ -217,20 +389,72 @@ type Row<T> = {
 export type Database = {
   public: {
     Tables: {
+      sports: Row<Sport>;
+      sport_events: Row<SportEvent>;
+      reserved_handles: Row<ReservedHandle>;
       profiles: Row<Profile>;
-      achievements: Row<Achievement>;
       organizations: Row<Organization>;
       memberships: Row<Membership>;
+      access_requests: Row<AccessRequest>;
+      achievements: Row<Achievement>;
+      achievement_evidence: Row<AchievementEvidence>;
+      verifications: Row<Verification>;
+      coach_endorsements: Row<CoachEndorsement>;
       film_clips: Row<FilmClip>;
       coach_contacts: Row<CoachContact>;
       profile_views: Row<ProfileView>;
-      reserved_handles: Row<{ handle: string; reason: string }>;
+      recruiter_lists: Row<RecruiterList>;
+      recruiter_list_members: Row<RecruiterListMember>;
+      saved_searches: Row<SavedSearchRow>;
+      profile_reports: Row<ProfileReportRow>;
+      verification_requests: Row<VerificationRequestRecord>;
+      /** Not client-accessible since 0015; typed so service-role code can. */
+      posts: Row<Post>;
+      post_reactions: Row<PostReaction>;
     };
     Views: {
       record_entries: { Row: RecordEntry; Relationships: [] };
     };
     Functions: {
       record_profile_view: { Args: { target: string }; Returns: void };
+      is_staff: { Args: Record<string, never>; Returns: boolean };
+      can_view_profile: { Args: { target: string }; Returns: boolean };
+      coaches_athlete: { Args: { target: string }; Returns: boolean };
+      can_vouch_for_membership: { Args: { target_membership: string }; Returns: boolean };
+      /** 0017. Returns the new row (no hash) as JSON. Authenticated only. */
+      create_verification_request: {
+        Args: { p_achievement: string; p_coach_contact: string; p_token_hash: string; p_expires_at?: string | null };
+        Returns: Json;
+      };
+      /** 0017. Takes the RAW token. The detail payload, or null. Anon-callable. */
+      get_verification_request: { Args: { p_token: string }; Returns: Json | null };
+      /** 0017. Takes the RAW token. Detail payloads of live sibling requests. Anon-callable. */
+      get_coach_batch_requests: { Args: { p_token: string }; Returns: Json[] };
+      /** 0017. Takes the RAW token. Anon-callable; refuses the athlete's own session. */
+      respond_verification: {
+        Args: {
+          p_token: string;
+          p_outcome: string;
+          p_note: string | null;
+          p_verifier_name: string;
+          p_verifier_role: string | null;
+          p_flag_unknown?: boolean;
+          p_request_id?: string | null;
+        };
+        Returns: Json;
+      };
+      /** 0017. Owner only; marks a pending request expired. */
+      revoke_verification_request: { Args: { p_request_id: string }; Returns: Json };
+      /** 0018. Owner only; unfeatures the athlete's other clips and features this one, atomically. */
+      feature_film: { Args: { clip: string }; Returns: void };
+      /** 0018. Escapes LIKE metacharacters (backslash, `%`, `_`) so a value matches literally. */
+      like_literal: { Args: { value: string }; Returns: string };
+      /** 0020. Owner only (auth.uid()); distinct recruiter/coach viewers in the last 7 days. Counts, never ids. */
+      weekly_viewer_summary: { Args: Record<string, never>; Returns: Json };
+      /** 0021. Anon-callable; files a report against a resume the caller can see. */
+      report_profile: { Args: { p_profile: string; p_reason: string; p_detail: string | null }; Returns: void };
+      /** 0021. Staff only; sets or clears suspended_at and resolves open reports. */
+      set_profile_suspension: { Args: { p_profile: string; p_suspend: boolean }; Returns: Json };
       search_athletes: {
         Args: {
           q?: string | null;
@@ -240,6 +464,10 @@ export type Database = {
           regions?: string[] | null;
           athlete_positions?: string[] | null;
           verified_only?: boolean;
+          /** 0020. Inclusive GPA floor; null is no floor. */
+          min_gpa?: number | null;
+          /** 0020. verified_count (default) | graduation_year | gpa | recent. */
+          sort_by?: string | null;
           page_size?: number;
           page_offset?: number;
         };
@@ -253,6 +481,10 @@ export type Database = {
       profile_visibility: ProfileVisibility;
       account_kind: AccountKind;
       membership_role: MembershipRole;
+      verifier_kind: VerifierKind;
+      org_kind: OrgKind;
+      measure_direction: MeasureDirection;
+      post_anchor: PostAnchor;
     };
     CompositeTypes: Record<string, never>;
   };

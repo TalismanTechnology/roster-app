@@ -7,7 +7,9 @@ import { Site } from "@/components/shell/Site";
 import { Button } from "@/components/ui/Button";
 import { Corner, CORNER } from "@/components/ui/marks";
 import { getRepository } from "@/lib/data";
-import { getCurrentUser } from "@/lib/data/auth";
+import { homePathFor } from "@/lib/accounts";
+import { getCurrentProfile, getCurrentUser } from "@/lib/data/auth";
+import { isRecruiterKind } from "@/lib/data/rules";
 import { fullDate } from "@/lib/format";
 
 export const metadata: Metadata = {
@@ -17,12 +19,15 @@ export const metadata: Metadata = {
 
 /**
  * A recruiter's lists. Owner-only; the repository never returns another
- * person's list. Athletes can reach this too — a captain keeping track of
- * teammates is a fine use — so it isn't gated on account kind.
+ * person's list. Recruiter and coach accounts only (#86) — the actions
+ * refuse athletes too, so the page sends them back to their editor.
  */
 export default async function ListsPage() {
   const user = await getCurrentUser();
   if (!user) redirect("/sign-in?next=/lists");
+  const viewer = await getCurrentProfile();
+  if (!viewer) redirect("/onboarding");
+  if (!isRecruiterKind(viewer.account_kind)) redirect(homePathFor(viewer.account_kind));
 
   const repo = await getRepository();
   const lists = await repo.listLists(user.id);

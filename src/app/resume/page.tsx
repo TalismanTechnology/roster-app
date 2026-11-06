@@ -3,15 +3,28 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { buildChecklist, Checklist, firstUnfinished, type SectionId } from "@/components/editor/Checklist";
-import { AcademicsSection, ContactSection, IdentitySection, VisibilitySection } from "@/components/editor/ProfileSections";
+import { DirtyGuard } from "@/components/editor/DirtyGuard";
+import {
+  AcademicsSection,
+  ContactSection,
+  IdentitySection,
+  ViewerSummaryLine,
+  VisibilitySection,
+} from "@/components/editor/ProfileSections";
 import { CoachSection, FilmSection, RecordSection } from "@/components/editor/RecordSections";
 import { RequestsSection } from "@/components/editor/RequestsSection";
+import { ScaledPreview } from "@/components/editor/ScaledPreview";
 import { ResumeDocument } from "@/components/record/ResumeDocument";
 import { ShareBar } from "@/components/record/ShareBar";
 import { Site } from "@/components/shell/Site";
 import { Corner, CORNER } from "@/components/ui/marks";
 import { getRepository } from "@/lib/data";
-import { getCurrentUser } from "@/lib/data/auth";
+import { homePathFor } from "@/lib/accounts";
+import { getCurrentProfile, getCurrentUser } from "@/lib/data/auth";
+import { isLiveRequest } from "@/lib/data/rules";
+import type { VerificationRequest } from "@/lib/data/types";
+import { signInHref } from "@/lib/safe-next";
+import { siteHost } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Edit your resume",
@@ -36,21 +49,23 @@ const SECTION_IDS = new Set<string>(SECTIONS.map((s) => s.id));
  * URL so Back works and a link can point at "add your film" — chosen by a
  * checklist of what a recruiter would notice missing. A live preview of the
  * public resume sits beside it on wide screens, rendered by the same
- * component a recruiter gets and refreshed after every save.
+ * component a recruiter gets and refreshed after every save. Leaving a
+ * section with unsaved edits asks first (DirtyGuard).
  */
 export default async function ResumeEditorPage({ searchParams }: PageProps<"/resume">) {
   const user = await getCurrentUser();
-  if (!user) redirect("/sign-in");
+  if (!user) redirect(signInHref("/resume"));
 
   const repo = await getRepository();
-  const profile = await repo.getProfileById(user.id);
+  const profile = await getCurrentProfile();
 
   // Signed in but no profile yet: onboarding was abandoned partway.
   if (!profile) redirect("/onboarding");
-  // A recruiter has no resume to edit; their workspace is their lists.
-  if (profile.account_kind === "recruiter") redirect("/lists");
+  // Only athletes have a resume to edit; recruiters, coaches, brands, and
+  // staff work from their lists.
+  if (profile.account_kind !== "athlete") redirect(homePathFor(profile.account_kind));
 
-  const [entries, film, coaches, publicCoaches, requests, weekViews, params] = await Promise.all([
+  const [entries, film, coaches, publicCoaches, requests, weekViews, viewers, params] = await Promise.all([
     repo.listEntries(profile.id),
     repo.listFilm(profile.id),
     repo.listCoaches(profile.id, user.id),
@@ -58,6 +73,8 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
     repo.listCoaches(profile.id, null),
     repo.listVerificationRequests(profile.id),
     repo.weeklyViews(profile.id),
+    // #90: only asked for once the athlete opted in.
+    profile.viewer_summary_opt_in ? repo.viewerSummary(profile.id) : null,
     searchParams,
   ]);
 
@@ -65,11 +82,12 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
   const requested = typeof params.section === "string" && SECTION_IDS.has(params.section) ? (params.section as SectionId) : null;
   const active: SectionId = requested ?? firstUnfinished(checklist);
   const visibility = { public: "Public", unlisted: "Unlisted", private: "Private" }[profile.visibility];
-  const pendingCount = requests.filter((r) => r.status === "pending").length;
+  const pendingCount = requests.filter((r: VerificationRequest) => isLiveRequest(r)).length;
 
   return (
     <Site>
       <main className="flex flex-col gap-6 pb-16" style={{ paddingInline: "var(--pad-x)", paddingTop: "1.5rem" }}>
+        <DirtyGuard />
         {/* Share bar: the link, the numbers, and the door to the public page. */}
         <section aria-label="Your resume" className="panel">
           <div className="flex flex-wrap items-center gap-x-8 gap-y-4" style={{ padding: "var(--feature-pad)" }}>
@@ -79,7 +97,14 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
                 <span className={profile.visibility === "public" ? "font-bold text-ink" : "font-bold text-pending"}>{visibility}</span>
               </p>
               <p className="font-display mt-1 truncate text-display-sm">{profile.display_name}</p>
-              <p className="truncate text-sm text-ink-muted">roster.us/{profile.handle}</p>
+              <p className="truncate text-sm text-ink-muted">
+                {siteHost()}/{profile.handle}
+              </p>
+              {viewers && (
+                <div className="mt-2">
+                  <ViewerSummaryLine summary={viewers} />
+                </div>
+              )}
             </div>
 
             <dl className="flex gap-8">
@@ -98,7 +123,7 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
             </dl>
 
             <div className="flex flex-wrap items-center gap-2">
-              <ShareBar handle={profile.handle} print={false} />
+              <ShareBar handle={profile.handle} title={`${profile.display_name} · Roster`} print={false} />
               <Link href={`/${profile.handle}`} className="btn-primary min-h-10 px-4 text-sm">
                 View as a recruiter
               </Link>
@@ -114,7 +139,8 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
             <ol className="-mx-2 flex gap-1 overflow-x-auto px-2 pb-1 lg:sticky lg:top-[calc(var(--header-h)+1rem)] lg:mx-0 lg:flex-col lg:gap-1 lg:px-0">
               {SECTIONS.map((s) => {
                 const isActive = s.id === active;
-                const item = checklist.find((c) => c.id === s.id);
+                // The section's own item; the extras (photo, a verified entry) show on the checklist.
+                const isUnfinished = checklist.some((c) => c.key === s.id && !c.isDone);
                 return (
                   <li key={s.id}>
                     <Link
@@ -130,7 +156,7 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
                           {pendingCount}
                         </span>
                       )}
-                      {item && !item.isDone && s.id !== "requests" && (
+                      {isUnfinished && s.id !== "requests" && (
                         <span className={`size-2 rounded-full ${isActive ? "bg-paper/60" : "bg-pending"}`} aria-label="Not done" role="img" />
                       )}
                     </Link>
@@ -143,7 +169,7 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
           {/* The active section */}
           <div className="min-w-0 lg:col-span-6">
             {active === "identity" && <IdentitySection profile={profile} />}
-            {active === "record" && <RecordSection entries={entries} coaches={coaches} requests={requests} />}
+            {active === "record" && <RecordSection entries={entries} coaches={coaches} requests={requests} sport={profile.primary_sport} />}
             {active === "film" && <FilmSection clips={film} />}
             {active === "academics" && <AcademicsSection profile={profile} />}
             {active === "references" && <CoachSection coaches={coaches} />}
@@ -162,9 +188,9 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
                 <span>As a recruiter sees it · updates on save</span>
               </p>
               <div className="max-h-[calc(100svh-var(--header-h)-4.5rem)] overflow-y-auto border border-rule bg-paper">
-                <div style={{ zoom: 0.55 }}>
+                <ScaledPreview scale={0.55}>
                   <ResumeDocument profile={profile} entries={entries} film={film} coaches={publicCoaches} />
-                </div>
+                </ScaledPreview>
               </div>
             </div>
           </aside>

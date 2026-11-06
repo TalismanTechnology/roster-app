@@ -1,76 +1,77 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { Avatar } from "@/components/record/Avatar";
+import { SavedSearches } from "@/components/search/SavedSearches";
 import { SaveToList } from "@/components/search/SaveToList";
 import { Site } from "@/components/shell/Site";
 import { Checkbox, Field, Select, TextInput } from "@/components/ui/fields";
 import { Corner, CORNER, Frame, Verified } from "@/components/ui/marks";
 import { getRepository } from "@/lib/data";
-import { getCurrentUser } from "@/lib/data/auth";
-import type { RecruiterList } from "@/lib/data/types";
-import type { AthleteLevel, Profile } from "@/lib/database.types";
+import { getCurrentProfile, getCurrentUser } from "@/lib/data/auth";
+import { isRecruiterKind } from "@/lib/data/rules";
+import { MAX_QUERY_LENGTH, pageCount } from "@/lib/data/search-query";
+import type { RecruiterList, SavedSearch, TopMark } from "@/lib/data/types";
+import type { Profile } from "@/lib/database.types";
 import { LEVEL_OPTIONS, levelLabel } from "@/lib/format";
+import { heightLabel, weightLabel } from "@/lib/measurables";
+import { allPositions, MAX_POSITION_LENGTH, positionsFor } from "@/lib/positions";
+import { US_STATES } from "@/lib/regions";
+import {
+  describeFilters,
+  filtersToQuery,
+  parsePage,
+  parseSearchFilters,
+  SORT_OPTIONS,
+  toSearchParams,
+  type SearchFilters,
+} from "@/lib/search-filters";
 import { SPORTS, sportName } from "@/lib/sports";
 
 export const metadata: Metadata = {
   title: "Find athletes",
-  description: "Search verified athlete resumes by sport, level, class year, and state.",
+  description: "Search verified athlete resumes by sport, level, position, class year, GPA, and state.",
   alternates: { canonical: "/search" },
 };
 
 const PAGE_SIZE = 24;
-const LEVEL_VALUES = new Set<string>(LEVEL_OPTIONS.map(([value]) => value));
-
-type Filters = {
-  q: string | null;
-  sport: string | null;
-  level: string | null;
-  gradYear: number | null;
-  region: string | null;
-  verifiedOnly: boolean;
-};
 
 /**
  * Discovery. A plain GET form — every filter lives in the URL, so a recruiter
- * can bookmark "TX receivers, class of 2027" or send it to a colleague, and
- * the page needs no client JavaScript beyond the save-to-list control.
+ * can bookmark "TX receivers, class of 2027, 3.0+" or send it to a colleague,
+ * and the page needs no client JavaScript beyond the save controls. The URL
+ * is parsed and re-serialized by `search-filters`, the same code saved
+ * searches store with.
  *
  * The repository applies the listing rule: public athletes only, verified
- * first. A signed-in recruiter can save any row to a list.
+ * first unless another sort is chosen. A signed-in recruiter or coach can
+ * save any row to a list and save the search itself.
  */
 export default async function SearchPage({ searchParams }: PageProps<"/search">) {
   const params = await searchParams;
-  const filters: Filters = {
-    q: str(params.q),
-    sport: str(params.sport),
-    level: str(params.level),
-    gradYear: int(params.class),
-    region: str(params.state)?.toUpperCase() ?? null,
-    verifiedOnly: params.verified === "1",
-  };
-  const page = Math.max(int(params.page) ?? 1, 1);
+  const filters = parseSearchFilters(params);
 
   const [repo, user] = await Promise.all([getRepository(), getCurrentUser()]);
-  const athletes = await repo.searchAthletes({
-    q: filters.q,
-    sport: filters.sport,
-    level: filters.level && LEVEL_VALUES.has(filters.level) ? (filters.level as AthleteLevel) : null,
-    gradYear: filters.gradYear,
-    region: filters.region,
-    verifiedOnly: filters.verifiedOnly,
-    page,
-    pageSize: PAGE_SIZE,
-  });
+  // The repository clamps the page: `?page=999` serves the last page, not an
+  // empty one that still offers "Previous".
+  const { athletes, total, page, pageSize } = await repo.searchAthletes(toSearchParams(filters, parsePage(params), PAGE_SIZE));
+  const pages = pageCount(total, pageSize);
 
-  // Only a recruiter (or coach/staff) saves to lists; athletes never see the control.
-  const viewer = user ? await repo.getProfileById(user.id) : null;
-  const canSave = Boolean(viewer && viewer.account_kind !== "athlete");
-  const lists = canSave && user ? await repo.listLists(user.id) : [];
-  const savedIn = canSave && user
-    ? Object.fromEntries(await Promise.all(athletes.map(async (a) => [a.id, await repo.listsContaining(user.id, a.id)])))
-    : {};
+  // Only a recruiter (or coach/staff) saves to lists; athletes never see the controls.
+  const viewer = user ? await getCurrentProfile() : null;
+  const canSave = Boolean(user && viewer && isRecruiterKind(viewer.account_kind));
+  const ids = athletes.map((a) => a.id);
+  // One read each for the whole page, not one per row.
+  const [lists, savedIn, saved, marks] = await Promise.all([
+    canSave && user ? repo.listLists(user.id) : ([] as RecruiterList[]),
+    canSave && user ? repo.listsContainingMany(user.id, ids) : ({} as Record<string, string[]>),
+    canSave && user ? repo.listSavedSearches(user.id) : ([] as SavedSearch[]),
+    repo.topVerifiedMarks(ids),
+  ]);
 
-  const active = describe(filters);
+  const active = describeFilters(filters);
+  const query = filtersToQuery(filters);
+  const positionOptions = filters.sport ? positionsFor(filters.sport) : allPositions();
 
   return (
     <Site>
@@ -91,57 +92,98 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
 
         <div className="grid gap-8 pb-16 lg:grid-cols-12">
           <Frame className="self-start lg:sticky lg:top-[calc(var(--header-h)+1rem)] lg:col-span-3">
-            <form method="GET" role="search" aria-label="Filters" className="flex flex-col gap-5" style={{ padding: "var(--feature-pad)" }}>
-              <Field label="Name or handle">
-                <TextInput name="q" type="search" defaultValue={filters.q ?? ""} placeholder="Reyes" />
-              </Field>
-              <Field label="Sport">
-                <Select name="sport" defaultValue={filters.sport ?? ""}>
-                  <option value="">Any sport</option>
-                  {SPORTS.map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="Level">
-                <Select name="level" defaultValue={filters.level ?? ""}>
-                  <option value="">Any level</option>
-                  {LEVEL_OPTIONS.map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <div className="grid grid-cols-2 gap-4">
-                <Field label="Class of">
-                  <TextInput name="class" type="number" min={1950} max={2100} defaultValue={filters.gradYear ?? ""} placeholder="2027" />
+            <div className="flex flex-col gap-5" style={{ padding: "var(--feature-pad)" }}>
+              <form method="GET" role="search" aria-label="Filters" className="flex flex-col gap-5">
+                <Field label="Name or handle">
+                  <TextInput name="q" type="search" defaultValue={filters.q ?? ""} placeholder="Reyes" maxLength={MAX_QUERY_LENGTH} />
                 </Field>
-                <Field label="State">
-                  <TextInput name="state" maxLength={2} defaultValue={filters.region ?? ""} placeholder="TX" autoCapitalize="characters" />
+                <Field label="Sport">
+                  <Select name="sport" defaultValue={filters.sport ?? ""}>
+                    <option value="">Any sport</option>
+                    {SPORTS.map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </Select>
                 </Field>
-              </div>
-              <Checkbox name="verified" value="1" defaultChecked={filters.verifiedOnly} label="Verified only" hint="At least one coach-verified entry." />
-              <div className="flex items-center justify-between gap-3 border-t border-rule pt-4">
-                <button type="submit" className="btn-primary min-h-9 px-4 text-sm">
-                  Search
-                </button>
-                {active.length > 0 && (
-                  <Link href="/search" className="label text-ink-muted underline decoration-transparent underline-offset-4 hover:text-ink hover:decoration-ink">
-                    Clear
-                  </Link>
-                )}
-              </div>
-            </form>
+                <Field label="Level">
+                  <Select name="level" defaultValue={filters.level ?? ""}>
+                    <option value="">Any level</option>
+                    {LEVEL_OPTIONS.map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Position" hint={filters.sport ? `${sportName(filters.sport)} positions suggested.` : undefined}>
+                  <TextInput
+                    name="position"
+                    list="position-options"
+                    defaultValue={filters.position ?? ""}
+                    placeholder="WR"
+                    maxLength={MAX_POSITION_LENGTH}
+                    autoComplete="off"
+                  />
+                  <datalist id="position-options">
+                    {positionOptions.map((p) => (
+                      <option key={p} value={p} />
+                    ))}
+                  </datalist>
+                </Field>
+                <div className="grid grid-cols-2 gap-4">
+                  <Field label="Class of">
+                    <TextInput name="class" type="number" min={1950} max={2100} defaultValue={filters.gradYear ?? ""} placeholder="2027" />
+                  </Field>
+                  <Field label="State">
+                    <Select name="state" defaultValue={filters.region ?? ""}>
+                      <option value="">Any</option>
+                      {US_STATES.map(([code, name]) => (
+                        <option key={code} value={code}>
+                          {code} — {name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <Field label="Min GPA">
+                    <TextInput name="gpa" type="number" min={0} max={5} step="0.1" inputMode="decimal" defaultValue={filters.minGpa ?? ""} placeholder="3.0" />
+                  </Field>
+                  <Field label="Sort">
+                    <Select name="sort" defaultValue={filters.sort}>
+                      {SORT_OPTIONS.map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                </div>
+                <Checkbox name="verified" value="1" defaultChecked={filters.verifiedOnly} label="Verified only" hint="At least one coach-verified entry." />
+                <div className="flex items-center justify-between gap-3 border-t border-rule pt-4">
+                  <button type="submit" className="btn-primary min-h-9 px-4 text-sm">
+                    Search
+                  </button>
+                  {query !== "" && (
+                    <Link href="/search" className="label text-ink-muted underline decoration-transparent underline-offset-4 hover:text-ink hover:decoration-ink">
+                      Clear
+                    </Link>
+                  )}
+                </div>
+              </form>
+
+              {canSave && <SavedSearches searches={saved} current={query} />}
+            </div>
           </Frame>
 
           <section aria-label="Results" className="min-w-0 lg:col-span-9">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rule pb-3">
               <p className="label text-ink-muted" data-numeric>
-                {athletes.length === 0 ? "No results" : `${athletes.length}${athletes.length === PAGE_SIZE ? "+" : ""} ${athletes.length === 1 ? "athlete" : "athletes"}`}
-                {page > 1 && ` · page ${page}`}
+                {total === 0 ? "No results" : `${total} ${total === 1 ? "athlete" : "athletes"}`}
+                {pages > 1 && ` · page ${page} of ${pages}`}
+                {filters.sort !== "verified_count" && ` · ${SORT_OPTIONS.find(([v]) => v === filters.sort)?.[1]}`}
               </p>
               {active.length > 0 && (
                 <ul className="flex flex-wrap gap-2" aria-label="Active filters">
@@ -159,12 +201,18 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
             ) : (
               <ol className="divide-y divide-rule">
                 {athletes.map((athlete) => (
-                  <AthleteRow key={athlete.id} athlete={athlete} lists={canSave ? lists : null} savedIn={savedIn[athlete.id] ?? []} />
+                  <AthleteRow
+                    key={athlete.id}
+                    athlete={athlete}
+                    mark={marks[athlete.id] ?? null}
+                    lists={canSave ? lists : null}
+                    savedIn={savedIn[athlete.id] ?? []}
+                  />
                 ))}
               </ol>
             )}
 
-            <Pager page={page} hasMore={athletes.length === PAGE_SIZE} filters={filters} />
+            <Pager page={page} hasMore={page < pages} filters={filters} />
           </section>
         </div>
       </main>
@@ -174,28 +222,66 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
 
 // ---------------------------------------------------------------------------
 
-function AthleteRow({ athlete, lists, savedIn }: { athlete: Profile; lists: RecruiterList[] | null; savedIn: string[] }) {
+/**
+ * One result (#91): the photo in its brackets, who and where, the body
+ * (height · weight), the best verified mark, and the count. A row, not a
+ * card — the list reads like a results sheet.
+ */
+function AthleteRow({
+  athlete,
+  mark,
+  lists,
+  savedIn,
+}: {
+  athlete: Profile;
+  mark: TopMark | null;
+  lists: RecruiterList[] | null;
+  savedIn: string[];
+}) {
   const line = [athlete.positions.join(" / "), athlete.school ?? athlete.location, athlete.grad_year ? `Class of ${athlete.grad_year}` : null]
     .filter(Boolean)
     .join(" · ");
   const meta = [levelLabel(athlete.level), sportName(athlete.primary_sport), athlete.region].filter(Boolean).join(" · ");
+  const body = [heightLabel(athlete.height_cm), weightLabel(athlete.weight_kg), athlete.gpa !== null ? `${athlete.gpa.toFixed(2)} GPA` : null]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <li className="group relative">
-      <div className="grid grid-cols-[1fr_auto] items-center gap-x-6 gap-y-3 py-4 sm:grid-cols-[1.6fr_1fr_auto]">
+      <div className="grid grid-cols-[auto_1fr_auto] items-center gap-x-5 gap-y-3 py-4 sm:grid-cols-[auto_1.6fr_1.2fr_auto]">
+        <Avatar url={athlete.avatar_url} name={athlete.display_name} className="size-14" sizes="56px" />
+
         <div className="min-w-0">
           <Link href={`/${athlete.handle}`} className="font-bold after:absolute after:inset-0 hover:underline">
             {athlete.display_name}
           </Link>
           <p className="label mt-0.5 truncate text-ink-muted">{line}</p>
           <p className="label mt-0.5 truncate text-ink-subtle">{meta}</p>
+          {body && (
+            <p className="label mt-0.5 truncate font-mono text-ink-subtle" data-numeric>
+              {body}
+            </p>
+          )}
         </div>
 
-        <p className="hidden text-sm text-ink-muted sm:block" data-numeric>
-          {athlete.entry_count} {athlete.entry_count === 1 ? "entry" : "entries"}
-        </p>
+        <div className="col-span-full min-w-0 sm:col-span-1">
+          {mark ? (
+            <p className="flex min-w-0 items-baseline gap-2">
+              <Verified className="shrink-0 self-center" />
+              {mark.value_display && (
+                <span className="font-display text-lg tracking-tight" data-numeric>
+                  {mark.value_display}
+                  {mark.unit && <span className="ml-0.5 text-sm font-normal text-ink-muted">{mark.unit}</span>}
+                </span>
+              )}
+              <span className="label truncate text-ink-muted">{mark.title}</span>
+            </p>
+          ) : (
+            <p className="label text-ink-subtle">{athlete.entry_count} {athlete.entry_count === 1 ? "entry" : "entries"} · none verified</p>
+          )}
+        </div>
 
-        <p className="label flex items-center gap-1.5 whitespace-nowrap" data-numeric>
+        <p className="label row-start-1 flex items-center gap-1.5 justify-self-end whitespace-nowrap sm:row-start-auto" style={{ gridColumn: "-2 / -1" }} data-numeric>
           <Verified className={athlete.verified_count > 0 ? "" : "opacity-30"} /> {athlete.verified_count} verified
         </p>
 
@@ -225,19 +311,12 @@ function EmptyResults({ hasFilters }: { hasFilters: boolean }) {
   );
 }
 
-function Pager({ page, hasMore, filters }: { page: number; hasMore: boolean; filters: Filters }) {
+function Pager({ page, hasMore, filters }: { page: number; hasMore: boolean; filters: SearchFilters }) {
   if (page === 1 && !hasMore) return null;
 
   const to = (target: number) => {
-    const search = new URLSearchParams();
-    if (filters.q) search.set("q", filters.q);
-    if (filters.sport) search.set("sport", filters.sport);
-    if (filters.level) search.set("level", filters.level);
-    if (filters.gradYear) search.set("class", String(filters.gradYear));
-    if (filters.region) search.set("state", filters.region);
-    if (filters.verifiedOnly) search.set("verified", "1");
-    if (target > 1) search.set("page", String(target));
-    return `/search?${search.toString()}`;
+    const query = filtersToQuery(filters, target);
+    return query ? `/search?${query}` : "/search";
   };
 
   return (
@@ -256,24 +335,4 @@ function Pager({ page, hasMore, filters }: { page: number; hasMore: boolean; fil
       )}
     </nav>
   );
-}
-
-function describe(f: Filters): string[] {
-  return [
-    f.q && `“${f.q}”`,
-    f.sport && sportName(f.sport),
-    f.level && levelLabel(f.level as AthleteLevel),
-    f.gradYear && `Class of ${f.gradYear}`,
-    f.region,
-    f.verifiedOnly && "Verified only",
-  ].filter((x): x is string => Boolean(x));
-}
-
-function str(value: string | string[] | undefined): string | null {
-  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
-}
-
-function int(value: string | string[] | undefined): number | null {
-  const parsed = Number(str(value));
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }

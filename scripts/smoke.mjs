@@ -1,20 +1,41 @@
 /**
- * End-to-end smoke of the product loop against a dev server on :3000.
+ * End-to-end smoke of the product loop, isolated.
+ *
+ * By default this spawns its own `next start` (build first: `npm run build`)
+ * on a free port against a throwaway ROSTER_DATA_DIR, so it never touches the
+ * developer's `.data/` and never depends on a server someone left running.
+ * The temp directory and the server are torn down on exit, pass or fail.
+ * Pass `--base=` to point it at a server you started yourself instead.
  *
  * Runs in local data mode against the seeded roster. Each step asserts the
  * thing a user would notice; a failure prints the step and the page URL.
  *
- * Usage:  node scripts/smoke.mjs [--base=http://localhost:3000]
+ * Usage:  node scripts/smoke.mjs [--base=http://127.0.0.1:3000] [--shots=dir]
  */
+
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { crc32, deflateSync } from "node:zlib";
 
 import { chromium } from "playwright-core";
 
-const base = process.argv.find((a) => a.startsWith("--base="))?.split("=")[1] ?? "http://localhost:3000";
+import { serverFromArgs } from "./lib/server.mjs";
+
 const stamp = Date.now().toString(36);
+const { base, dataDir } = await serverFromArgs({ label: "roster-smoke" });
+process.stdout.write(`smoke against ${base}${dataDir ? ` (data: ${dataDir})` : ""}\n\n`);
 
 const browser = await chromium.launch({ channel: "chromium" });
 const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 const page = await context.newPage();
+
+// A policy violation is a broken feature the user may not notice: an
+// iframe that never loads, a script that never ran. Collected for every page.
+const cspViolations = [];
+page.on("console", (m) => {
+  if (/Content Security Policy/i.test(m.text())) cspViolations.push(`${page.url()}: ${m.text().slice(0, 200)}`);
+});
 
 let failures = 0;
 async function step(name, fn) {
@@ -42,6 +63,25 @@ const expectText = async (text, timeout = 10_000) => {
   }
 };
 
+await step("security headers: CSP everywhere, no referrer from a verify link", async () => {
+  const home = await fetch(`${base}/`);
+  const csp = home.headers.get("content-security-policy") ?? "";
+  for (const directive of ["default-src 'self'", "frame-ancestors 'none'", "object-src 'none'", "youtube-nocookie.com"]) {
+    if (!csp.includes(directive)) throw new Error(`CSP missing ${directive}: ${csp}`);
+  }
+  const verify = await fetch(`${base}/verify/not-a-real-token`);
+  const policy = verify.headers.get("referrer-policy");
+  if (policy !== "no-referrer") throw new Error(`verify Referrer-Policy is ${policy}`);
+  // `next start` here is not the production deploy: no preload promise.
+  if (/preload/.test(home.headers.get("strict-transport-security") ?? "")) throw new Error("HSTS preload outside production deploy");
+});
+
+await step("an unknown verify link explains itself instead of a bare 404", async () => {
+  await page.goto(`${base}/verify/not-a-real-token`, { waitUntil: "networkidle" });
+  await expectText("This link doesn’t work.");
+  await expectText("Nothing was recorded.");
+});
+
 await step("search lists seeded public athletes", async () => {
   await page.goto(`${base}/search`, { waitUntil: "networkidle" });
   await expectText("Jordan Reyes");
@@ -62,6 +102,49 @@ await step("public resume renders with verified entries", async () => {
   await expectText("40-yard dash");
 });
 
+await step("public resume: share card, Twitter card, and ProfilePage JSON-LD", async () => {
+  const html = await (await fetch(`${base}/jordanreyes`)).text();
+  const meta = (attr, name) => html.match(new RegExp(`<meta ${attr}="${name}" content="([^"]+)"`))?.[1] ?? null;
+  const ogImage = meta("property", "og:image");
+  if (!ogImage || !/^https?:\/\/[^/]+\/jordanreyes\/opengraph-image/.test(ogImage)) throw new Error(`og:image is ${ogImage}`);
+  if (meta("name", "twitter:card") !== "summary_large_image") throw new Error(`twitter:card is ${meta("name", "twitter:card")}`);
+  if (!meta("name", "twitter:image")) throw new Error("no twitter:image");
+  const ld = html.match(/<script type="application\/ld\+json">(.+?)<\/script>/)?.[1];
+  const data = ld ? JSON.parse(ld) : null;
+  if (data?.["@type"] !== "ProfilePage" || data.mainEntity?.name !== "Jordan Reyes") throw new Error(`JSON-LD: ${ld}`);
+
+  const card = await fetch(`${base}${new URL(ogImage).pathname}${new URL(ogImage).search}`);
+  if (!card.ok || card.headers.get("content-type") !== "image/png") throw new Error(`card: ${card.status} ${card.headers.get("content-type")}`);
+  if ((await card.arrayBuffer()).byteLength < 5000) throw new Error("card is suspiciously small");
+  if ((await fetch(`${base}/graceokoro/opengraph-image`)).status !== 404) throw new Error("a private resume has a share card");
+});
+
+await step("public resume explains verification; the printout carries a QR and an as-of date", async () => {
+  await page.goto(`${base}/jordanreyes`, { waitUntil: "networkidle" });
+  await expectText("How verification works");
+  await page.locator("li").filter({ hasText: "Verified by" }).first().locator("time").first().waitFor({ timeout: 10_000 });
+  const colophon = page.locator('aside[aria-label="Printed record"]');
+  if (await colophon.isVisible()) throw new Error("print colophon shows on screen");
+  await page.emulateMedia({ media: "print" });
+  try {
+    await colophon.waitFor({ state: "visible", timeout: 5_000 });
+    if (!/Verified as of/.test((await colophon.textContent()) ?? "")) throw new Error("no as-of line");
+    const qr = colophon.locator('svg[role="img"][aria-label*="/jordanreyes"] path');
+    if ((await qr.getAttribute("d"))?.length < 200) throw new Error("QR path missing");
+  } finally {
+    await page.emulateMedia({ media: null });
+  }
+});
+
+await step("sitemap is sharded, robots lists the shards, unlisted stays out", async () => {
+  const robots = await (await fetch(`${base}/robots.txt`)).text();
+  const shard = robots.match(/Sitemap: (\S+\/sitemap\/0\.xml)/)?.[1];
+  if (!shard) throw new Error(`robots.txt lists no shard:\n${robots}`);
+  const xml = await (await fetch(`${base}${new URL(shard).pathname}`)).text();
+  if (!xml.includes("/jordanreyes</loc>")) throw new Error("public athlete missing from sitemap");
+  if (xml.includes("/elijahbrooks<")) throw new Error("unlisted athlete in sitemap");
+});
+
 await step("unlisted resume opens by link but is not searchable", async () => {
   await page.goto(`${base}/elijahbrooks`, { waitUntil: "networkidle" });
   await expectText("Elijah Brooks");
@@ -69,6 +152,88 @@ await step("unlisted resume opens by link but is not searchable", async () => {
   if (await page.getByText("Elijah Brooks").first().isVisible().catch(() => false)) {
     throw new Error("unlisted athlete appeared in search");
   }
+});
+
+await step("unlisted resume is X-Robots-Tag noindex and carries no JSON-LD", async () => {
+  const unlisted = await fetch(`${base}/elijahbrooks`);
+  if (unlisted.headers.get("x-robots-tag") !== "noindex, noarchive") throw new Error(`X-Robots-Tag: ${unlisted.headers.get("x-robots-tag")}`);
+  if ((await unlisted.text()).includes("application/ld+json")) throw new Error("unlisted resume emits structured data");
+  const listed = await fetch(`${base}/jordanreyes`);
+  if (listed.headers.get("x-robots-tag")) throw new Error(`public resume has X-Robots-Tag ${listed.headers.get("x-robots-tag")}`);
+});
+
+await step("legal pages render and are linked from the footer and sign-up", async () => {
+  for (const [path, heading] of [["/privacy", "Your record. Your call."], ["/terms", "Play it straight."]]) {
+    const res = await page.goto(`${base}${path}`, { waitUntil: "networkidle" });
+    if (res.status() !== 200) throw new Error(`${path} returned ${res.status()}`);
+    await page.getByRole("heading", { level: 1, name: heading }).waitFor({ timeout: 10_000 });
+  }
+  const footer = page.locator("footer");
+  for (const name of ["Privacy", "Terms"]) {
+    if (!(await footer.getByRole("link", { name, exact: true }).count())) throw new Error(`footer has no ${name} link`);
+  }
+  await page.goto(`${base}/sign-up`, { waitUntil: "networkidle" });
+  for (const href of ["/privacy", "/terms"]) {
+    if (!(await page.locator(`main a[href="${href}"]`).count())) throw new Error(`sign-up does not link ${href}`);
+  }
+});
+
+await step("health endpoint reports readiness as JSON", async () => {
+  const res = await fetch(`${base}/api/health`);
+  if (res.status !== 200) throw new Error(`/api/health returned ${res.status}`);
+  if (!/no-store/.test(res.headers.get("cache-control") ?? "")) throw new Error("health is cacheable");
+  const body = await res.json();
+  if (body.service !== "roster" || body.dataMode !== "local") throw new Error(`unexpected body: ${JSON.stringify(body)}`);
+  if (!["ok", "degraded"].includes(body.status)) throw new Error(`status ${body.status}`);
+  for (const check of ["env", "session", "database"]) {
+    if (body.checks?.[check]?.status !== "ok") throw new Error(`check ${check}: ${JSON.stringify(body.checks?.[check])}`);
+  }
+  // `next start` here is production serving local demo data: a warning by design.
+  if (body.checks?.dataMode?.status !== "warn") throw new Error(`check dataMode: ${JSON.stringify(body.checks?.dataMode)}`);
+});
+
+await step("signed out, a resume masks contact details: no mailto, a request-contact gate", async () => {
+  const html = await (await fetch(`${base}/jordanreyes`)).text();
+  if (/mailto:jordanreyes@example\.com/.test(html) || html.includes("jordanreyes@example.com")) throw new Error("raw contact email in signed-out HTML");
+  await page.goto(`${base}/jordanreyes`, { waitUntil: "networkidle" });
+  const gate = page.getByRole("link", { name: "Request contact" });
+  await gate.waitFor({ timeout: 10_000 });
+  if (!/\/sign-in\?next=%2Fjordanreyes/.test((await gate.getAttribute("href")) ?? "")) throw new Error(`gate links to ${await gate.getAttribute("href")}`);
+  await expectText("j••••••••••@example.com");
+});
+
+await step("a visitor reports a profile without an account", async () => {
+  await page.goto(`${base}/devinokafor`, { waitUntil: "networkidle" });
+  await page.getByText("Report this profile", { exact: true }).click();
+  await page.getByLabel(/What's wrong with/).selectOption("impersonation");
+  await page.getByLabel("Details (optional)").fill(`smoke ${stamp}: not the real athlete`);
+  await page.getByRole("button", { name: /send report/i }).click();
+  await expectText("the report is in");
+  if (dataDir) {
+    const db = JSON.parse(readFileSync(path.join(dataDir, "roster.json"), "utf8"));
+    const report = db.profile_reports.find((r) => r.detail === `smoke ${stamp}: not the real athlete`);
+    if (!report || report.reason !== "impersonation" || report.status !== "open") throw new Error(`report not stored: ${JSON.stringify(report)}`);
+  }
+});
+
+await step("a suspended resume 404s and leaves search; reinstating brings it back", async () => {
+  if (!dataDir) return; // needs the store on disk
+  const moderate = (verb) => execFileSync(path.join("node_modules", ".bin", "tsx"), ["--conditions=react-server", "scripts/moderate.ts", verb, "marcusbell"], {
+    env: { ...process.env, ROSTER_DATA: "local", ROSTER_DATA_DIR: dataDir },
+    encoding: "utf8",
+  });
+  moderate("suspend");
+  try {
+    const gone = await page.goto(`${base}/marcusbell`, { waitUntil: "networkidle" });
+    if (gone.status() !== 404) throw new Error(`suspended resume served ${gone.status()}`);
+    if ((await fetch(`${base}/marcusbell/opengraph-image`)).status !== 404) throw new Error("suspended resume still has a share card");
+    await page.goto(`${base}/search?q=Marcus`, { waitUntil: "networkidle" });
+    if (await page.getByText("Marcus Bell").first().isVisible().catch(() => false)) throw new Error("suspended athlete in search");
+  } finally {
+    moderate("reinstate");
+  }
+  const back = await page.goto(`${base}/marcusbell`, { waitUntil: "networkidle" });
+  if (back.status() !== 200) throw new Error(`reinstated resume served ${back.status()}`);
 });
 
 await step("private resume is not found", async () => {
@@ -90,6 +255,133 @@ await step("sign in as a seeded athlete lands in the editor", async () => {
   await page.waitForURL(/\/resume$/, { timeout: 15_000 });
   await expectText("Jordan Reyes");
 });
+
+/** A solid-colour PNG, built by hand so the smoke needs no image library. */
+function png(width, height, [r, g, b]) {
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([len, body, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 2; // truecolour
+  const row = Buffer.concat([Buffer.from([0]), Buffer.from(Array.from({ length: width }, () => [r, g, b]).flat())]);
+  const raw = Buffer.concat(Array.from({ length: height }, () => row));
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+await step("an athlete uploads a photo: resized in the browser, shown on the resume and the card", async () => {
+  await page.goto(`${base}/resume?section=identity`, { waitUntil: "networkidle" });
+  await page.locator('input[type="file"][name="avatar"]').setInputFiles({
+    name: "portrait.png",
+    mimeType: "image/png",
+    buffer: png(900, 600, [200, 40, 40]),
+  });
+  const notice = page.locator("#identity").locator('[role="status"], [role="alert"]').first();
+  await notice.waitFor({ state: "visible", timeout: 20_000 });
+  const verdict = (await notice.textContent())?.trim() ?? "";
+  if (!/^Saved/.test(verdict)) throw new Error(`upload said: ${verdict}`);
+  await page.getByRole("img", { name: "Photo of Jordan Reyes" }).first().waitFor({ timeout: 10_000 });
+
+  await page.goto(`${base}/jordanreyes`, { waitUntil: "networkidle" });
+  const img = page.getByRole("img", { name: "Photo of Jordan Reyes" }).first();
+  await img.waitFor({ timeout: 10_000 });
+  const src = await img.getAttribute("src");
+  if (!src?.startsWith("/media/avatars/")) throw new Error(`avatar src ${src}`);
+  const file = await fetch(`${base}${src}`);
+  if (file.headers.get("content-type") !== "image/jpeg") throw new Error(`stored as ${file.headers.get("content-type")}`);
+  // Cropped square and scaled down on the client: a 900×600 PNG arrives as a 512² JPEG.
+  const { width, height } = await img.evaluate((el) => ({ width: el.naturalWidth, height: el.naturalHeight }));
+  if (width !== height || width > 512) throw new Error(`stored avatar is ${width}×${height}`);
+  const html = await (await fetch(`${base}/jordanreyes`)).text();
+  if (!/"image":"https?:\/\/[^"]+\/media\/avatars\//.test(html)) throw new Error("JSON-LD has no image");
+});
+
+await step("an athlete saves height and weight in feet, inches, and pounds", async () => {
+  await page.goto(`${base}/resume?section=identity`, { waitUntil: "networkidle" });
+  const form = page.locator("form").filter({ has: page.locator('input[name="height_ft"]') }).first();
+  await form.locator('input[name="height_ft"]').fill("6");
+  await form.locator('input[name="height_in"]').fill("1");
+  await form.locator('input[name="weight_lbs"]').fill("190");
+  await form.getByRole("button", { name: /save identity/i }).click();
+  const notice = form.locator('[role="status"], [role="alert"]').first();
+  await notice.waitFor({ state: "visible", timeout: 20_000 });
+  const verdict = (await notice.textContent())?.trim() ?? "";
+  if (!/^Saved/.test(verdict)) throw new Error(`form said: ${verdict}`);
+  // Stored metric, shown imperial: the same numbers come back.
+  await page.goto(`${base}/resume?section=identity`, { waitUntil: "networkidle" });
+  const values = await Promise.all(
+    ["height_ft", "height_in", "weight_lbs"].map((n) => page.locator(`input[name="${n}"]`).first().inputValue()),
+  );
+  if (values.join("/") !== "6/1/190") throw new Error(`reloaded as ${values.join("/")}`);
+  await page.goto(`${base}/jordanreyes`, { waitUntil: "networkidle" });
+  await expectText(`6'1"`);
+  await expectText("190 lbs");
+});
+
+await step("a hostile next= never leaves the site", async () => {
+  // Signed in, /sign-in bounces straight to `next` — the sharpest edge.
+  for (const next of ["/%5Cevil.com", "//evil.com", "/%09/evil.com", "https://evil.com"]) {
+    await page.goto(`${base}/sign-in?next=${next}`, { waitUntil: "networkidle" });
+    const landed = new URL(page.url());
+    if (landed.origin !== new URL(base).origin) throw new Error(`next=${next} redirected to ${landed.origin}`);
+  }
+});
+
+/** The editor's add-entry form, filled and saved. */
+async function addEntry(title, value) {
+  await page.goto(`${base}/resume`, { waitUntil: "networkidle" });
+  const form = page
+    .locator("form")
+    .filter({ has: page.locator('input[name="achieved_on"]') })
+    .filter({ hasNot: page.locator('input[name="id"]') })
+    .first();
+  await form.locator('input[name="title"]').fill(title);
+  await form.locator('input[name="achieved_on"]').fill("2026-06-01");
+  await form.locator('input[name="value_display"]').fill(value);
+  await form.locator('button[type="submit"]').click();
+  const notice = form.locator('[role="status"], [role="alert"]').first();
+  await notice.waitFor({ state: "visible", timeout: 20_000 });
+  const verdict = (await notice.textContent())?.trim() ?? "";
+  if (!/^Saved/.test(verdict)) throw new Error(`form said: ${verdict}`);
+}
+
+/** Opens the row's request form (labelled `summaryText`), creates a link, returns its path. */
+async function requestLink(title, summaryText = "Request verification") {
+  const row = page.locator("li").filter({ hasText: title }).first();
+  const summary = row.locator("summary", { hasText: summaryText }).first();
+  await summary.click();
+  const panel = summary.locator("xpath=ancestor::details[1]");
+  await panel.getByRole("button", { name: /create request link/i }).click();
+  // The one moment the link exists: the action's result, on the row.
+  const code = page.locator("li").filter({ hasText: title }).locator("code", { hasText: "/verify/" }).first();
+  await code.waitFor({ timeout: 20_000 });
+  const text = (await code.textContent())?.trim() ?? "";
+  const linkPath = text ? new URL(text, base).pathname : "";
+  if (!linkPath.startsWith("/verify/")) throw new Error(`no link: ${text}`);
+  return linkPath;
+}
+
+/** Messages the server wrote instead of sending (no RESEND_API_KEY in tests). */
+function outbox() {
+  if (!dataDir) return null;
+  try {
+    return JSON.parse(readFileSync(path.join(dataDir, "email-outbox.json"), "utf8"));
+  } catch {
+    return [];
+  }
+}
 
 await step("adding an entry persists and shows on the public resume", async () => {
   const title = `Smoke entry ${stamp}`;
@@ -119,19 +411,29 @@ await step("editor shows the live preview and creates a verification link", asyn
   await expectText("Live preview");
   await expectText("views this week");
   await shot("editor");
-  // Open the first "Request verification" disclosure and create a link.
-  const summary = page.locator("summary", { hasText: "Request verification" }).first();
-  await summary.click();
-  const panel = summary.locator("xpath=ancestor::details[1]");
-  await panel.getByRole("button", { name: /create request link/i }).click();
-  // After the action the row re-renders as "submitted" and shows the link
-  // from server data, outside the disclosure.
-  const code = page.locator("code", { hasText: "/verify/" }).first();
-  await code.waitFor({ timeout: 20_000 });
-  const path = (await code.textContent())?.trim();
-  if (!path?.startsWith("/verify/")) throw new Error(`no link: ${path}`);
-  globalThis.__verifyPath = path;
+  // Request verification on the smoke entry itself, so the later steps can
+  // edit it without disturbing the seeded record.
+  globalThis.__verifyPath = await requestLink(`Smoke entry ${stamp}`);
   await shot("editor-request");
+});
+
+await step("the coach is emailed the link; the link is never shown again", async () => {
+  const messages = outbox();
+  if (messages) {
+    const sent = messages.find((m) => m.tag === "verification_request" && m.text.includes(globalThis.__verifyPath));
+    if (!sent) throw new Error(`no outbox email carries ${globalThis.__verifyPath}`);
+    if (sent.to !== "tbradley@example.org") throw new Error(`emailed ${sent.to}`);
+  }
+  // Only the hash is stored: a fresh visit says "waiting", never the link.
+  await page.goto(`${base}/resume`, { waitUntil: "networkidle" });
+  const row = page.locator("li").filter({ hasText: `Smoke entry ${stamp}` }).first();
+  await row.getByText("Waiting on").waitFor({ timeout: 10_000 });
+  if (await row.locator("code", { hasText: "/verify/" }).count()) throw new Error("stored link replayed after reload");
+});
+
+await step("a second entry to the same coach joins the coach's batch", async () => {
+  await addEntry(`Batch entry ${stamp}`, "22.22");
+  globalThis.__batchPath = await requestLink(`Batch entry ${stamp}`);
 });
 
 await step("the athlete cannot verify their own entry", async () => {
@@ -151,11 +453,31 @@ await step("a coach verifies by link with no account; the mark and name appear",
   await context.clearCookies();
   await page.goto(`${base}${globalThis.__verifyPath}`, { waitUntil: "networkidle" });
   await expectText("says this happened");
+  await expectText("Also waiting on you");
   await shot("verify");
-  await page.getByLabel("Note", { exact: false }).fill("Timed it myself at the spring combine.");
-  await page.getByRole("button", { name: /yes, i verify/i }).click();
+  const main = page.locator('form:has(input[name="token"]):not(:has(input[name="request_id"]))');
+  // #78: no verifying without the attestation.
+  if (!(await main.getByRole("button", { name: /yes, i verify/i }).isDisabled())) {
+    throw new Error("Verify enabled before the attestation was ticked");
+  }
+  await main.getByLabel("Note", { exact: false }).fill("Timed it myself at the spring combine.");
+  await main.getByLabel(/I coached or saw/).check();
+  await main.getByRole("button", { name: /yes, i verify/i }).click();
   await page.getByText("Verified. Thank you.").waitFor({ timeout: 20_000 });
   await shot("verify-done");
+
+  // #81: the other entry, answered from the same page with the same link.
+  const batch = page.locator('section[aria-labelledby="batch-heading"]');
+  await batch.getByText(`Batch entry ${stamp}`).first().waitFor({ timeout: 10_000 });
+  await batch.getByRole("button", { name: /this isn.t right/i }).click();
+  await batch.getByText("Recorded as disputed.").waitFor({ timeout: 20_000 });
+
+  // #80: the athlete hears both answers.
+  const messages = outbox();
+  if (messages) {
+    const answered = messages.filter((m) => m.tag === "verification_answered" && m.to === "jordanreyes@example.com");
+    if (answered.length < 2) throw new Error(`expected 2 answer emails to the athlete, saw ${answered.length}`);
+  }
   // Single use: a revisit shows the answered state, never the form.
   await page.goto(`${base}${globalThis.__verifyPath}`, { waitUntil: "networkidle" });
   await expectText("Each link works once.");
@@ -164,7 +486,76 @@ await step("a coach verifies by link with no account; the mark and name appear",
   }
   // The public resume now carries the coach's name on the entry.
   await page.goto(`${base}/jordanreyes`, { waitUntil: "networkidle" });
-  await expectText("Verified by Tom Bradley");
+  const row = page.locator("li").filter({ hasText: `Smoke entry ${stamp}` }).first();
+  await row.getByText("Verified by Tom Bradley").waitFor({ timeout: 10_000 });
+});
+
+/*
+ * Signed out, a verify link cannot tell the athlete from the coach: the link
+ * is a bearer token, and by design whoever holds it answers as the coach the
+ * athlete named. What keeps that honest is everything around it, asserted
+ * here so a regression fails loudly: the response is attributed to the named
+ * contact (never a name the respondent types), the link is single-use, and
+ * — next step — any later edit to the entry throws the badge away.
+ */
+await step("signed out, a verify link answers only as the named coach, once", async () => {
+  await context.clearCookies();
+  await page.goto(`${base}${globalThis.__verifyPath}`, { waitUntil: "networkidle" });
+  await expectText("Each link works once.");
+  if (await page.locator('input[name="verifier_name"], input[name="name"]').count()) {
+    throw new Error("respondent can type the verifier's name");
+  }
+});
+
+await step("editing a verified entry clears its badge", async () => {
+  await page.goto(`${base}/sign-in`, { waitUntil: "networkidle" });
+  await page.getByLabel("Email").fill("jordanreyes@roster.local");
+  await page.getByLabel("Password").fill("roster-demo");
+  await page.getByRole("button", { name: /sign in/i }).click();
+  await page.waitForURL(/\/resume$/, { timeout: 15_000 });
+
+  const row = page.locator("li").filter({ hasText: `Smoke entry ${stamp}` }).first();
+  await row.locator("summary", { hasText: "Edit" }).click();
+  const form = row.locator("form").filter({ has: page.locator('input[name="value_display"]') }).first();
+  await form.locator('input[name="value_display"]').fill("10.01");
+  await form.getByRole("button", { name: /save entry/i }).click();
+  const notice = form.locator('[role="status"], [role="alert"]').first();
+  await notice.waitFor({ state: "visible", timeout: 20_000 });
+  const verdict = (await notice.textContent())?.trim() ?? "";
+  if (!/^Saved/.test(verdict)) throw new Error(`form said: ${verdict}`);
+
+  await page.goto(`${base}/jordanreyes`, { waitUntil: "networkidle" });
+  const publicRow = page.locator("li").filter({ hasText: `Smoke entry ${stamp}` }).first();
+  await publicRow.getByText("Self-reported").first().waitFor({ timeout: 10_000 });
+  if (await publicRow.getByText("Verified by").count()) throw new Error("badge survived an edit to the measured value");
+
+  await page.goto(`${base}/resume`, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: /sign out/i }).first().click();
+  await page.waitForURL(/\/$/, { timeout: 15_000 });
+});
+
+await step("a disputed entry offers fix & request again; revoke closes the new link", async () => {
+  await page.goto(`${base}/sign-in`, { waitUntil: "networkidle" });
+  await page.getByLabel("Email").fill("jordanreyes@roster.local");
+  await page.getByLabel("Password").fill("roster-demo");
+  await page.getByRole("button", { name: /sign in/i }).click();
+  await page.waitForURL(/\/resume$/, { timeout: 15_000 });
+
+  const title = `Batch entry ${stamp}`;
+  const row = page.locator("li").filter({ hasText: title }).first();
+  await row.getByText("says this isn’t right").waitFor({ timeout: 10_000 });
+  const again = await requestLink(title, "Request again");
+
+  await page.goto(`${base}/resume`, { waitUntil: "networkidle" });
+  const fresh = page.locator("li").filter({ hasText: title }).first();
+  await fresh.getByRole("button", { name: /^revoke$/i }).click();
+  await fresh.locator("summary", { hasText: "Request verification" }).waitFor({ timeout: 15_000 });
+
+  await page.getByRole("button", { name: /sign out/i }).first().click();
+  await page.waitForURL(/\/$/, { timeout: 15_000 });
+  await context.clearCookies();
+  await page.goto(`${base}${again}`, { waitUntil: "networkidle" });
+  await expectText("This link has expired.");
 });
 
 await step("a recruiter manages lists: create, save from search, open, remove", async () => {
@@ -196,6 +587,62 @@ await step("a recruiter manages lists: create, save from search, open, remove", 
   await shot("list");
   await page.getByRole("button", { name: /^remove$/i }).first().click();
   await page.getByText("Nobody here yet").waitFor({ timeout: 15_000 });
+
+  // Rename in place; the heading follows.
+  await page.locator("summary", { hasText: "Rename list" }).click();
+  await page.locator('input[name="name"]').fill(`${listName} renamed`);
+  await page.getByRole("button", { name: /save name/i }).click();
+  await page.getByRole("heading", { name: `${listName} renamed` }).waitFor({ timeout: 15_000 });
+});
+
+await step("a recruiter filters by GPA and sort, saves the search, notes a list member, exports CSV", async () => {
+  await page.goto(`${base}/search?gpa=3&sort=gpa`, { waitUntil: "networkidle" });
+  const results = page.locator('section[aria-label="Results"]');
+  await results.locator("li").first().waitFor({ timeout: 10_000 });
+  const gpas = (await results.getByText(/\d\.\d\d GPA/).allTextContents()).map((t) => Number(t.match(/(\d\.\d\d) GPA/)[1]));
+  if (gpas.length === 0) throw new Error("no GPA on any row");
+  if (gpas.some((g) => g < 3)) throw new Error(`GPA under the floor: ${gpas}`);
+  if (gpas.join() !== [...gpas].sort((a, b) => b - a).join()) throw new Error(`not sorted by GPA: ${gpas}`);
+
+  const name = `Smoke search ${stamp}`;
+  await page.getByLabel("Saved search name").fill(name);
+  await page.getByRole("button", { name: /save search/i }).click();
+  await page.getByRole("link", { name }).waitFor({ timeout: 15_000 });
+  await page.goto(`${base}/search`, { waitUntil: "networkidle" });
+  await page.getByRole("link", { name }).click();
+  await page.waitForURL(/gpa=3/, { timeout: 15_000 });
+
+  await page.goto(`${base}/lists`, { waitUntil: "networkidle" });
+  await page.getByRole("link", { name: "Class of 2027 receivers" }).click();
+  await page.waitForURL(/\/lists\/[^/]+$/, { timeout: 15_000 });
+  const note = `Call after spring ball ${stamp}`;
+  const row = page.locator("li").filter({ hasText: "Jordan Reyes" }).first();
+  await row.getByLabel("Note on Jordan Reyes").fill(note);
+  await row.getByRole("button", { name: /save note/i }).click();
+  await row.getByText("Saved").first().waitFor({ timeout: 15_000 });
+  await page.reload({ waitUntil: "networkidle" });
+  const kept = await page.locator("li").filter({ hasText: "Jordan Reyes" }).first().getByLabel("Note on Jordan Reyes").inputValue();
+  if (kept !== note) throw new Error(`note reloaded as "${kept}"`);
+
+  // Fetched from the page, with its session: Playwright's own request client
+  // won't send the session cookie over plain http.
+  const href = await page.getByRole("link", { name: /export csv/i }).getAttribute("href");
+  const csv = await page.evaluate(async (url) => {
+    const r = await fetch(url);
+    return { type: r.headers.get("content-type"), disposition: r.headers.get("content-disposition"), body: await r.text() };
+  }, href);
+  if (!csv.type?.startsWith("text/csv")) throw new Error(`export is ${csv.type}`);
+  if (!/attachment; filename="class-of-2027-receivers\.csv"/.test(csv.disposition ?? "")) throw new Error(`disposition ${csv.disposition}`);
+  const body = csv.body;
+  if (!body.includes("Jordan Reyes") || !body.includes(note)) throw new Error("export is missing the athlete or the note");
+});
+
+await step("a signed-in recruiter can reveal an athlete's contact details", async () => {
+  await page.goto(`${base}/jordanreyes`, { waitUntil: "networkidle" });
+  const contact = page.getByRole("link", { name: "Contact", exact: true });
+  await contact.waitFor({ timeout: 10_000 });
+  if ((await contact.getAttribute("href")) !== "mailto:jordanreyes@example.com") throw new Error(`Contact is ${await contact.getAttribute("href")}`);
+  if (await page.getByRole("link", { name: "Request contact" }).count()) throw new Error("recruiter still sees the gate");
 });
 
 await step("settings: wrong current password is refused, sign out works", async () => {
@@ -231,12 +678,18 @@ await step("sign up → three-step onboarding → editor", async () => {
   // 02 — identity
   await page.getByLabel("Your name").fill("Smoke Tester");
   await page.getByLabel("Class of").fill("2028");
+  // No sport is assumed; Continue waits for a choice.
+  await page.getByLabel("Sport").selectOption("football");
   await shot("onboarding-02");
   await page.getByRole("button", { name: /continue/i }).click();
 
   // 03 — visibility, then submit
   // The radio input is visually hidden; click the label like a person would.
   await page.getByText("Unlisted", { exact: true }).click();
+  // #44: the age / guardian attestation is required before the resume exists.
+  await page.getByRole("button", { name: /create my resume/i }).click();
+  if (!/\/onboarding$/.test(page.url())) throw new Error("submitted without the age attestation");
+  await page.getByText("I’m 18 or older.", { exact: true }).click();
   await shot("onboarding-03");
   await page.getByRole("button", { name: /create my resume/i }).click();
   await page.waitForURL(/\/resume$/, { timeout: 15_000 });
@@ -255,6 +708,133 @@ await step("reserved handle is refused before submit", async () => {
   await page.getByText("Some words are reserved.").waitFor({ timeout: 10_000 });
   const isDisabled = await page.getByRole("button", { name: /continue/i }).isDisabled();
   if (!isDisabled) throw new Error("Continue should be disabled for a reserved handle");
+});
+
+await step("a recruiter signs up: role choice → short form → search, and lists are theirs", async () => {
+  // The account from the previous step, still at onboarding.
+  await page.goto(`${base}/onboarding`, { waitUntil: "networkidle" });
+  await page.getByText("Recruiter", { exact: true }).click();
+  await page.getByLabel("Your name").fill("Smoke Scout");
+  await page.getByLabel("Program or organization").fill("Smoke State University");
+  await page.locator('input[name="title"]').fill("Recruiting Coordinator");
+  await page.getByRole("button", { name: /start searching/i }).click();
+  await page.waitForURL(/\/search$/, { timeout: 15_000 });
+  await page.locator('section[aria-label="Results"]').getByRole("button", { name: /^save$/i }).first().waitFor({ timeout: 10_000 });
+  // No resume to edit: the editor sends a recruiter to their lists.
+  await page.goto(`${base}/resume`, { waitUntil: "networkidle" });
+  if (!/\/lists$/.test(page.url())) throw new Error(`recruiter at /resume landed on ${page.url()}`);
+});
+
+await step("changing the password signs out every other session", async () => {
+  // Two devices signed in as the account created above.
+  const email = `smoke-${stamp}@roster.local`;
+  const other = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const mine = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  try {
+    for (const ctx of [other, mine]) {
+      const p = await ctx.newPage();
+      await p.goto(`${base}/sign-in`, { waitUntil: "networkidle" });
+      await p.getByLabel("Email").fill(email);
+      await p.getByLabel("Password").fill("password123");
+      await p.getByRole("button", { name: /sign in/i }).click();
+      await p.waitForURL(/\/(resume|onboarding)$/, { timeout: 15_000 });
+      await p.close();
+    }
+    const p = await mine.newPage();
+    await p.goto(`${base}/settings`, { waitUntil: "networkidle" });
+    await p.locator('input[name="current"]').fill("password123");
+    await p.locator('input[name="next"]').fill("password456");
+    await p.locator('input[name="confirm"]').fill("password456");
+    await p.getByRole("button", { name: /update password/i }).click();
+    await p.waitForLoadState("networkidle");
+    await p.waitForTimeout(500);
+
+    // This device keeps its session…
+    await p.goto(`${base}/settings`, { waitUntil: "networkidle" });
+    if (p.url().includes("/sign-in")) throw new Error("the device that changed the password was signed out");
+    // …the other one does not, though its cookie still carries a valid signature.
+    const q = await other.newPage();
+    await q.goto(`${base}/settings`, { waitUntil: "networkidle" });
+    if (!q.url().includes("/sign-in")) throw new Error("other session survived the password change");
+  } finally {
+    await other.close();
+    await mine.close();
+  }
+});
+
+await step("forgot password: one answer for any email; the emailed link resets once", async () => {
+  const email = `smoke-${stamp}@roster.local`;
+  await context.clearCookies();
+  await page.goto(`${base}/sign-in`, { waitUntil: "networkidle" });
+  await page.getByRole("link", { name: /forgot password/i }).click();
+  await page.waitForURL(/\/forgot-password$/, { timeout: 15_000 });
+
+  // The answer must not depend on whether the account exists.
+  const answerFor = async (address) => {
+    await page.goto(`${base}/forgot-password`, { waitUntil: "networkidle" });
+    await page.getByLabel("Email").fill(address);
+    await page.getByRole("button", { name: /send reset link/i }).click();
+    const status = page.locator('[role="status"]').filter({ hasText: "Check your email." });
+    await status.waitFor({ timeout: 15_000 });
+    return ((await status.textContent()) ?? "").replace(address, "<email>");
+  };
+  const unknown = await answerFor(`nobody-${stamp}@roster.local`);
+  const known = await answerFor(email);
+  if (unknown !== known) throw new Error(`reset answer differs for an unknown email: "${unknown}" vs "${known}"`);
+
+  const messages = outbox();
+  if (!messages) return; // --base= run: no outbox to read
+  if (messages.some((m) => m.tag === "password_reset" && m.to === `nobody-${stamp}@roster.local`)) {
+    throw new Error("a reset email went to an address with no account");
+  }
+  const mail = messages.filter((m) => m.tag === "password_reset" && m.to === email).at(-1);
+  const link = mail?.text.match(/https?:\/\/\S+\/reset-password\?token=\S+/)?.[0];
+  if (!link) throw new Error(`no reset link emailed to ${email}`);
+  const resetPath = `${new URL(link).pathname}${new URL(link).search}`;
+
+  const reset = await fetch(`${base}${resetPath}`);
+  if (reset.headers.get("referrer-policy") !== "no-referrer") throw new Error("reset page leaks its token in a Referer");
+
+  await page.goto(`${base}${resetPath}`, { waitUntil: "networkidle" });
+  await page.locator('input[name="password"]').fill("password789");
+  await page.locator('input[name="confirm"]').fill("password789");
+  await page.getByRole("button", { name: /set new password/i }).click();
+  await page.waitForURL(/\/settings\?password=reset$/, { timeout: 15_000 });
+  await expectText("Password reset");
+
+  // Single use.
+  await page.locator("main").getByRole("button", { name: /sign out/i }).click();
+  await page.waitForURL(/\/$/, { timeout: 15_000 });
+  await page.goto(`${base}${resetPath}`, { waitUntil: "networkidle" });
+  await expectText("Link expired.");
+
+  // The old password is gone; the new one works.
+  await page.goto(`${base}/sign-in`, { waitUntil: "networkidle" });
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill("password456");
+  await page.getByRole("button", { name: /sign in/i }).click();
+  await expectText("did not work");
+  await page.getByLabel("Password").fill("password789");
+  await page.getByRole("button", { name: /sign in/i }).click();
+  await page.waitForURL(/\/resume$/, { timeout: 15_000 });
+});
+
+await step("deleting the account removes it and signs out", async () => {
+  await page.goto(`${base}/settings`, { waitUntil: "networkidle" });
+  await page.locator('input[name="confirm_handle"]').fill(`smoke_${stamp}`);
+  await page.getByRole("button", { name: /delete my account/i }).click();
+  await page.waitForURL(/\/$/, { timeout: 15_000 });
+  const gone = await page.goto(`${base}/smoke_${stamp}`, { waitUntil: "networkidle" });
+  if (gone.status() !== 404) throw new Error(`deleted resume still serves ${gone.status()}`);
+  await page.goto(`${base}/sign-in`, { waitUntil: "networkidle" });
+  await page.getByLabel("Email").fill(`smoke-${stamp}@roster.local`);
+  await page.getByLabel("Password").fill("password789");
+  await page.getByRole("button", { name: /sign in/i }).click();
+  await expectText("did not work");
+});
+
+await step("no Content-Security-Policy violations on any page visited", async () => {
+  if (cspViolations.length) throw new Error(`${cspViolations.length} violation(s): ${cspViolations[0]}`);
 });
 
 await browser.close();

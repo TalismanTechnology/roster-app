@@ -1,11 +1,15 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
-import { getRepository } from "@/lib/data";
-import { getCurrentUser, signOutEverywhere } from "@/lib/data/auth";
+import { reissueSession, signOutEverywhere } from "@/lib/data/auth";
 import { DataError } from "@/lib/data/types";
+import { revalidateProfile } from "@/lib/revalidate";
+
+import { fieldErrorsOf } from "./schemas";
+import { failed, formValues, requireUser as requireSession, str, type FormValues } from "./shared";
 
 /**
  * Account settings: the sign-in email, the password, and deletion. Each
@@ -13,36 +17,37 @@ import { DataError } from "@/lib/data/types";
  * the rest (uniqueness, current-password check, the cascade on delete).
  */
 
-export type AccountFormState = { ok: boolean; error: string | null };
+/** `values` carries non-secret fields back after a failure; passwords never return. */
+export type AccountFormState = {
+  ok: boolean;
+  error: string | null;
+  values?: FormValues;
+  /** On a validation failure or a wrong current password, each field's messages. */
+  fieldErrors?: Record<string, string[]>;
+  /**
+   * The email change is waiting on a confirmation link sent to this address;
+   * the old address still signs in until it is clicked (#29).
+   */
+  pendingEmail?: string;
+};
 
 const IDLE: AccountFormState = { ok: true, error: null };
 
-function str(formData: FormData, name: string): string {
-  const value = formData.get(name);
-  return typeof value === "string" ? value : "";
-}
-
-function failed(error: unknown, fallback: string): AccountFormState {
-  if (error instanceof DataError) return { ok: false, error: error.message };
-  return { ok: false, error: fallback };
-}
-
-async function requireUser() {
-  const user = await getCurrentUser();
-  if (!user) redirect("/sign-in?next=/settings");
-  return { repo: await getRepository(), user };
-}
+const requireUser = () => requireSession("/sign-in?next=/settings");
 
 export async function updateEmail(_prev: AccountFormState, formData: FormData): Promise<AccountFormState> {
   const { repo, user } = await requireUser();
   const parsed = z.string().trim().email("Enter a valid email address.").safeParse(str(formData, "email"));
-  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message, values: formValues(formData) };
 
+  let result;
   try {
-    await repo.updateEmail(user.id, parsed.data);
+    result = await repo.updateEmail(user.id, parsed.data);
   } catch (error) {
-    return failed(error, "Could not update your email.");
+    return failed(error, "Could not update your email.", formValues(formData));
   }
+  if (result === "pending") return { ok: true, error: null, pendingEmail: parsed.data.trim().toLowerCase() };
+  revalidatePath("/settings");
   return IDLE;
 }
 
@@ -61,13 +66,20 @@ export async function updatePassword(_prev: AccountFormState, formData: FormData
     next: str(formData, "next"),
     confirm: str(formData, "confirm"),
   });
-  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message, fieldErrors: fieldErrorsOf(parsed.error) };
 
   try {
     await repo.updatePassword(user.id, parsed.data.current, parsed.data.next);
   } catch (error) {
+    // #28: a wrong current password belongs to that field, not the form.
+    if (error instanceof DataError && error.code === "forbidden") {
+      return { ok: false, error: "Password not changed.", fieldErrors: { current: [error.message] } };
+    }
     return failed(error, "Could not update your password.");
   }
+  // The change retired every session cookie, this one included; hand this
+  // device a fresh one so only the others are signed out.
+  await reissueSession(user.id);
   return IDLE;
 }
 
@@ -79,14 +91,16 @@ export async function deleteAccount(_prev: AccountFormState, formData: FormData)
   const typed = str(formData, "confirm_handle").trim().toLowerCase();
 
   if (typed !== expected.toLowerCase()) {
-    return { ok: false, error: `Type ${expected} to confirm.` };
+    return { ok: false, error: `Type ${expected} to confirm.`, values: formValues(formData) };
   }
 
   try {
     await repo.deleteAccount(user.id);
   } catch (error) {
-    return failed(error, "Could not delete the account.");
+    return failed(error, "Could not delete the account.", formValues(formData));
   }
+  // The public resume and its search row go with the account.
+  revalidateProfile(profile?.handle);
 
   await signOutEverywhere();
   redirect("/");

@@ -1,5 +1,8 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import "server-only";
 
+import { randomUUID } from "node:crypto";
+
+import type { AvatarType } from "@/lib/avatars";
 import type { CoachContact, FilmClip, Profile, RecordEntry } from "@/lib/database.types";
 import { HANDLE_PATTERN, isReservedHandle } from "@/lib/handles";
 
@@ -7,23 +10,72 @@ import type { Repository } from "../repository";
 import {
   DataError,
   type AuthUser,
+  type EmailChangeResult,
+  type IndexablePage,
+  type IssuedPasswordReset,
+  type CoachPatch,
+  type MoveDirection,
   type NewCoach,
   type NewEntry,
   type NewFilm,
   type NewProfile,
+  type NewProfileReport,
+  type ProfileReport,
   type RecruiterList,
   type RecruiterListDetail,
+  type SavedSearch,
   type SearchParams,
+  type SearchResult,
+  type CreatedVerificationRequest,
+  type VerificationAnswerOptions,
   type VerificationRequest,
   type VerificationRequestDetail,
+  type VerificationResponse,
+  type TopMark,
+  type ViewerSummary,
 } from "../types";
-import { parseFilmUrl } from "./film";
-import { hashPassword, verifyPassword } from "./password";
-import { canRespondToRequest, canSeeCoachContact, canViewProfile } from "./rules";
+import {
+  canActForSibling,
+  canPinAnother,
+  canRespondToRequest,
+  DAILY_REQUEST_CAP,
+  isListed,
+  isLiveRequest,
+  pickTopMark,
+  summarizeViewers,
+  swapNeighbour,
+  weekStart,
+  isOverDailyCap,
+  REQUEST_TTL_DAYS,
+  canSeeCoachContact,
+  canViewProfile,
+  canReportProfile,
+  DAILY_REPORT_CAP,
+  isStaff,
+  REPORT_DETAIL_MAX,
+  CURRENT_PASSWORD_MISMATCH,
+  isSubstantiveEntryChange,
+  MAX_PINNED,
+  PASSWORD_RESET_TTL_MINUTES,
+  SIGN_UP_CONFLICT_COPY,
+  ENTRY_WRITE_FIELDS,
+} from "../rules";
+import { removeAvatars, writeAvatar } from "./avatars";
+import { filmThumbnailUrl, parseFilmUrl } from "./film";
+import { applySuspension } from "./moderation";
+import { hashPassword, verifyPassword, verifyPasswordConstantTime } from "./password";
+import { generateToken, hashToken } from "../tokens";
 import { searchProfiles } from "./search";
-import { mutate, readDb, type AchievementRow, type Db, type RecruiterListRow } from "./store";
+import {
+  mutate,
+  readDb,
+  type AchievementRow,
+  type Db,
+  type RecruiterListRow,
+  type VerificationRequestRow,
+} from "./store";
 
-const REQUEST_TTL_MS = 30 * 86_400_000;
+const REQUEST_TTL_MS = REQUEST_TTL_DAYS * 86_400_000;
 
 const now = () => new Date().toISOString();
 const today = () => now().slice(0, 10);
@@ -44,7 +96,8 @@ export class LocalRepository implements Repository {
     const normalized = email.trim().toLowerCase();
     return mutate((db) => {
       if (db.users.some((u) => u.email === normalized)) {
-        throw new DataError("conflict", "An account with that email already exists.");
+        // The same words Supabase's adapter uses: never "already exists".
+        throw new DataError("conflict", SIGN_UP_CONFLICT_COPY);
       }
       const user = {
         id: randomUUID(),
@@ -60,7 +113,8 @@ export class LocalRepository implements Repository {
   async signIn(email: string, password: string): Promise<AuthUser | null> {
     const normalized = email.trim().toLowerCase();
     const user = readDb().users.find((u) => u.email === normalized);
-    if (!user || !verifyPassword(password, user.password_hash)) return null;
+    // One scrypt run whether or not the account exists — see dummyPasswordHash.
+    if (!verifyPasswordConstantTime(password, user?.password_hash) || !user) return null;
     return { id: user.id, email: user.email };
   }
 
@@ -69,31 +123,86 @@ export class LocalRepository implements Repository {
     return user ? { id: user.id, email: user.email } : null;
   }
 
-  async updateEmail(userId: string, email: string): Promise<void> {
+  async updateEmail(userId: string, email: string): Promise<EmailChangeResult> {
     const normalized = email.trim().toLowerCase();
-    mutate((db) => {
+    // Immediate: there is no mailbox to confirm against locally. Supabase
+    // answers `pending` until the new address clicks its link.
+    await mutate((db) => {
       if (db.users.some((u) => u.email === normalized && u.id !== userId)) {
         throw new DataError("conflict", "That email is already in use.");
       }
       const user = requireUser(db, userId);
       user.email = normalized;
     });
+    return "updated";
   }
 
   async updatePassword(userId: string, current: string, next: string): Promise<void> {
-    mutate((db) => {
+    await mutate((db) => {
       const user = requireUser(db, userId);
       if (!verifyPassword(current, user.password_hash)) {
-        throw new DataError("forbidden", "Your current password did not match.");
+        throw new DataError("forbidden", CURRENT_PASSWORD_MISMATCH);
       }
       user.password_hash = hashPassword(next);
+      // Every cookie issued before this moment stops working.
+      user.session_version = (user.session_version ?? 0) + 1;
     });
   }
 
+  // Supabase's `redirectTo` is not taken: the local link always lands on /reset-password.
+  async requestPasswordReset(email: string): Promise<IssuedPasswordReset | null> {
+    const normalized = email.trim().toLowerCase();
+    return mutate((db) => {
+      const user = db.users.find((u) => u.email === normalized);
+      if (!user) return null;
+      const at = new Date();
+      // One live link per account: asking again retires the last one, as
+      // Supabase does with its recovery tokens.
+      for (const r of db.password_resets) {
+        if (r.user_id === user.id && r.used_at === null) r.used_at = at.toISOString();
+      }
+      const token = generateToken();
+      const expiresAt = new Date(at.getTime() + PASSWORD_RESET_TTL_MINUTES * 60_000).toISOString();
+      db.password_resets.push({
+        token_hash: hashToken(token),
+        user_id: user.id,
+        created_at: at.toISOString(),
+        expires_at: expiresAt,
+        used_at: null,
+      });
+      return { email: user.email, token, expiresAt };
+    });
+  }
+
+  async canResetPassword(token: string | null): Promise<boolean> {
+    return Boolean(token && findLiveReset(readDb(), token));
+  }
+
+  async resetPassword(token: string | null, next: string): Promise<AuthUser> {
+    return mutate((db) => {
+      const reset = token ? findLiveReset(db, token) : undefined;
+      if (!reset) throw new DataError("forbidden", "This reset link has expired or was already used. Request a new one.");
+      const user = requireUser(db, reset.user_id);
+      reset.used_at = now();
+      user.password_hash = hashPassword(next);
+      // Whoever knew the old password is signed out everywhere; the caller
+      // issues this device a fresh cookie at the new version.
+      user.session_version = (user.session_version ?? 0) + 1;
+      return { id: user.id, email: user.email };
+    });
+  }
+
+  /** Local-mode only: the version a session cookie must carry, or null for no such user. */
+  async sessionVersion(userId: string): Promise<number | null> {
+    const user = readDb().users.find((u) => u.id === userId);
+    return user ? (user.session_version ?? 0) : null;
+  }
+
   async deleteAccount(userId: string): Promise<void> {
-    mutate((db) => {
+    await mutate((db) => {
       const mine = new Set(db.achievements.filter((a) => a.profile_id === userId).map((a) => a.id));
       db.users = db.users.filter((u) => u.id !== userId);
+      db.password_resets = db.password_resets.filter((r) => r.user_id !== userId);
       db.profiles = db.profiles.filter((p) => p.id !== userId);
       db.memberships = db.memberships.filter((m) => m.profile_id !== userId);
       db.achievements = db.achievements.filter((a) => a.profile_id !== userId);
@@ -108,7 +217,13 @@ export class LocalRepository implements Repository {
       db.recruiter_list_members = db.recruiter_list_members.filter(
         (m) => !lists.has(m.list_id) && m.profile_id !== userId,
       );
+      db.saved_searches = db.saved_searches.filter((x) => x.owner_id !== userId);
+      // Reports against the account go with it; reports it filed stay, anonymised
+      // (`profile_reports.reporter_id … on delete set null`).
+      db.profile_reports = db.profile_reports.filter((r) => r.profile_id !== userId);
+      for (const r of db.profile_reports) if (r.reporter_id === userId) r.reporter_id = null;
     });
+    removeAvatars(userId);
   }
 
   // --- profiles -----------------------------------------------------------
@@ -134,6 +249,8 @@ export class LocalRepository implements Repository {
     const handle = input.handle.toLowerCase();
     if (!HANDLE_PATTERN.test(handle)) throw new DataError("invalid", "That handle is not valid.");
     if (isReservedHandle(handle)) throw new DataError("invalid", "That handle is reserved.");
+    // Mirrors guard_profile_privileged_columns() (0015): staff is granted, not chosen.
+    if (input.account_kind === "staff") throw new DataError("forbidden", "That account type is not available.");
 
     return mutate((db) => {
       if (db.profiles.some((p) => p.handle === handle)) {
@@ -151,12 +268,36 @@ export class LocalRepository implements Repository {
   async updateProfile(id: string, patch: Partial<Profile>): Promise<Profile> {
     return mutate((db) => {
       const profile = requireProfile(db, id);
-      // Handles and counters are not editable through this path.
-      const { id: _id, handle: _handle, entry_count: _e, verified_count: _v, created_at: _c, ...safe } = patch;
-      void _id; void _handle; void _e; void _v; void _c;
-      Object.assign(profile, safe, { updated_at: now() });
+      // Handles and counters are not editable through this path, nor are the
+      // columns guard_profile_privileged_columns() (0015) keeps from the
+      // owner: account kind, moderation, and identity trust.
+      const {
+        id: _id, handle: _handle, entry_count: _e, verified_count: _v, created_at: _c,
+        account_kind: _k, suspended_at: _s, identity_verified_at: _iv,
+        // The onboarding attestation is a record, not a setting (guard_profile_consent, 0021).
+        age_consent: _ac, consent_at: _ca,
+        ...safe
+      } = patch;
+      void _id; void _handle; void _e; void _v; void _c; void _k; void _s; void _iv;
+      // Given once (from null, both together), then fixed.
+      const consent = profile.age_consent === null && _ac ? { age_consent: _ac, consent_at: _ca ?? now() } : {};
+      Object.assign(profile, safe, consent, { updated_at: now() });
       return profile;
     });
+  }
+
+  async setAvatar(profileId: string, bytes: Uint8Array, type: AvatarType): Promise<Profile> {
+    requireProfile(readDb(), profileId);
+    const url = writeAvatar(profileId, bytes, type);
+    const profile = await this.updateProfile(profileId, { avatar_url: url });
+    removeAvatars(profileId, url);
+    return profile;
+  }
+
+  async removeAvatar(profileId: string): Promise<Profile> {
+    const profile = await this.updateProfile(profileId, { avatar_url: null });
+    removeAvatars(profileId);
+    return profile;
   }
 
   // --- the record ---------------------------------------------------------
@@ -180,9 +321,10 @@ export class LocalRepository implements Repository {
         detail: input.detail,
         sport: input.sport ?? profile.primary_sport,
         event_id: null,
-        value_numeric: null,
+        // measured_has_unit (0003): a number without a unit is no measurement.
+        value_numeric: input.unit ? (input.value_numeric ?? null) : null,
         value_display: input.value_display,
-        unit: null,
+        unit: input.unit ?? null,
         competition: input.competition,
         opponent: null,
         placement: input.placement,
@@ -207,13 +349,26 @@ export class LocalRepository implements Repository {
   async updateEntry(profileId: string, entryId: string, patch: Partial<NewEntry>): Promise<RecordEntry> {
     return mutate((db) => {
       const row = requireOwned(db.achievements, entryId, profileId, "entry");
-      Object.assign(row, patch, { updated_at: now() });
+      const isSubstantive = isSubstantiveEntryChange(row, patch);
+      Object.assign(row, pickEntryFields(patch), { updated_at: now() });
+      if (!row.unit) row.value_numeric = null;
+
+      if (isSubstantive) {
+        // The coach vouched for the old values. The badge, its date, and any
+        // link still waiting on an answer all describe a claim that no
+        // longer exists. `verified_by` is derived from `verification`, so it
+        // clears with it.
+        row.verification = "unverified";
+        row.verified_at = null;
+        expirePendingRequests(db, row.id);
+        syncCounts(db, profileId);
+      }
       return toEntry(db, row);
     });
   }
 
   async deleteEntry(profileId: string, entryId: string): Promise<void> {
-    mutate((db) => {
+    await mutate((db) => {
       requireOwned(db.achievements, entryId, profileId, "entry");
       db.achievements = db.achievements.filter((a) => a.id !== entryId);
       db.evidence = db.evidence.filter((e) => e.achievement_id !== entryId);
@@ -224,8 +379,11 @@ export class LocalRepository implements Repository {
   }
 
   async setPinned(profileId: string, entryId: string, isPinned: boolean): Promise<void> {
-    mutate((db) => {
+    await mutate((db) => {
       const row = requireOwned(db.achievements, entryId, profileId, "entry");
+      if (isPinned && !row.is_pinned && !canPinAnother(db.achievements.filter((a) => a.profile_id === profileId))) {
+        throw new DataError("invalid", `You can pin up to ${MAX_PINNED} entries. Unpin one first.`);
+      }
       row.is_pinned = isPinned;
       row.updated_at = now();
     });
@@ -256,10 +414,7 @@ export class LocalRepository implements Repository {
         url: input.url,
         provider: parsed.provider,
         external_id: parsed.external_id,
-        thumbnail_url:
-          parsed.provider === "youtube" && parsed.external_id
-            ? `https://i.ytimg.com/vi/${parsed.external_id}/hqdefault.jpg`
-            : null,
+        thumbnail_url: filmThumbnailUrl(parsed),
         season: input.season,
         sport: profile.primary_sport,
         duration_s: null,
@@ -273,15 +428,44 @@ export class LocalRepository implements Repository {
     });
   }
 
+  async updateFilm(profileId: string, clipId: string, input: NewFilm): Promise<FilmClip> {
+    return mutate((db) => {
+      const clip = requireOwned(db.film_clips, clipId, profileId, "clip");
+      if (input.url !== clip.url) {
+        // parse_film_url fires on `update of url` (0007), so only then.
+        const parsed = parseFilmUrl(input.url);
+        clip.provider = parsed.provider;
+        clip.external_id = parsed.external_id;
+        clip.thumbnail_url = filmThumbnailUrl(parsed);
+      }
+      Object.assign(clip, { title: input.title, url: input.url, season: input.season, updated_at: now() });
+      return clip;
+    });
+  }
+
+  async moveFilm(profileId: string, clipId: string, direction: MoveDirection): Promise<void> {
+    await mutate((db) => {
+      requireOwned(db.film_clips, clipId, profileId, "clip");
+      const ordered = db.film_clips
+        .filter((f) => f.profile_id === profileId)
+        .sort((a, b) => a.position - b.position || a.created_at.localeCompare(b.created_at));
+      const order = swapNeighbour(ordered.map((f) => f.id), clipId, direction);
+      for (const clip of ordered) {
+        const position = order.indexOf(clip.id);
+        if (clip.position !== position) Object.assign(clip, { position, updated_at: now() });
+      }
+    });
+  }
+
   async deleteFilm(profileId: string, clipId: string): Promise<void> {
-    mutate((db) => {
+    await mutate((db) => {
       requireOwned(db.film_clips, clipId, profileId, "clip");
       db.film_clips = db.film_clips.filter((f) => f.id !== clipId);
     });
   }
 
   async featureFilm(profileId: string, clipId: string): Promise<void> {
-    mutate((db) => {
+    await mutate((db) => {
       requireOwned(db.film_clips, clipId, profileId, "clip");
       for (const clip of db.film_clips) {
         if (clip.profile_id !== profileId) continue;
@@ -327,8 +511,19 @@ export class LocalRepository implements Repository {
     });
   }
 
+  async updateCoach(profileId: string, coachId: string, patch: CoachPatch): Promise<CoachContact> {
+    return mutate((db) => {
+      const contact = requireOwned(db.coach_contacts, coachId, profileId, "reference");
+      const fields = ["name", "role", "org_name", "email", "phone", "is_visible"] as const;
+      for (const f of fields) {
+        if (patch[f] !== undefined) Object.assign(contact, { [f]: patch[f] });
+      }
+      return contact;
+    });
+  }
+
   async deleteCoach(profileId: string, coachId: string): Promise<void> {
-    mutate((db) => {
+    await mutate((db) => {
       requireOwned(db.coach_contacts, coachId, profileId, "reference");
       db.coach_contacts = db.coach_contacts.filter((c) => c.id !== coachId);
     });
@@ -340,19 +535,27 @@ export class LocalRepository implements Repository {
     profileId: string,
     achievementId: string,
     coachContactId: string,
-  ): Promise<VerificationRequest> {
+  ): Promise<CreatedVerificationRequest> {
     return mutate((db) => {
       const entry = requireOwned(db.achievements, achievementId, profileId, "entry");
       requireOwned(db.coach_contacts, coachContactId, profileId, "reference");
 
-      // One live request per entry; re-requesting supersedes the old link.
-      for (const r of db.verification_requests) {
-        if (r.achievement_id === achievementId && r.status === "pending") r.status = "expired";
+      // create_verification_request()'s daily cap. Checked under the store
+      // lock, so two tabs cannot both slip under it.
+      if (isOverDailyCap(db.verification_requests, profileId)) {
+        throw new DataError(
+          "rate_limited",
+          `You can send ${DAILY_REQUEST_CAP} verification requests a day. Try again tomorrow.`,
+        );
       }
 
-      const request: VerificationRequest = {
+      // One live request per entry; re-requesting supersedes the old link.
+      expirePendingRequests(db, achievementId);
+
+      const token = generateToken();
+      const row: VerificationRequestRow = {
         id: randomUUID(),
-        token: randomBytes(24).toString("base64url"),
+        token_hash: hashToken(token),
         achievement_id: achievementId,
         profile_id: profileId,
         coach_contact_id: coachContactId,
@@ -360,26 +563,33 @@ export class LocalRepository implements Repository {
         note: null,
         verifier_name: null,
         verifier_role: null,
+        flagged_unknown_athlete: false,
         created_at: now(),
         responded_at: null,
         expires_at: new Date(Date.now() + REQUEST_TTL_MS).toISOString(),
       };
-      db.verification_requests.push(request);
+      db.verification_requests.push(row);
       entry.verification = "submitted";
+      entry.verified_at = null;
       entry.updated_at = now();
-      return request;
+      return { ...publicRequest(row), token };
     });
   }
 
   async getVerificationRequest(token: string): Promise<VerificationRequestDetail | null> {
     const db = readDb();
-    const request = db.verification_requests.find((r) => r.token === token);
-    if (!request) return null;
-    const row = db.achievements.find((a) => a.id === request.achievement_id);
-    const athlete = db.profiles.find((p) => p.id === request.profile_id);
-    const coach = db.coach_contacts.find((c) => c.id === request.coach_contact_id);
-    if (!row || !athlete || !coach) return null;
-    return { ...request, entry: toEntry(db, row), athlete, coach };
+    const request = findByToken(db, token);
+    return request ? toDetail(db, request) : null;
+  }
+
+  async getCoachBatchRequests(token: string): Promise<VerificationRequestDetail[]> {
+    const db = readDb();
+    const authority = findByToken(db, token);
+    if (!authority) return [];
+    return db.verification_requests
+      .filter((r) => isLiveRequest(r) && isSibling(db, authority, r))
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .flatMap((r) => toDetail(db, r) ?? []);
   }
 
   async respondToVerification(
@@ -388,68 +598,114 @@ export class LocalRepository implements Repository {
     note: string | null,
     verifier: { name: string; role: string | null },
     responderUserId: string | null,
-  ): Promise<void> {
-    mutate((db) => {
-      const request = db.verification_requests.find((r) => r.token === token);
-      if (!request) throw new DataError("not_found", "That verification link is not valid.");
+    options: VerificationAnswerOptions = {},
+  ): Promise<VerificationResponse> {
+    return mutate((db) => {
+      const authority = findByToken(db, token);
+      if (!authority) throw new DataError("not_found", "That verification link is not valid.");
+
+      let request = authority;
+      if (options.requestId && options.requestId !== authority.id) {
+        const sibling = db.verification_requests.find((r) => r.id === options.requestId);
+        if (!sibling || !isSibling(db, authority, sibling)) {
+          // The link itself being dead reads as expired, like the RPC says.
+          if (authority.status === "expired" || new Date(authority.expires_at) <= new Date()) {
+            throw new DataError("forbidden", RESPONSE_COPY.expired);
+          }
+          throw new DataError("not_found", "That verification request was not found.");
+        }
+        request = sibling;
+      }
 
       const allowed = canRespondToRequest(request, responderUserId);
-      if (!allowed.ok) {
-        const copy = {
-          used: "This link has already been used.",
-          expired: "This link has expired. Ask the athlete to send a new one.",
-          self: "You can't verify your own record.",
-        };
-        throw new DataError("forbidden", copy[allowed.reason]);
-      }
+      if (!allowed.ok) throw new DataError("forbidden", RESPONSE_COPY[allowed.reason]);
 
       const entry = db.achievements.find((a) => a.id === request.achievement_id);
       if (!entry) throw new DataError("not_found", "That entry no longer exists.");
 
+      // A flag is a dispute, whatever button sent it — as in respond_verification().
+      const flagged = options.flagUnknownAthlete === true;
+      const decided = flagged ? "disputed" : outcome;
       const at = now();
       db.verifications.push({
         id: randomUUID(),
         achievement_id: entry.id,
         verifier_id: responderUserId,
         verifier_kind: "coach",
-        outcome,
+        outcome: decided,
         method: "coach_attestation",
         note,
         verifier_name: verifier.name,
+        verifier_role: verifier.role,
         created_at: at,
       });
 
       // apply_verification()
-      entry.verification = outcome;
-      entry.verified_at = outcome === "verified" ? at : null;
+      entry.verification = decided;
+      entry.verified_at = decided === "verified" ? at : null;
       entry.updated_at = at;
 
-      request.status = outcome;
+      request.status = decided;
       request.note = note;
       request.verifier_name = verifier.name;
       request.verifier_role = verifier.role;
+      request.flagged_unknown_athlete = flagged;
       request.responded_at = at;
 
       syncCounts(db, entry.profile_id);
+      const athlete = requireProfile(db, entry.profile_id);
+      // Local mode can reach the account email too; Supabase only has the
+      // published contact_email (see respond_verification()).
+      const accountEmail = db.users.find((u) => u.id === athlete.id)?.email ?? null;
+      return {
+        requestId: request.id,
+        handle: athlete.handle,
+        outcome: decided,
+        flaggedUnknownAthlete: flagged,
+        athleteName: athlete.display_name,
+        athleteEmail: athlete.contact_email ?? accountEmail,
+        entryTitle: entry.title,
+      };
     });
   }
 
   async listVerificationRequests(profileId: string): Promise<VerificationRequest[]> {
     return readDb()
       .verification_requests.filter((r) => r.profile_id === profileId)
-      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .map(publicRequest);
+  }
+
+  async revokeVerificationRequest(profileId: string, requestId: string): Promise<void> {
+    await mutate((db) => {
+      const request = requireOwned(db.verification_requests, requestId, profileId, "request");
+      if (request.status !== "pending") {
+        throw new DataError("conflict", "That request has already been answered or closed.");
+      }
+      request.status = "expired";
+      // sync_entry_on_request(): the last open link takes the entry back.
+      const entry = db.achievements.find((a) => a.id === request.achievement_id);
+      const stillOpen = db.verification_requests.some((r) => r.achievement_id === request.achievement_id && r.status === "pending");
+      if (entry && entry.verification === "submitted" && !stillOpen) {
+        entry.verification = "unverified";
+        entry.verified_at = null;
+        entry.updated_at = now();
+      }
+    });
   }
 
   // --- signals ------------------------------------------------------------
 
   async recordView(profileId: string, viewerId: string | null): Promise<void> {
-    const db = readDb();
     if (viewerId === profileId) return;
-    const target = db.profiles.find((p) => p.id === profileId);
-    const viewer = viewerId ? db.profiles.find((p) => p.id === viewerId) : null;
-    if (!canViewProfile(target, viewerId, viewer)) return;
 
-    mutate((d) => {
+    // The visibility check and the increment share one locked snapshot, so
+    // a resume going private mid-request is never counted against.
+    await mutate((d) => {
+      const target = d.profiles.find((p) => p.id === profileId);
+      const viewer = viewerId ? d.profiles.find((p) => p.id === viewerId) : null;
+      if (!canViewProfile(target, viewerId, viewer)) return;
+
       const day = today();
       const existing = d.profile_views.find(
         (v) => v.profile_id === profileId && v.viewer_id === viewerId && v.viewed_on === day,
@@ -466,10 +722,42 @@ export class LocalRepository implements Repository {
       .reduce((sum, v) => sum + v.view_count, 0);
   }
 
+  async viewerSummary(profileId: string): Promise<ViewerSummary> {
+    const db = readDb();
+    const kinds = new Map(db.profiles.map((p) => [p.id, p.account_kind]));
+    return summarizeViewers(db.profile_views, (id) => kinds.get(id), profileId, weekStart());
+  }
+
   // --- discovery ----------------------------------------------------------
 
-  async searchAthletes(params: SearchParams): Promise<Profile[]> {
+  async searchAthletes(params: SearchParams): Promise<SearchResult> {
     return searchProfiles(readDb().profiles, params);
+  }
+
+  async listIndexableProfiles(offset: number, limit: number): Promise<IndexablePage> {
+    const all = readDb()
+      .profiles.filter((p) => isListed(p) && p.entry_count > 0)
+      .sort((a, b) => (a.handle < b.handle ? -1 : a.handle > b.handle ? 1 : 0));
+    return {
+      total: all.length,
+      profiles: all.slice(offset, offset + limit).map((p) => ({ handle: p.handle, updated_at: p.updated_at })),
+    };
+  }
+
+  async topVerifiedMarks(profileIds: string[]): Promise<Record<string, TopMark>> {
+    const db = readDb();
+    const wanted = new Set(profileIds);
+    const byProfile = new Map<string, AchievementRow[]>();
+    for (const a of db.achievements) {
+      if (!wanted.has(a.profile_id) || a.verification !== "verified") continue;
+      byProfile.set(a.profile_id, [...(byProfile.get(a.profile_id) ?? []), a]);
+    }
+    const out: Record<string, TopMark> = {};
+    for (const [id, rows] of byProfile) {
+      const top = pickTopMark(rows);
+      if (top) out[id] = top;
+    }
+    return out;
   }
 
   // --- recruiter lists ----------------------------------------------------
@@ -520,8 +808,20 @@ export class LocalRepository implements Repository {
     });
   }
 
+  async renameList(ownerId: string, listId: string, name: string): Promise<RecruiterList> {
+    return mutate((db) => {
+      const list = requireList(db, ownerId, listId);
+      if (db.recruiter_lists.some((l) => l.owner_id === ownerId && l.name === name && l.id !== listId)) {
+        throw new DataError("conflict", "You already have a list with that name.");
+      }
+      list.name = name;
+      list.updated_at = now();
+      return withCount(db, list);
+    });
+  }
+
   async deleteList(ownerId: string, listId: string): Promise<void> {
-    mutate((db) => {
+    await mutate((db) => {
       requireList(db, ownerId, listId);
       db.recruiter_lists = db.recruiter_lists.filter((l) => l.id !== listId);
       db.recruiter_list_members = db.recruiter_list_members.filter((m) => m.list_id !== listId);
@@ -529,7 +829,7 @@ export class LocalRepository implements Repository {
   }
 
   async addToList(ownerId: string, listId: string, profileId: string, note: string | null): Promise<void> {
-    mutate((db) => {
+    await mutate((db) => {
       const list = requireList(db, ownerId, listId);
       const target = db.profiles.find((p) => p.id === profileId);
       const owner = db.profiles.find((p) => p.id === ownerId) ?? null;
@@ -543,12 +843,37 @@ export class LocalRepository implements Repository {
   }
 
   async removeFromList(ownerId: string, listId: string, profileId: string): Promise<void> {
-    mutate((db) => {
+    await mutate((db) => {
       const list = requireList(db, ownerId, listId);
       db.recruiter_list_members = db.recruiter_list_members.filter(
         (m) => !(m.list_id === listId && m.profile_id === profileId),
       );
       list.updated_at = now();
+    });
+  }
+
+  async setListNote(ownerId: string, listId: string, profileId: string, note: string | null): Promise<void> {
+    await mutate((db) => {
+      const list = requireList(db, ownerId, listId);
+      const member = db.recruiter_list_members.find((m) => m.list_id === listId && m.profile_id === profileId);
+      if (!member) throw new DataError("not_found", "That athlete is not on this list.");
+      member.note = note;
+      list.updated_at = now();
+    });
+  }
+
+  async moveListMember(ownerId: string, fromListId: string, toListId: string, profileId: string): Promise<void> {
+    if (fromListId === toListId) return;
+    await mutate((db) => {
+      const from = requireList(db, ownerId, fromListId);
+      const to = requireList(db, ownerId, toListId);
+      const member = db.recruiter_list_members.find((m) => m.list_id === fromListId && m.profile_id === profileId);
+      if (!member) throw new DataError("not_found", "That athlete is not on this list.");
+      const already = db.recruiter_list_members.some((m) => m.list_id === toListId && m.profile_id === profileId);
+      db.recruiter_list_members = db.recruiter_list_members.filter((m) => m !== member);
+      if (!already) db.recruiter_list_members.push({ ...member, list_id: toListId, added_at: now() });
+      from.updated_at = now();
+      to.updated_at = now();
     });
   }
 
@@ -558,6 +883,100 @@ export class LocalRepository implements Repository {
     return db.recruiter_list_members
       .filter((m) => m.profile_id === profileId && mine.has(m.list_id))
       .map((m) => m.list_id);
+  }
+
+  async listsContainingMany(ownerId: string, profileIds: string[]): Promise<Record<string, string[]>> {
+    const db = readDb();
+    const mine = new Set(db.recruiter_lists.filter((l) => l.owner_id === ownerId).map((l) => l.id));
+    const out: Record<string, string[]> = Object.fromEntries(profileIds.map((id) => [id, []]));
+    for (const m of db.recruiter_list_members) {
+      if (mine.has(m.list_id) && m.profile_id in out) out[m.profile_id].push(m.list_id);
+    }
+    return out;
+  }
+
+  // --- saved searches -----------------------------------------------------
+
+  // --- moderation (0021) ----------------------------------------------------
+
+  async reportProfile(profileId: string, reporterId: string | null, report: NewProfileReport): Promise<void> {
+    await mutate((db) => {
+      const target = db.profiles.find((p) => p.id === profileId);
+      const reporter = reporterId ? db.profiles.find((p) => p.id === reporterId) : null;
+      if (!canReportProfile(target, reporterId, reporter)) throw new DataError("not_found", "That resume was not found.");
+
+      if (reporterId) {
+        const mine = db.profile_reports.filter((r) => r.reporter_id === reporterId);
+        if (mine.some((r) => r.profile_id === profileId && r.status === "open")) return;
+        if (mine.filter((r) => r.created_at.slice(0, 10) === today()).length >= DAILY_REPORT_CAP) {
+          throw new DataError("rate_limited", "You've sent a lot of reports today. Try again tomorrow.");
+        }
+      }
+      db.profile_reports.push({
+        id: randomUUID(),
+        profile_id: profileId,
+        reporter_id: reporterId,
+        reason: report.reason,
+        detail: report.detail?.slice(0, REPORT_DETAIL_MAX) ?? null,
+        status: "open",
+        created_at: now(),
+        resolved_at: null,
+        resolved_by: null,
+      });
+    });
+  }
+
+  async listProfileReports(actorId: string): Promise<ProfileReport[]> {
+    const db = readDb();
+    if (!isStaff(db.profiles.find((p) => p.id === actorId))) throw new DataError("forbidden", "Staff only.");
+    return db.profile_reports
+      .map((r): ProfileReport => ({
+        id: r.id, profile_id: r.profile_id, reporter_id: r.reporter_id, reason: r.reason, detail: r.detail,
+        status: r.status, created_at: r.created_at, resolved_at: r.resolved_at,
+      }))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }
+
+  async setProfileSuspended(actorId: string, profileId: string, suspended: boolean): Promise<Profile> {
+    return mutate((db) => {
+      if (!isStaff(db.profiles.find((p) => p.id === actorId))) throw new DataError("forbidden", "Staff only.");
+      return applySuspension(db, profileId, suspended, actorId);
+    });
+  }
+
+  async listSavedSearches(ownerId: string): Promise<SavedSearch[]> {
+    return readDb()
+      .saved_searches.filter((x) => x.owner_id === ownerId)
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  }
+
+  async saveSearch(ownerId: string, name: string, query: string, digest: boolean): Promise<SavedSearch> {
+    return mutate((db) => {
+      const existing = db.saved_searches.find((x) => x.owner_id === ownerId && x.name === name);
+      if (existing) {
+        Object.assign(existing, { query, digest, updated_at: now() });
+        return existing;
+      }
+      const row: SavedSearch = { id: randomUUID(), owner_id: ownerId, name, query, digest, created_at: now(), updated_at: now() };
+      db.saved_searches.push(row);
+      return row;
+    });
+  }
+
+  async setSavedSearchDigest(ownerId: string, searchId: string, digest: boolean): Promise<void> {
+    await mutate((db) => {
+      const row = db.saved_searches.find((x) => x.id === searchId && x.owner_id === ownerId);
+      if (!row) throw new DataError("not_found", "That saved search was not found.");
+      Object.assign(row, { digest, updated_at: now() });
+    });
+  }
+
+  async deleteSavedSearch(ownerId: string, searchId: string): Promise<void> {
+    await mutate((db) => {
+      const before = db.saved_searches.length;
+      db.saved_searches = db.saved_searches.filter((x) => !(x.id === searchId && x.owner_id === ownerId));
+      if (db.saved_searches.length === before) throw new DataError("not_found", "That saved search was not found.");
+    });
   }
 }
 
@@ -573,6 +992,7 @@ export function newProfile(input: NewProfile): Profile {
     account_kind: input.account_kind ?? "athlete",
     visibility: input.visibility ?? "public",
     display_name: input.display_name,
+    title: input.title ?? null,
     avatar_url: null,
     cover_url: null,
     bio: null,
@@ -586,7 +1006,7 @@ export function newProfile(input: NewProfile): Profile {
     positions: [],
     jersey: null,
     region: null,
-    school: null,
+    school: input.school ?? null,
     gpa: null,
     sat_score: null,
     act_score: null,
@@ -602,6 +1022,9 @@ export function newProfile(input: NewProfile): Profile {
     verified_count: 0,
     identity_verified_at: null,
     suspended_at: null,
+    viewer_summary_opt_in: false,
+    age_consent: input.age_consent ?? null,
+    consent_at: input.age_consent ? (input.consent_at ?? at) : null,
     created_at: at,
     updated_at: at,
   };
@@ -630,13 +1053,18 @@ export function toEntry(db: Db, a: AchievementRow): RecordEntry {
     org_logo_url: null,
     event_name: a.event_name,
     evidence_count: db.evidence.filter((e) => e.achievement_id === a.id).length,
-    verified_by:
-      a.verification === "verified"
-        ? (db.verifications
-            .filter((v) => v.achievement_id === a.id && v.outcome === "verified")
-            .sort((x, y) => y.created_at.localeCompare(x.created_at))[0]?.verifier_name ?? null)
-        : null,
+    verified_by: a.verification === "verified" ? verifiedBy(db, a.id) : null,
+    value_numeric: a.value_numeric,
   };
+}
+
+/** record_entries.verified_by (0016): the newest verified decision's "Name, Role". */
+function verifiedBy(db: Db, achievementId: string): string | null {
+  const latest = db.verifications
+    .filter((v) => v.achievement_id === achievementId && v.outcome === "verified")
+    .sort((x, y) => y.created_at.localeCompare(x.created_at))[0];
+  if (!latest?.verifier_name) return null;
+  return [latest.verifier_name, latest.verifier_role].filter(Boolean).join(", ");
 }
 
 function byPinnedThenDate(a: RecordEntry, b: RecordEntry): number {
@@ -650,6 +1078,72 @@ export function syncCounts(db: Db, profileId: string): void {
   const mine = db.achievements.filter((a) => a.profile_id === profileId);
   profile.entry_count = mine.length;
   profile.verified_count = mine.filter((a) => a.verification === "verified").length;
+}
+
+/** Only the `NewEntry` columns — a direct POST must not smuggle in `verification`. */
+function pickEntryFields(patch: Partial<NewEntry>): Partial<NewEntry> {
+  return Object.fromEntries(ENTRY_WRITE_FIELDS.filter((f) => patch[f] !== undefined).map((f) => [f, patch[f]]));
+}
+
+const RESPONSE_COPY = {
+  used: "This link has already been used.",
+  expired: "This link has expired. Ask the athlete to send a new one.",
+  self: "You can't verify your own record.",
+} as const;
+
+function findByToken(db: Db, token: string): VerificationRequestRow | undefined {
+  const hash = hashToken(token);
+  return db.verification_requests.find((r) => r.token_hash === hash);
+}
+
+/** The row without its hash — what leaves the adapter. */
+function publicRequest(row: VerificationRequestRow): VerificationRequest {
+  const { token_hash: _hash, ...request } = row;
+  void _hash;
+  return request;
+}
+
+/** verification_request_payload(): the entry, and narrow slices of athlete and coach. */
+function toDetail(db: Db, request: VerificationRequestRow): VerificationRequestDetail | null {
+  const row = db.achievements.find((a) => a.id === request.achievement_id);
+  const athlete = db.profiles.find((p) => p.id === request.profile_id);
+  const coach = db.coach_contacts.find((c) => c.id === request.coach_contact_id);
+  if (!row || !athlete || !coach) return null;
+  return {
+    ...publicRequest(request),
+    entry: toEntry(db, row),
+    athlete: {
+      id: athlete.id,
+      handle: athlete.handle,
+      display_name: athlete.display_name,
+      primary_sport: athlete.primary_sport,
+      school: athlete.school,
+      grad_year: athlete.grad_year,
+    },
+    coach: { id: coach.id, name: coach.name, role: coach.role, org_name: coach.org_name },
+  };
+}
+
+function isSibling(db: Db, authority: VerificationRequestRow, other: VerificationRequestRow): boolean {
+  const email = (id: string) => db.coach_contacts.find((c) => c.id === id)?.email ?? null;
+  return canActForSibling(authority, other, {
+    authority: email(authority.coach_contact_id),
+    sibling: email(other.coach_contact_id),
+  });
+}
+
+/** Supersedes every link still waiting on an answer for this entry. */
+function expirePendingRequests(db: Db, achievementId: string): void {
+  for (const r of db.verification_requests) {
+    if (r.achievement_id === achievementId && r.status === "pending") r.status = "expired";
+  }
+}
+
+/** A reset row for this raw token that is unused and in date, or undefined. */
+function findLiveReset(db: Db, token: string) {
+  const hash = hashToken(token);
+  const at = now();
+  return db.password_resets.find((r) => r.token_hash === hash && r.used_at === null && r.expires_at > at);
 }
 
 function requireUser(db: Db, userId: string) {

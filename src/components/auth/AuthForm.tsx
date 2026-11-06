@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState } from "react";
 
 import type { AuthFormState } from "@/lib/actions/auth";
@@ -15,12 +16,15 @@ export function AuthForm({
   action,
   submitLabel,
   next,
+  initialError = null,
 }: {
   action: (prev: AuthFormState, formData: FormData) => Promise<AuthFormState>;
   submitLabel: string;
   next?: string;
+  /** A message the page arrived with — e.g. a confirmation link that failed. */
+  initialError?: string | null;
 }) {
-  const [state, formAction] = useActionState(action, { error: null });
+  const [state, formAction] = useActionState(action, { error: initialError });
   const isSignUp = /create/i.test(submitLabel);
 
   if (state.confirmEmail) {
@@ -39,7 +43,9 @@ export function AuthForm({
       {next && <input type="hidden" name="next" value={next} />}
 
       <Field label="Email">
-        <TextInput name="email" type="email" autoComplete="email" required autoFocus />
+        {/* defaultValue from the last attempt: React resets the form after the
+            action, and retyping an email to fix a password is a small insult. */}
+        <TextInput name="email" type="email" autoComplete="email" defaultValue={state.email} required autoFocus />
       </Field>
 
       <Field label="Password" hint={isSignUp ? "At least 8 characters." : undefined}>
@@ -51,6 +57,15 @@ export function AuthForm({
           required
         />
       </Field>
+
+      {!isSignUp && (
+        <Link
+          href="/forgot-password"
+          className="label -mt-3 w-fit text-ink-muted underline decoration-transparent underline-offset-4 transition-colors hover:text-ink hover:decoration-ink"
+        >
+          Forgot password?
+        </Link>
+      )}
 
       {state.error && (
         <p role="alert" className="text-sm text-disputed">

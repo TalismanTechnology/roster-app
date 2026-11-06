@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, type ReactNode, type HTMLAttributes } from 'react';
+import { useReducedMotion } from 'motion/react';
 
 interface MagnetProps extends HTMLAttributes<HTMLDivElement> {
   children: ReactNode;
@@ -27,12 +28,12 @@ const Magnet: React.FC<MagnetProps> = ({
   const [isActive, setIsActive] = useState<boolean>(false);
   const [position, setPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const magnetRef = useRef<HTMLDivElement>(null);
+  // Under reduced motion the magnet is simply off: no listener, no transform.
+  const prefersReduced = useReducedMotion();
+  const isOff = disabled || prefersReduced === true;
 
   useEffect(() => {
-    if (disabled) {
-      setPosition({ x: 0, y: 0 });
-      return;
-    }
+    if (isOff) return;
 
     const handleMouseMove = (e: MouseEvent) => {
       if (!magnetRef.current) return;
@@ -59,9 +60,11 @@ const Magnet: React.FC<MagnetProps> = ({
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
     };
-  }, [padding, disabled, magnetStrength]);
+  }, [padding, isOff, magnetStrength]);
 
   const transitionStyle = isActive ? activeTransition : inactiveTransition;
+  // Off reads as centered without a state write in the effect.
+  const offset = isOff ? { x: 0, y: 0 } : position;
 
   return (
     <div
@@ -73,9 +76,9 @@ const Magnet: React.FC<MagnetProps> = ({
       <div
         className={innerClassName}
         style={{
-          transform: `translate3d(${position.x}px, ${position.y}px, 0)`,
-          transition: transitionStyle,
-          willChange: 'transform'
+          transform: isOff ? undefined : `translate3d(${offset.x}px, ${offset.y}px, 0)`,
+          transition: isOff ? undefined : transitionStyle,
+          willChange: isOff ? undefined : 'transform'
         }}
       >
         {children}

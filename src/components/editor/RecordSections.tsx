@@ -7,43 +7,58 @@ import {
   deleteCoach,
   deleteFilm,
   featureFilm,
+  moveFilm,
+  toggleCoachVisible,
   togglePinned,
   updateAchievement,
+  updateCoach,
+  updateFilm,
 } from "@/lib/actions/resume";
 import { EditorForm } from "@/components/editor/EditorForm";
 import { EditorSection, Panel } from "@/components/editor/ProfileSections";
 import { VerificationMark } from "@/components/record/VerificationMark";
 import { Field, Select, TextArea, TextInput } from "@/components/ui/fields";
 import { Unverified } from "@/components/ui/marks";
+import { canPinAnother, isLiveRequest, MAX_PINNED } from "@/lib/data/rules";
 import type { VerificationRequest } from "@/lib/data/types";
+import { latestToday } from "@/lib/dates";
 import { KIND_OPTIONS, kindLabel, recordDate } from "@/lib/format";
 import { providerLabel } from "@/lib/film";
+import { eventsFor, formatMeasurable, MARK_UNITS } from "@/lib/sport-events";
 
-import { CopyButton } from "./CopyButton";
+import { ConfirmDelete } from "./ConfirmDelete";
+import { EventPicker } from "./EventPicker";
 import { RequestVerification } from "./RequestVerification";
 
 /**
  * The record half of the editor: entries, film, references. Every row action
  * is a real button — a 40px bordered target, never a bare text link — and
- * posts straight to a Server Action, so the rows need no client JavaScript.
- * Editing and verification requests fold out of a row with <details>.
+ * posts straight to a Server Action, so the rows need no client JavaScript
+ * beyond Delete, which asks twice (ConfirmDelete). Editing and verification
+ * requests fold out of a row with <details>.
  */
 
 function RowAction({
   action,
   id,
   label,
-  destructive = false,
+  extra,
+  ariaLabel,
+  disabled = false,
 }: {
   action: (formData: FormData) => Promise<void>;
   id: string;
   label: string;
-  destructive?: boolean;
+  /** More hidden fields, e.g. a direction. */
+  extra?: Record<string, string>;
+  ariaLabel?: string;
+  disabled?: boolean;
 }) {
   return (
     <form action={action}>
       <input type="hidden" name="id" value={id} />
-      <button type="submit" className={`btn-row ${destructive ? "btn-row-danger" : ""}`}>
+      {extra && Object.entries(extra).map(([name, value]) => <input key={name} type="hidden" name={name} value={value} />)}
+      <button type="submit" className="btn-row disabled:cursor-not-allowed disabled:opacity-40" aria-label={ariaLabel} disabled={disabled}>
         {label}
       </button>
     </form>
@@ -82,9 +97,16 @@ function AddPanel({ title, children }: { title: string; children: React.ReactNod
 // Record entries
 // ---------------------------------------------------------------------------
 
-function EntryFields({ entry }: { entry?: RecordEntry }) {
+function EntryFields({ entry, sport }: { entry?: RecordEntry; sport: string | null }) {
+  const events = eventsFor(entry?.sport ?? sport);
+  const initialEvent = entry ? (events.find((e) => e.name === entry.title && e.unit === entry.unit)?.slug ?? "") : "";
+  // A unit from before the templates ("s") stays selectable, so saving an
+  // untouched form never rewrites it — that would clear a verified badge.
+  const units: string[] = entry?.unit && !(MARK_UNITS as readonly string[]).includes(entry.unit) ? [...MARK_UNITS, entry.unit] : [...MARK_UNITS];
   return (
     <>
+      <EventPicker events={events} initial={initialEvent} />
+
       <div className="grid gap-6 sm:grid-cols-2">
         <Field label="Type">
           <Select name="kind" defaultValue={entry?.kind ?? "personal_record"} required>
@@ -97,7 +119,7 @@ function EntryFields({ entry }: { entry?: RecordEntry }) {
         </Field>
 
         <Field label="Date">
-          <TextInput name="achieved_on" type="date" defaultValue={entry?.achieved_on ?? ""} required />
+          <TextInput name="achieved_on" type="date" max={latestToday()} defaultValue={entry?.achieved_on ?? ""} required />
         </Field>
       </div>
 
@@ -106,8 +128,19 @@ function EntryFields({ entry }: { entry?: RecordEntry }) {
       </Field>
 
       <div className="grid gap-6 sm:grid-cols-2">
-        <Field label="Mark" hint="As the sport writes it: 53.94, 6-08.25, 58 rec · 912 yds">
+        <Field label="Mark" hint="As the sport writes it: 53.94, 4:12.50, 6-08.25, 58 rec · 912 yds">
           <TextInput name="value_display" defaultValue={entry?.value_display ?? ""} maxLength={20} />
+        </Field>
+
+        <Field label="Unit" hint="With a unit, a single mark is stored as a number recruiters can compare.">
+          <Select name="unit" defaultValue={entry?.unit ?? ""}>
+            <option value="">None</option>
+            {units.map((u) => (
+              <option key={u} value={u}>
+                {u}
+              </option>
+            ))}
+          </Select>
         </Field>
 
         <Field label="Competition">
@@ -138,31 +171,39 @@ export function RecordSection({
   entries,
   coaches,
   requests = [],
+  sport = null,
 }: {
   entries: RecordEntry[];
   coaches: CoachContact[];
   requests?: VerificationRequest[];
+  /** The athlete's primary sport, for the event picker. */
+  sport?: string | null;
 }) {
-  // A pending request's link lives on the row, rendered from the server, so
-  // it is there the moment the request is made and on every visit after.
-  const pendingByEntry = new Map(requests.filter((r) => r.status === "pending").map((r) => [r.achievement_id, r]));
-  const coachById = new Map(coaches.map((c) => [c.id, c]));
+  // `requests` is newest first, so the first match per entry wins. The raw
+  // link is never here — only a hash is stored; see RequestVerification.
+  const pendingByEntry = new Map<string, VerificationRequest>();
+  const latestByEntry = new Map<string, VerificationRequest>();
+  for (const r of requests) {
+    if (r.status === "pending" && !pendingByEntry.has(r.achievement_id)) pendingByEntry.set(r.achievement_id, r);
+    if (r.status !== "expired" && !latestByEntry.has(r.achievement_id)) latestByEntry.set(r.achievement_id, r);
+  }
+  const canPin = canPinAnother(entries);
 
   return (
     <EditorSection
       id="record"
       title="The record"
       count={entries.length}
-      lede="Every PR, result, award, and honor. Pin the three that matter most — they lead your resume — then send each entry to the coach who saw it."
+      lede="Every PR, result, award, and honor. Pin the three that matter most — they lead your resume — then send each entry to the coach who saw it. Editing a verified entry clears its badge."
     >
       {entries.length === 0 ? (
         <Empty>Nothing on the record yet. Add the first entry below.</Empty>
       ) : (
         <ol className="panel divide-y divide-rule">
           {entries.map((entry) => {
-            const pending = pendingByEntry.get(entry.id);
+            const pending = pendingByEntry.get(entry.id) ?? null;
             return (
-              <li key={entry.id} className="flex flex-wrap items-start gap-x-5 gap-y-4" style={{ padding: "var(--feature-pad)" }}>
+              <li key={entry.id} id={`entry-${entry.id}`} className="flex flex-wrap items-start gap-x-5 gap-y-4" style={{ padding: "var(--feature-pad)" }}>
                 <time dateTime={entry.achieved_on} className="w-16 shrink-0 pt-1 text-sm text-ink-muted" data-numeric>
                   {recordDate(entry.achieved_on)}
                 </time>
@@ -174,6 +215,11 @@ export function RecordSection({
                       <span className="font-display text-lg" data-numeric>
                         {entry.value_display}
                         {entry.unit && <span className="ml-0.5 text-sm font-normal text-ink-muted">{entry.unit}</span>}
+                      </span>
+                    )}
+                    {entry.value_numeric !== null && entry.unit && (
+                      <span className="label font-mono text-ink-subtle" title="Stored as a comparable number">
+                        [ {formatMeasurable(entry.value_numeric, entry.unit)} ]
                       </span>
                     )}
                   </p>
@@ -192,32 +238,30 @@ export function RecordSection({
                 <VerificationMark state={entry.verification} className="mt-1.5" />
 
                 <div className="flex basis-full flex-wrap items-center gap-2">
-                  <RowAction action={togglePinned} id={entry.id} label={entry.is_pinned ? "Unpin" : "Pin"} />
+                  {entry.is_pinned || canPin ? (
+                    <RowAction action={togglePinned} id={entry.id} label={entry.is_pinned ? "Unpin" : "Pin"} />
+                  ) : (
+                    <button type="button" className="btn-row cursor-not-allowed opacity-40" disabled title={`${MAX_PINNED} entries are pinned. Unpin one first.`}>
+                      Pin
+                    </button>
+                  )}
                   <Disclosure summary="Edit">
                     <EditorForm action={updateAchievement} submitLabel="Save entry" compact>
                       <input type="hidden" name="id" value={entry.id} />
-                      <EntryFields entry={entry} />
+                      <EntryFields entry={entry} sport={sport} />
                     </EditorForm>
                   </Disclosure>
-                  {(entry.verification === "unverified" || entry.verification === "disputed") && (
-                    <Disclosure summary="Request verification">
-                      <RequestVerification entryId={entry.id} coaches={coaches} />
-                    </Disclosure>
-                  )}
-                  <RowAction action={deleteAchievement} id={entry.id} label="Delete" destructive />
+                  {/* Rendered in every state so its one-time link survives the refresh. */}
+                  <RequestVerification
+                    entryId={entry.id}
+                    verification={entry.verification}
+                    coaches={coaches}
+                    pending={pending}
+                    pendingIsLive={pending ? isLiveRequest(pending) : false}
+                    latest={latestByEntry.get(entry.id) ?? null}
+                  />
+                  <ConfirmDelete action={deleteAchievement} id={entry.id} what="entry" />
                 </div>
-
-                {entry.verification === "submitted" && pending && (
-                  <div className="flex basis-full flex-wrap items-center gap-3 border-t border-rule pt-4" role="status">
-                    <span className="text-sm text-ink-muted">
-                      Sent to {coachById.get(pending.coach_contact_id)?.name ?? "your coach"} — send them this link:
-                    </span>
-                    <code className="max-w-full truncate border border-rule bg-paper-sunken px-2 py-1.5 text-sm text-ink-muted">
-                      /verify/{pending.token}
-                    </code>
-                    <CopyButton value={`/verify/${pending.token}`} label="Copy link" className="btn-row" />
-                  </div>
-                )}
               </li>
             );
           })}
@@ -226,7 +270,7 @@ export function RecordSection({
 
       <AddPanel title="Add an entry">
         <EditorForm action={addAchievement} submitLabel="Add entry">
-          <EntryFields />
+          <EntryFields sport={sport} />
         </EditorForm>
       </AddPanel>
     </EditorSection>
@@ -237,7 +281,30 @@ export function RecordSection({
 // Film
 // ---------------------------------------------------------------------------
 
-export function FilmSection({ clips }: { clips: FilmClip[] }) {
+function FilmFields({ clip }: { clip?: FilmClip }) {
+  return (
+    <>
+      <Field label="Title" hint="“Junior season highlights”, “Full game vs. Central”">
+        <TextInput name="title" defaultValue={clip?.title ?? ""} required minLength={3} maxLength={120} />
+      </Field>
+
+      <div className="grid gap-6 sm:grid-cols-2">
+        <Field label="Link">
+          <TextInput name="url" type="url" defaultValue={clip?.url ?? ""} required placeholder="https://" />
+        </Field>
+
+        <Field label="Season">
+          <TextInput name="season" defaultValue={clip?.season ?? ""} maxLength={40} placeholder="2026" />
+        </Field>
+      </div>
+    </>
+  );
+}
+
+export function FilmSection({ clips: unordered }: { clips: FilmClip[] }) {
+  // The athlete's own order (#56), not the featured-first order the resume
+  // reads in: Up and Down move a clip through this list.
+  const clips = [...unordered].sort((a, b) => a.position - b.position || a.created_at.localeCompare(b.created_at));
   return (
     <EditorSection
       id="film"
@@ -249,8 +316,11 @@ export function FilmSection({ clips }: { clips: FilmClip[] }) {
         <Empty>No film yet. A highlight reel is the first thing most recruiters open.</Empty>
       ) : (
         <ol className="panel divide-y divide-rule">
-          {clips.map((clip) => (
+          {clips.map((clip, i) => (
             <li key={clip.id} className="flex flex-wrap items-center gap-x-5 gap-y-3" style={{ padding: "var(--feature-pad)" }}>
+              <span className="label w-6 shrink-0 font-mono text-ink-subtle" data-numeric>
+                {String(i + 1).padStart(2, "0")}
+              </span>
               <div className="min-w-0 flex-1 basis-56">
                 <p className="truncate text-lg font-bold">
                   {clip.title}
@@ -261,9 +331,17 @@ export function FilmSection({ clips }: { clips: FilmClip[] }) {
                 </p>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex basis-full flex-wrap items-center gap-2">
+                <RowAction action={moveFilm} id={clip.id} label="↑" extra={{ direction: "up" }} ariaLabel={`Move ${clip.title} up`} disabled={i === 0} />
+                <RowAction action={moveFilm} id={clip.id} label="↓" extra={{ direction: "down" }} ariaLabel={`Move ${clip.title} down`} disabled={i === clips.length - 1} />
                 {!clip.is_featured && <RowAction action={featureFilm} id={clip.id} label="Feature" />}
-                <RowAction action={deleteFilm} id={clip.id} label="Delete" destructive />
+                <Disclosure summary="Edit">
+                  <EditorForm action={updateFilm} submitLabel="Save clip" compact>
+                    <input type="hidden" name="id" value={clip.id} />
+                    <FilmFields clip={clip} />
+                  </EditorForm>
+                </Disclosure>
+                <ConfirmDelete action={deleteFilm} id={clip.id} what="clip" />
               </div>
             </li>
           ))}
@@ -272,19 +350,7 @@ export function FilmSection({ clips }: { clips: FilmClip[] }) {
 
       <AddPanel title="Add a clip">
         <EditorForm action={addFilm} submitLabel="Add clip">
-          <Field label="Title" hint="“Junior season highlights”, “Full game vs. Central”">
-            <TextInput name="title" required minLength={3} maxLength={120} />
-          </Field>
-
-          <div className="grid gap-6 sm:grid-cols-2">
-            <Field label="Link">
-              <TextInput name="url" type="url" required placeholder="https://" />
-            </Field>
-
-            <Field label="Season">
-              <TextInput name="season" maxLength={40} placeholder="2026" />
-            </Field>
-          </div>
+          <FilmFields />
         </EditorForm>
       </AddPanel>
     </EditorSection>
@@ -295,13 +361,39 @@ export function FilmSection({ clips }: { clips: FilmClip[] }) {
 // Coach references
 // ---------------------------------------------------------------------------
 
+function CoachFields({ coach }: { coach?: CoachContact }) {
+  return (
+    <div className="grid gap-6 sm:grid-cols-2">
+      <Field label="Name">
+        <TextInput name="name" defaultValue={coach?.name ?? ""} required minLength={2} maxLength={80} />
+      </Field>
+
+      <Field label="Role">
+        <TextInput name="role" defaultValue={coach?.role ?? ""} maxLength={80} placeholder="Head Coach" />
+      </Field>
+
+      <Field label="School or club">
+        <TextInput name="org_name" defaultValue={coach?.org_name ?? ""} maxLength={120} />
+      </Field>
+
+      <Field label="Email">
+        <TextInput name="email" type="email" defaultValue={coach?.email ?? ""} />
+      </Field>
+
+      <Field label="Phone">
+        <TextInput name="phone" type="tel" defaultValue={coach?.phone ?? ""} maxLength={25} />
+      </Field>
+    </div>
+  );
+}
+
 export function CoachSection({ coaches }: { coaches: CoachContact[] }) {
   return (
     <EditorSection
       id="references"
       title="References"
       count={coaches.length}
-      lede="The coach a recruiter calls — and the person who verifies your entries. Ask before you list someone; their details show only while your resume is public and open to recruiting."
+      lede="The coach a recruiter calls — and the person who verifies your entries. Ask before you list someone; their details show only while your resume is public and open to recruiting. Hide keeps a reference off your resume but still lets them verify."
     >
       {coaches.length === 0 ? (
         <Empty>No references yet. You need at least one coach here before you can request verification.</Empty>
@@ -310,13 +402,30 @@ export function CoachSection({ coaches }: { coaches: CoachContact[] }) {
           {coaches.map((coach) => (
             <li key={coach.id} className="flex flex-wrap items-center gap-x-5 gap-y-3" style={{ padding: "var(--feature-pad)" }}>
               <div className="min-w-0 flex-1 basis-56">
-                <p className="truncate text-lg font-bold">{coach.name}</p>
+                <p className="truncate text-lg font-bold">
+                  {coach.name}
+                  {!coach.is_visible && <span className="label ml-3 font-mono font-normal text-ink-subtle">[ Hidden ]</span>}
+                </p>
                 <p className="mt-0.5 truncate text-sm text-ink-muted">
                   {[coach.role, coach.org_name, coach.email ?? coach.phone].filter(Boolean).join(" · ")}
                 </p>
               </div>
 
-              <RowAction action={deleteCoach} id={coach.id} label="Delete" destructive />
+              <div className="flex basis-full flex-wrap items-center gap-2">
+                <RowAction
+                  action={toggleCoachVisible}
+                  id={coach.id}
+                  label={coach.is_visible ? "Hide" : "Show"}
+                  ariaLabel={coach.is_visible ? `Hide ${coach.name} from your resume` : `Show ${coach.name} on your resume`}
+                />
+                <Disclosure summary="Edit">
+                  <EditorForm action={updateCoach} submitLabel="Save reference" compact>
+                    <input type="hidden" name="id" value={coach.id} />
+                    <CoachFields coach={coach} />
+                  </EditorForm>
+                </Disclosure>
+                <ConfirmDelete action={deleteCoach} id={coach.id} what="reference" />
+              </div>
             </li>
           ))}
         </ol>
@@ -324,27 +433,7 @@ export function CoachSection({ coaches }: { coaches: CoachContact[] }) {
 
       <AddPanel title="Add a reference">
         <EditorForm action={addCoach} submitLabel="Add reference">
-          <div className="grid gap-6 sm:grid-cols-2">
-            <Field label="Name">
-              <TextInput name="name" required minLength={2} maxLength={80} />
-            </Field>
-
-            <Field label="Role">
-              <TextInput name="role" maxLength={80} placeholder="Head Coach" />
-            </Field>
-
-            <Field label="School or club">
-              <TextInput name="org_name" maxLength={120} />
-            </Field>
-
-            <Field label="Email">
-              <TextInput name="email" type="email" />
-            </Field>
-
-            <Field label="Phone">
-              <TextInput name="phone" type="tel" maxLength={25} />
-            </Field>
-          </div>
+          <CoachFields />
         </EditorForm>
       </AddPanel>
     </EditorSection>

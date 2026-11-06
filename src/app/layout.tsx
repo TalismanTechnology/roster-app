@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 
+import { siteUrl } from "@/lib/site";
+
 import "./globals.css";
 
 /**
@@ -13,6 +15,10 @@ import "./globals.css";
  */
 
 export const metadata: Metadata = {
+  // Resolves every relative URL in metadata — canonical, og:url, and the
+  // generated share-card images — against the public origin, not the host
+  // the request happened to arrive on.
+  metadataBase: new URL(siteUrl()),
   title: {
     default: "Roster — The Athlete's Resume",
     template: "%s · Roster",

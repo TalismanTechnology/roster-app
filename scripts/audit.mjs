@@ -5,17 +5,24 @@
  * console errors, and the accessibility checks a linter can do without a
  * human — images without alt, buttons and links without a name, form
  * controls without a label, a missing h1, skipped heading levels. Signed-in
- * routes run under the seeded athlete or recruiter. Writes screenshots to
- * .shots/audit/ and exits non-zero on any finding.
+ * routes run under the seeded athlete or recruiter, `/onboarding` under a
+ * fresh sign-up. Routes keyed on data — a verify token, a list id — are
+ * created or looked up first. Writes screenshots to .shots/audit/ and exits
+ * non-zero on any finding.
  *
- * Usage:  node scripts/audit.mjs [--base=http://localhost:3000]
+ * Spawns its own isolated server like the smoke (it writes: a sign-up, a
+ * request link) unless pointed elsewhere with --base=.
+ *
+ * Usage:  node scripts/audit.mjs [--base=http://127.0.0.1:3000]
  */
 
 import { mkdir } from "node:fs/promises";
 
 import { chromium } from "playwright-core";
 
-const base = process.argv.find((a) => a.startsWith("--base="))?.split("=")[1] ?? "http://localhost:3000";
+import { serverFromArgs } from "./lib/server.mjs";
+
+const { base } = await serverFromArgs({ label: "roster-audit" });
 const WIDTHS = [320, 375, 768, 1024, 1440];
 
 const ROUTES = [
@@ -27,11 +34,20 @@ const ROUTES = [
   { path: "/preview", as: null },
   { path: "/sign-in", as: null },
   { path: "/sign-up", as: null },
+  { path: "/privacy", as: null },
+  { path: "/terms", as: null },
   { path: "/nobody-here", as: null, expectStatus: 404 },
   { path: "/resume", as: "athlete" },
   { path: "/settings", as: "athlete" },
   { path: "/lists", as: "recruiter" },
   { path: "/search?sport=soccer", as: "recruiter" },
+  { path: "/onboarding", as: "fresh" },
+  // Under /lists/loading.tsx the 200 is committed before notFound() runs, so
+  // the not-found UI streams in with it; assert what the visitor sees.
+  { path: "/lists/00000000-0000-4000-8000-000000000000", as: "recruiter", streamedNotFound: "No such list." },
+  // Filled in below, once the data they key on exists.
+  { path: () => verifyPath, as: null },
+  { path: () => listPath, as: "recruiter" },
 ];
 
 const ACCOUNTS = {
@@ -43,10 +59,20 @@ const browser = await chromium.launch({ channel: "chromium" });
 await mkdir(".shots/audit", { recursive: true });
 
 const findings = [];
+const stamp = Date.now().toString(36);
 
 async function signedInContext(as) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  if (as) {
+  if (as === "fresh") {
+    // A new account with no profile yet: the only way onto /onboarding.
+    const page = await context.newPage();
+    await page.goto(`${base}/sign-up`, { waitUntil: "networkidle" });
+    await page.getByLabel("Email").fill(`audit-${stamp}@roster.local`);
+    await page.getByLabel("Password").fill("password123");
+    await page.getByRole("button", { name: /create account/i }).click();
+    await page.waitForURL(/\/onboarding$/, { timeout: 15_000 });
+    await page.close();
+  } else if (as) {
     const page = await context.newPage();
     await page.goto(`${base}/sign-in`, { waitUntil: "networkidle" });
     await page.getByLabel("Email").fill(ACCOUNTS[as][0]);
@@ -58,7 +84,39 @@ async function signedInContext(as) {
   return context;
 }
 
-for (const route of ROUTES) {
+// A live verify link: the athlete asks for one in the editor.
+let verifyPath = null;
+{
+  const context = await signedInContext("athlete");
+  const page = await context.newPage();
+  await page.goto(`${base}/resume`, { waitUntil: "networkidle" });
+  const existing = page.locator("code", { hasText: "/verify/" }).first();
+  if (!(await existing.count())) {
+    const summary = page.locator("summary", { hasText: "Request verification" }).first();
+    await summary.click();
+    await summary.locator("xpath=ancestor::details[1]").getByRole("button", { name: /create request link/i }).click();
+    await existing.waitFor({ timeout: 20_000 });
+  }
+  verifyPath = new URL((await existing.textContent()).trim(), base).pathname;
+  await context.close();
+}
+
+// One of the recruiter's own lists, by id.
+let listPath = null;
+{
+  const context = await signedInContext("recruiter");
+  const page = await context.newPage();
+  await page.goto(`${base}/lists`, { waitUntil: "networkidle" });
+  listPath = await page.locator('a[href^="/lists/"]').first().getAttribute("href");
+  await context.close();
+}
+
+for (const entry of ROUTES) {
+  const route = { ...entry, path: typeof entry.path === "function" ? entry.path() : entry.path };
+  if (!route.path) {
+    findings.push(`setup: could not resolve a ${entry.as ?? "public"} dynamic route`);
+    continue;
+  }
   const context = await signedInContext(route.as);
   for (const width of WIDTHS) {
     const page = await context.newPage();
@@ -76,6 +134,10 @@ for (const route of ROUTES) {
     const status = response?.status();
     if (route.expectStatus && status !== route.expectStatus) findings.push(`${route.path}@${width}: status ${status}, expected ${route.expectStatus}`);
     if (!route.expectStatus && status !== 200) findings.push(`${route.path}@${width}: status ${status}`);
+    if (route.streamedNotFound) {
+      const shown = await page.getByRole("heading", { level: 1, name: route.streamedNotFound }).isVisible().catch(() => false);
+      if (!shown) findings.push(`${route.path}@${width}: expected the not-found page ("${route.streamedNotFound}")`);
+    }
 
     await page.addStyleTag({ content: "nextjs-portal, [data-nextjs-toast] { display: none !important; }" });
     await page.waitForTimeout(300);
@@ -144,3 +206,6 @@ if (findings.length) {
   process.exit(1);
 }
 process.stdout.write("\nno findings\n");
+// Explicitly, like the smoke: the server child's pipes keep the event loop
+// alive, and its teardown runs on "exit".
+process.exit(0);

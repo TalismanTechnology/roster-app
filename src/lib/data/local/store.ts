@@ -1,3 +1,5 @@
+import "server-only";
+
 import fs from "node:fs";
 import path from "node:path";
 
@@ -11,7 +13,8 @@ import type {
   ProfileView,
 } from "@/lib/database.types";
 
-import type { VerificationRequest } from "../types";
+import { hashToken } from "../tokens";
+import type { ProfileReport, SavedSearch, VerificationRequest } from "../types";
 import { dataDir } from "./paths";
 import { buildSeed } from "./seed";
 
@@ -22,7 +25,8 @@ import { buildSeed } from "./seed";
  * hundred rows; parsing them on every request costs less than a database
  * round trip would, and a single file is something a developer can open,
  * read, and delete. Writes go to a temp file and rename into place so a
- * crash mid-write never leaves a half-written database.
+ * crash mid-write never leaves a half-written database, and every
+ * read-modify-write runs under one in-process lock (`mutate`).
  *
  * Reads are never cached — see `readDb` for why.
  */
@@ -32,6 +36,8 @@ export type LocalUser = {
   email: string;
   password_hash: string;
   created_at: string;
+  /** Bumped on password change; session cookies carry it. Absent reads as 0. */
+  session_version?: number;
 };
 
 /** `achievements` plus the two columns the `record_entries` view joins in. */
@@ -59,8 +65,13 @@ export type VerificationRow = {
   method: string | null;
   note: string | null;
   verifier_name: string | null;
+  /** Optional: rows written before 0016 parity have no role. */
+  verifier_role?: string | null;
   created_at: string;
 };
+
+/** `verification_requests` (0017): the request plus its token's sha256, never the token. */
+export type VerificationRequestRow = VerificationRequest & { token_hash: string };
 
 export type RecruiterListRow = {
   id: string;
@@ -78,6 +89,21 @@ export type RecruiterListMemberRow = {
   added_at: string;
 };
 
+/**
+ * A password reset link (local mode's stand-in for Supabase recovery). Like
+ * verification links, only the token's sha256 is kept.
+ */
+export type PasswordResetRow = {
+  token_hash: string;
+  user_id: string;
+  created_at: string;
+  expires_at: string;
+  used_at: string | null;
+};
+
+/** `profile_reports` (0021): the report plus who resolved it. */
+export type ProfileReportRow = ProfileReport & { resolved_by: string | null };
+
 export type Db = {
   version: 1;
   users: LocalUser[];
@@ -87,12 +113,18 @@ export type Db = {
   achievements: AchievementRow[];
   evidence: EvidenceRow[];
   verifications: VerificationRow[];
-  verification_requests: VerificationRequest[];
+  verification_requests: VerificationRequestRow[];
   film_clips: FilmClip[];
   coach_contacts: CoachContact[];
   profile_views: ProfileView[];
   recruiter_lists: RecruiterListRow[];
   recruiter_list_members: RecruiterListMemberRow[];
+  /** Files written before Wave 6 have none; `upgrade` adds the array. */
+  password_resets: PasswordResetRow[];
+  /** `saved_searches` (0020). Added by `upgrade` to older files. */
+  saved_searches: SavedSearch[];
+  /** `profile_reports` (0021). Added by `upgrade` to older files. */
+  profile_reports: ProfileReportRow[];
 };
 
 export function emptyDb(): Db {
@@ -111,6 +143,9 @@ export function emptyDb(): Db {
     profile_views: [],
     recruiter_lists: [],
     recruiter_list_members: [],
+    password_resets: [],
+    saved_searches: [],
+    profile_reports: [],
   };
 }
 
@@ -138,7 +173,34 @@ function ensureExists(): void {
  */
 export function readDb(): Db {
   ensureExists();
-  return JSON.parse(fs.readFileSync(dbFile(), "utf8")) as Db;
+  return upgrade(JSON.parse(fs.readFileSync(dbFile(), "utf8")) as Db);
+}
+
+/**
+ * Brings rows written by older builds up to the current shape. Requests used
+ * to store the raw token; it is hashed and dropped here, so the next write
+ * leaves no working link on disk.
+ */
+function upgrade(db: Db): Db {
+  for (const row of db.verification_requests as (VerificationRequestRow & { token?: string })[]) {
+    if (row.token !== undefined) {
+      row.token_hash ??= hashToken(row.token);
+      delete row.token;
+    }
+    row.flagged_unknown_athlete ??= false;
+  }
+  db.password_resets ??= [];
+  db.saved_searches ??= [];
+  db.profile_reports ??= [];
+  // 0021 columns: accounts made before the attestation have none.
+  for (const p of db.profiles) {
+    p.age_consent ??= null;
+    p.consent_at ??= null;
+  }
+  // 0020 columns, defaulted the way the migration defaults them.
+  for (const p of db.profiles) p.viewer_summary_opt_in ??= false;
+  for (const a of db.achievements) a.value_numeric ??= null;
+  return db;
 }
 
 export function writeDb(db: Db): void {
@@ -150,15 +212,42 @@ export function writeDb(db: Db): void {
 }
 
 /**
- * Applies a change to a fresh copy of the database and persists it. The
- * callback receives its own clone, so a thrown error leaves the file as it
- * was and no caller ever sees a half-applied change.
+ * The tail of the write queue. Kept on `globalThis` rather than in module
+ * state: Next's dev server can hold several instances of this module in one
+ * process (see `readDb`), and a lock each instance keeps to itself would
+ * serialize nothing.
  */
-export function mutate<T>(change: (db: Db) => T): T {
-  const db = structuredClone(readDb());
-  const result = change(db);
-  writeDb(db);
-  return result;
+const LOCK = Symbol.for("roster.local.store.lock");
+type LockHolder = { [LOCK]?: Promise<unknown> };
+
+/**
+ * Runs `task` once every earlier task has settled. A failure releases the
+ * lock like a success does — one bad write must not wedge every write after.
+ */
+export function withStoreLock<T>(task: () => T | Promise<T>): Promise<T> {
+  const holder = globalThis as LockHolder;
+  const previous = holder[LOCK] ?? Promise.resolve();
+  const run = previous.then(task, task);
+  holder[LOCK] = run.catch(() => undefined);
+  return run;
+}
+
+/**
+ * Applies a change to a fresh copy of the database and persists it, holding
+ * the store lock from the read to the write so two concurrent saves can
+ * never both start from the same snapshot and silently drop one change.
+ *
+ * The callback receives its own clone, so a thrown error leaves the file as
+ * it was and no caller ever sees a half-applied change. It may be async;
+ * the lock is held until it settles.
+ */
+export function mutate<T>(change: (db: Db) => T | Promise<T>): Promise<T> {
+  return withStoreLock(async () => {
+    const db = structuredClone(readDb());
+    const result = await change(db);
+    writeDb(db);
+    return result;
+  });
 }
 
 /** Drops the file so the next read reseeds. Tests and `npm run seed`. */

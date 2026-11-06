@@ -3,8 +3,9 @@ import { redirect } from "next/navigation";
 
 import { AuthLayout } from "@/components/auth/AuthLayout";
 import { OnboardingForm } from "@/components/auth/OnboardingForm";
-import { getRepository } from "@/lib/data";
-import { getCurrentUser } from "@/lib/data/auth";
+import { getCurrentProfile, getCurrentUser } from "@/lib/data/auth";
+import { signInHref } from "@/lib/safe-next";
+import { siteHost } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Set up your resume",
@@ -19,14 +20,13 @@ export const metadata: Metadata = {
  */
 export default async function OnboardingPage() {
   const user = await getCurrentUser();
-  if (!user) redirect("/sign-in");
+  if (!user) redirect(signInHref("/onboarding"));
 
-  const repo = await getRepository();
-  if (await repo.getProfileById(user.id)) redirect("/resume");
+  if (await getCurrentProfile()) redirect("/resume");
 
   return (
     <AuthLayout label="Almost there" title="Claim your page." image="03">
-      <OnboardingForm />
+      <OnboardingForm host={siteHost()} />
     </AuthLayout>
   );
 }

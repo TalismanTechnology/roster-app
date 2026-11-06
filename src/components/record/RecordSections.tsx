@@ -5,6 +5,8 @@ import type { CoachContact, FilmClip, Profile, RecordEntry } from "@/lib/databas
 import { entryContext, fullDate, kindLabel, placementLabel, recordDate } from "@/lib/format";
 
 import { posterFor, providerLabel } from "@/lib/film";
+import { signInHref } from "@/lib/safe-next";
+import { formatMeasurable } from "@/lib/sport-events";
 
 import { FilmPlayer } from "./FilmPlayer";
 import { VerificationMark } from "./VerificationMark";
@@ -93,14 +95,12 @@ export function RecordList({ entries, isOwner }: { entries: RecordEntry[]; isOwn
   }
 
   const sorted = [...entries].sort((a, b) => b.achieved_on.localeCompare(a.achieved_on));
-  let lastYear = "";
 
   return (
     <ol className="border-t border-rule">
-      {sorted.map((e) => {
+      {sorted.map((e, i) => {
         const year = e.achieved_on.slice(0, 4);
-        const showYear = year !== lastYear;
-        lastYear = year;
+        const showYear = i === 0 || sorted[i - 1].achieved_on.slice(0, 4) !== year;
         const context = entryContext(e);
 
         return (
@@ -117,19 +117,15 @@ export function RecordList({ entries, isOwner }: { entries: RecordEntry[]; isOwn
 
               <div className="min-w-0">
                 <p className="font-bold">{e.title}</p>
-                <p className="label mt-0.5 text-ink-muted">
-                  {kindLabel(e.kind)}
-                  {context && <> · {context}</>}
+                <p className="label mt-0.5 flex flex-wrap items-center gap-x-2 text-ink-muted">
+                  <span>
+                    {kindLabel(e.kind)}
+                    {context && <> · {context}</>}
+                  </span>
+                  {e.value_numeric !== null && e.unit && <MeasurableChip value={e.value_numeric} unit={e.unit} />}
                 </p>
                 {e.detail && <p className="mt-2 max-w-2xl leading-normal">{e.detail}</p>}
-                {e.verification === "verified" && e.verified_by && (
-                  <p className="label mt-1.5 text-ink-muted">Verified by {e.verified_by}</p>
-                )}
-                {e.verification === "unverified" && (
-                  <p className="label mt-1.5 flex items-center gap-1.5 text-ink-subtle">
-                    <Unverified /> Self-reported
-                  </p>
-                )}
+                <Provenance entry={e} />
               </div>
 
               <div className="flex max-w-[45%] items-center justify-end gap-2.5 pt-0.5 text-right">
@@ -143,6 +139,90 @@ export function RecordList({ entries, isOwner }: { entries: RecordEntry[]; isOwn
         );
       })}
     </ol>
+  );
+}
+
+/**
+ * Where an entry's status came from (#71), in the words a recruiter needs.
+ * The chip says *what* the state is; this says who stood behind it and
+ * when, or — for the states short of verified — what the state means for
+ * how much weight the entry should carry.
+ */
+function Provenance({ entry }: { entry: RecordEntry }) {
+  switch (entry.verification) {
+    case "verified":
+      if (!entry.verified_by && !entry.verified_at) return null;
+      return (
+        <p className="label mt-1.5 text-ink-muted">
+          {entry.verified_by ? <>Verified by {entry.verified_by}</> : "Verified by a coach"}
+          {entry.verified_at && (
+            <>
+              {" · "}
+              <time dateTime={entry.verified_at} title={fullDate(entry.verified_at.slice(0, 10))}>
+                {fullDate(entry.verified_at.slice(0, 10))}
+              </time>
+            </>
+          )}
+        </p>
+      );
+    case "disputed":
+      return (
+        <p className="mt-1.5 max-w-2xl text-sm leading-snug text-ink-muted">
+          <span className="font-bold text-disputed">Disputed.</span> The coach asked to confirm this did not. Read it as
+          self-reported until it is corrected and confirmed — or ask the athlete about it.
+        </p>
+      );
+    case "submitted":
+      return <p className="label mt-1.5 text-ink-subtle">Sent to a coach to confirm · awaiting their answer</p>;
+    case "rejected":
+      return (
+        <p className="mt-1.5 max-w-2xl text-sm leading-snug text-ink-muted">
+          Reviewed and not substantiated. Treat it as an unsupported claim.
+        </p>
+      );
+    default:
+      return (
+        <p className="label mt-1.5 flex items-center gap-1.5 text-ink-subtle">
+          <Unverified /> Self-reported
+        </p>
+      );
+  }
+}
+
+/** How a mark is earned, once per record, for a reader deciding how far to trust it. */
+export function VerificationNote() {
+  return (
+    <aside aria-labelledby="how-verification-works" className="mt-6 grid gap-3 border border-rule p-5 @3xl:grid-cols-[14rem_1fr] @3xl:gap-8">
+      <p id="how-verification-works" className="label font-mono text-ink-muted">
+        [ How verification works ]
+      </p>
+      <ol className="grid gap-2 text-sm leading-snug text-ink-muted @xl:grid-cols-3 @xl:gap-6">
+        <li>
+          <span className="label font-mono text-ink-subtle">01 </span>
+          The athlete names a coach from their references for one entry.
+        </li>
+        <li>
+          <span className="label font-mono text-ink-subtle">02 </span>
+          The coach gets a single-use link and confirms or disputes it. Their name and role are recorded with the answer.
+        </li>
+        <li>
+          <span className="label font-mono text-ink-subtle">03 </span>
+          Changing a verified entry&rsquo;s result removes its mark until a coach confirms it again.
+        </li>
+      </ol>
+    </aside>
+  );
+}
+
+/**
+ * #55: a mark stored as a number in a known unit — comparable, sortable —
+ * flagged as such beside the entry. The display string stays the headline.
+ */
+function MeasurableChip({ value, unit }: { value: number; unit: string }) {
+  return (
+    <span className="font-mono text-ink-subtle" title="Measured mark">
+      [ {formatMeasurable(value, unit)} ]
+    </span>
   );
 }
 
@@ -252,12 +332,24 @@ export function AcademicsSection({ profile }: { profile: Profile }) {
 // References
 // ---------------------------------------------------------------------------
 
-export function ReferencesSection({ coaches, isOwner }: { coaches: CoachContact[]; isOwner: boolean }) {
+export function ReferencesSection({
+  coaches,
+  isOwner,
+  profile,
+  contactHidden = false,
+}: {
+  coaches: CoachContact[];
+  isOwner: boolean;
+  profile: Pick<Profile, "visibility" | "is_recruitable" | "handle">;
+  /** Email and phone were withheld from this viewer (lib/contact.ts). */
+  contactHidden?: boolean;
+}) {
   if (coaches.length === 0) return null;
-  // Rows arrive only when the viewer may see them (or is the owner); an
-  // owner whose resume isn't public + recruitable is told what a recruiter
-  // gets instead.
-  const isOwnerOnly = isOwner && coaches.every((c) => !c.email && !c.phone);
+  // Rows arrive only when the viewer may see them, and the owner always
+  // may — so the owner can't tell from the rows whether a recruiter sees
+  // them. The rule can: coach_contacts_select needs a public resume that is
+  // open to recruiting.
+  const isOwnerOnly = isOwner && !(profile.visibility === "public" && profile.is_recruitable);
 
   return (
     <div>
@@ -284,6 +376,14 @@ export function ReferencesSection({ coaches, isOwner }: { coaches: CoachContact[
           </li>
         ))}
       </ol>
+      {contactHidden && (
+        <p className="print-hidden label mt-3 text-ink-muted">
+          <Link href={signInHref(`/${profile.handle}`)} className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+            Sign in
+          </Link>{" "}
+          as a recruiter or coach to email or call references.
+        </p>
+      )}
       {isOwnerOnly && (
         <p className="label mt-3 text-ink-muted">
           References appear to recruiters only while this resume is public and you&rsquo;re open to recruiting.

@@ -6,9 +6,7 @@
 set client_min_messages = notice;
 
 -- --- Seed (as owner, RLS bypassed) ----------------------------------------
-insert into sports (slug, name, category, is_timed) values
-  ('track_field', 'Track & Field', 'track_field', true),
-  ('basketball',  'Basketball',    'team_ball',   false);
+-- Sports come from 0009; inserting them again here would be a duplicate key.
 
 insert into sport_events (sport_slug, slug, name, unit, direction) values
   ('track_field', '100m', '100 Meters', 's', 'lower_is_better');
@@ -49,10 +47,15 @@ values ('00000000-0000-0000-0000-0000000000e1',
         '00000000-0000-0000-0000-000000000001', 'personal_record',
         '100m Personal Best', 'track_field', '2026-05-04', 10.42, '10.42', 's');
 
-grant usage on schema public, auth to authenticated, anon;
-grant select, insert, update, delete on all tables in schema public to authenticated;
-grant select on all tables in schema public to anon;
+-- Table grants come from the shim's default privileges, as they do on
+-- Supabase. A blanket grant here would undo 0015's revoke on the posts tables.
 grant execute on all functions in schema auth to authenticated, anon;
+
+-- The app's hashToken(): sha256 hex. The migration's own helper is not
+-- executable by API roles, so tests carry a copy.
+create or replace function tok_hash(t text) returns text language sql immutable as $$
+  select encode(sha256(convert_to(t, 'UTF8')), 'hex');
+$$;
 
 -- Helpers: become a given user, or nobody.
 create or replace function become(u uuid) returns void language plpgsql as $$
@@ -75,8 +78,21 @@ declare
   cleo      uuid := '00000000-0000-0000-0000-000000000005';
   ach       uuid := '00000000-0000-0000-0000-0000000000e1';
   clip      uuid;
+  ach2      uuid;
+  staffer   uuid := '00000000-0000-0000-0000-000000000006';
+  newcomer  uuid := '00000000-0000-0000-0000-000000000007';
   n         integer;
   txt       text;
+  priv      text;
+  col_sql   text;
+  ach3      uuid;
+  ref_tom   uuid;
+  j         jsonb;
+  req_a     uuid;
+  req_b     uuid;
+  clip_a    uuid;
+  clip_b    uuid;
+  rl        uuid;
 begin
   set local role authenticated;
 
@@ -354,5 +370,487 @@ begin
     null;  -- expected
   end;
 
-  raise notice 'ALL 28 CHECKS PASSED';
+  -- 29. reserved handles cover the app's newer routes (0015) ---------------
+  select count(*) into n from reserved_handles
+   where handle in ('lists', 'manifest', 'sitemap', 'robots', 'favicon', 'icon');
+  assert n = 6, '29a: lists/manifest/sitemap/robots/favicon/icon must be reserved, got ' || n;
+
+  begin
+    insert into auth.users (id, email) values
+      ('00000000-0000-0000-0000-0000000000fd', 'lists@example.com');
+    insert into profiles (id, handle, display_name, account_kind, level)
+    values ('00000000-0000-0000-0000-0000000000fd', 'lists', 'Lists Squatter', 'athlete', 'club');
+    assert false, '29b: the /lists route must not be claimable as a handle';
+  exception when check_violation then
+    null;  -- expected
+  end;
+
+  -- 30. a new profile starts closed to recruiting --------------------------
+  perform become_anon();
+  insert into auth.users (id, email) values
+    ('00000000-0000-0000-0000-0000000000fc', 'fresh@example.com');
+  insert into profiles (id, handle, display_name, account_kind, level)
+  values ('00000000-0000-0000-0000-0000000000fc', 'fresh', 'Fresh', 'athlete', 'club');
+  select count(*) into n from profiles
+   where id = '00000000-0000-0000-0000-0000000000fc' and not is_recruitable;
+  assert n = 1, '30: is_recruitable must default to false';
+
+  -- 31. the leftover posts tables are closed to clients --------------------
+  foreach priv in array array['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] loop
+    assert not has_table_privilege('anon', 'posts', priv),
+      '31: anon must not hold ' || priv || ' on posts';
+    assert not has_table_privilege('authenticated', 'posts', priv),
+      '31: authenticated must not hold ' || priv || ' on posts';
+    assert not has_table_privilege('anon', 'post_reactions', priv),
+      '31: anon must not hold ' || priv || ' on post_reactions';
+    assert not has_table_privilege('authenticated', 'post_reactions', priv),
+      '31: authenticated must not hold ' || priv || ' on post_reactions';
+  end loop;
+  assert has_table_privilege('service_role', 'posts', 'SELECT'),
+    '31b: service_role should keep its grants on posts';
+
+  -- 32. an athlete cannot escalate their own profile -----------------------
+  set local role authenticated;
+  perform become(ava);
+  foreach col_sql in array array[
+    'account_kind = ''staff''',
+    'suspended_at = null, account_kind = ''coach''',
+    'verified_count = 99',
+    'entry_count = 99',
+    'identity_verified_at = now()'
+  ] loop
+    begin
+      execute format('update profiles set %s where id = %L', col_sql, ava);
+      assert false, '32a: an athlete must not be able to set ' || col_sql;
+    exception when insufficient_privilege then
+      null;  -- expected
+    end;
+  end loop;
+
+  -- A suspended athlete cannot lift their own suspension.
+  set local role postgres;
+  perform become_anon();
+  update profiles set suspended_at = now() where id = stranger;
+  set local role authenticated;
+  perform become(stranger);
+  begin
+    update profiles set suspended_at = null where id = stranger;
+    assert false, '32b: a suspended athlete must not lift their own suspension';
+  exception when insufficient_privilege then
+    null;  -- expected
+  end;
+
+  -- Ordinary profile fields stay editable.
+  perform become(ava);
+  update profiles set bio = 'Sprinter.' where id = ava;
+  set local role postgres;
+  select bio into txt from profiles where id = ava;
+  assert txt = 'Sprinter.', '32c: ordinary profile fields must stay editable';
+
+  -- Signing up cannot mint a staff account.
+  insert into auth.users (id, email) values (newcomer, 'newcomer@example.com');
+  set local role authenticated;
+  perform become(newcomer);
+  begin
+    insert into profiles (id, handle, display_name, account_kind)
+    values (newcomer, 'newcomer', 'Newcomer', 'staff');
+    assert false, '32d: a self-inserted profile must not be staff';
+  exception when insufficient_privilege then
+    null;  -- expected
+  end;
+  insert into profiles (id, handle, display_name, account_kind)
+  values (newcomer, 'newcomer', 'Newcomer', 'recruiter');
+
+  -- Staff and the service role (no JWT subject) may moderate.
+  set local role postgres;
+  perform become_anon();
+  insert into auth.users (id, email) values (staffer, 'staff@example.com');
+  insert into profiles (id, handle, display_name, account_kind)
+  values (staffer, 'roster_ops', 'Roster Ops', 'staff');
+  update profiles set suspended_at = null where id = stranger;
+
+  set local role authenticated;
+  perform become(staffer);
+  update profiles set identity_verified_at = now() where id = ava;
+  set local role postgres;
+  select count(*) into n from profiles where id = ava and identity_verified_at is not null;
+  assert n = 1, '32e: staff must be able to set identity_verified_at';
+
+  -- 33. an athlete cannot write the verification badge directly ------------
+  set local role authenticated;
+  perform become(ava);
+  insert into achievements (profile_id, kind, title, achieved_on)
+  values (ava, 'award', 'Team MVP', '2026-06-01')
+  returning id into ach2;
+
+  begin
+    update achievements set verification = 'verified', verified_at = now() where id = ach2;
+    assert false, '33a: an athlete must not mark their own entry verified';
+  exception when insufficient_privilege then
+    null;  -- expected
+  end;
+
+  begin
+    update achievements set verified_at = null where id = ach;
+    assert false, '33b: an athlete must not touch verified_at directly';
+  exception when insufficient_privilege then
+    null;  -- expected
+  end;
+
+  begin
+    insert into achievements (profile_id, kind, title, achieved_on, verification)
+    values (ava, 'award', 'Self-verified', '2026-06-01', 'verified');
+    assert false, '33c: a new entry must not be inserted as verified';
+  exception when insufficient_privilege then
+    null;  -- expected
+  end;
+
+  -- 34. who verified is on the record (0016) -------------------------------
+  -- Check 9's decision carried no stored name, so the verifier's profile
+  -- stands in.
+  set local role anon;
+  perform become_anon();
+  select verified_by into txt from record_entries where id = ach;
+  assert txt = 'Coach Kim', '34a: verified_by should fall back to the verifier profile, got ' || coalesce(txt, 'null');
+  select verified_by into txt from record_entries where id = ach2;
+  assert txt is null, '34b: an unverified entry has no verified_by';
+
+  -- 35. a cosmetic edit keeps the badge; a substantive one clears it -------
+  set local role authenticated;
+  perform become(ava);
+  update achievements set is_pinned = true where id = ach;
+  set local role postgres;
+  select verification::text into txt from achievements where id = ach;
+  assert txt = 'verified', '35a: pinning must not clear verification, got ' || txt;
+
+  set local role authenticated;
+  perform become(ava);
+  update achievements set value_display = '10.12', value_numeric = 10.12 where id = ach;
+  set local role postgres;
+  select verification::text into txt from achievements where id = ach;
+  assert txt = 'unverified', '35b: a substantive edit must clear verification, got ' || txt;
+  select count(*) into n from achievements where id = ach and verified_at is null;
+  assert n = 1, '35c: a substantive edit must clear verified_at';
+  select verified_count into n from profiles where id = ava;
+  assert n = 0, '35d: verified_count should follow the cleared badge, got ' || n;
+  select verified_by into txt from record_entries where id = ach;
+  assert txt is null, '35e: a cleared entry must not keep verified_by, got ' || coalesce(txt, 'null');
+
+  -- The app sends the reset alongside the edit; that must pass, not trip 33.
+  set local role authenticated;
+  perform become(ava);
+  update achievements set title = '100m PB', verification = 'unverified', verified_at = null
+   where id = ach;
+
+  -- A sneaky "edit and verify" in one statement still lands unverified.
+  update achievements set title = '100m Personal Best', verification = 'verified', verified_at = now()
+   where id = ach;
+  set local role postgres;
+  select verification::text into txt from achievements where id = ach;
+  assert txt = 'unverified', '35f: editing and verifying in one statement must not verify, got ' || txt;
+
+  -- 36. re-verification flows through the guard, and names the verifier ----
+  set local role authenticated;
+  perform become(coach);
+  -- Later than check 9's decision: this whole block is one transaction, so
+  -- now() alone would tie them.
+  insert into verifications (achievement_id, verifier_id, verifier_kind, outcome, method,
+                             verifier_name, verifier_role, created_at)
+  values (ach, coach, 'coach', 'verified', 'coach_attestation', 'Tom Bradley', 'Head Coach',
+          now() + interval '1 second');
+
+  set local role anon;
+  perform become_anon();
+  select verified_by into txt from record_entries where id = ach;
+  assert txt = 'Tom Bradley, Head Coach', '36a: verified_by should name the verifier, got ' || coalesce(txt, 'null');
+  set local role postgres;
+  select verified_count into n from profiles where id = ava;
+  assert n = 1, '36b: verified_count should follow re-verification, got ' || n;
+
+  -- 37. verification by link (0017) --------------------------------------
+  -- The athlete opens a request with a hash; the coach answers with the raw
+  -- token. The hash alone is never a credential.
+  set local role authenticated;
+  perform become(ava);
+  insert into achievements (profile_id, kind, title, achieved_on)
+  values (ava, 'personal_record', '200m PB', '2026-06-10')
+  returning id into ach3;
+  insert into coach_contacts (profile_id, name, role, email)
+  values (ava, 'Tom Bradley', 'Head Coach', 'tbradley@example.org')
+  returning id into ref_tom;
+
+  j := create_verification_request(ach3, ref_tom, tok_hash('tok-alpha-0000000001'), null);
+  req_a := (j->>'id')::uuid;
+  assert j->>'status' = 'pending', '37a: a new request is pending';
+  assert not (j ? 'token_hash'), '37a: the created row must not echo the hash';
+  set local role postgres;
+  select verification::text into txt from achievements where id = ach3;
+  assert txt = 'submitted', '37b: opening a request marks the entry submitted, got ' || txt;
+  select count(*) into n from verification_requests where id = req_a and expires_at <= now() + interval '30 days';
+  assert n = 1, '37b: expiry is clamped to 30 days';
+
+  -- The athlete reads their own rows, never the hash; others read nothing.
+  set local role authenticated;
+  perform become(ava);
+  select count(*) into n from verification_requests where id = req_a;
+  assert n = 1, '37c: the athlete lists their own requests';
+  begin
+    select token_hash into txt from verification_requests where id = req_a;
+    assert false, '37c: token_hash must not be selectable';
+  exception when insufficient_privilege then
+    null;  -- expected
+  end;
+  perform become(stranger);
+  select count(*) into n from verification_requests where id = req_a;
+  assert n = 0, '37d: another member must not see the request';
+  begin
+    perform create_verification_request(ach3, ref_tom, tok_hash('tok-stranger-00000001'), null);
+    assert false, '37d: a stranger must not open a request on someone else''s entry';
+  exception when sqlstate 'RS404' then
+    null;  -- expected
+  end;
+
+  set local role anon;
+  perform become_anon();
+  begin
+    select count(*) into n from verification_requests;
+    assert false, '37e: anon must not read verification_requests';
+  exception when insufficient_privilege then
+    null;  -- expected
+  end;
+  begin
+    perform create_verification_request(ach3, ref_tom, tok_hash('tok-anon-000000000001'), null);
+    assert false, '37e: anon must not open requests';
+  exception when insufficient_privilege then
+    null;  -- expected
+  end;
+
+  -- Anyone holding the raw token can read the request…
+  j := get_verification_request('tok-alpha-0000000001');
+  assert j is not null and j->'entry'->>'title' = '200m PB', '37f: the raw token opens the request';
+  assert j->'coach'->>'name' = 'Tom Bradley', '37f: the payload names the coach';
+  assert not (j->'coach' ? 'email') and not (j->'athlete' ? 'contact_email'),
+    '37f: the payload must not carry contact details';
+  -- …but not the hash, and not a guess.
+  assert get_verification_request(tok_hash('tok-alpha-0000000001')) is null,
+    '37f: the stored hash must not work as a token';
+  assert get_verification_request('nope') is null, '37f: an unknown token returns nothing';
+
+  -- 38. the athlete cannot answer their own request, even via the RPC ----
+  set local role authenticated;
+  perform become(ava);
+  begin
+    perform respond_verification('tok-alpha-0000000001', 'verified', null, 'Ava Reyes', null);
+    assert false, '38: an athlete must not verify their own entry through the link';
+  exception when sqlstate 'RS403' then
+    null;  -- expected
+  end;
+
+  -- 39. batch: other entries waiting on the same coach --------------------
+  j := create_verification_request(ach2, ref_tom, tok_hash('tok-bravo-0000000001'), null);
+  req_b := (j->>'id')::uuid;
+  set local role anon;
+  perform become_anon();
+  select count(*) into n from get_coach_batch_requests('tok-alpha-0000000001') b where (b->>'id')::uuid = req_b;
+  assert n = 1, '39a: the sibling request is listed for the same coach';
+  select count(*) into n from get_coach_batch_requests('tok-alpha-0000000001') b where (b->>'id')::uuid = req_a;
+  assert n = 0, '39a: the link''s own request is not its own sibling';
+
+  -- Answer the sibling with the first link as the authority.
+  j := respond_verification('tok-alpha-0000000001', 'verified', 'Saw both.', 'Tom Bradley', 'Head Coach', false, req_b);
+  assert j->>'handle' = 'ava', '39b: the answer returns the athlete handle';
+  set local role postgres;
+  select verification::text into txt from achievements where id = ach2;
+  assert txt = 'verified', '39b: answering a sibling verifies that entry, got ' || txt;
+
+  -- 40. the coach answers; the link is single use -------------------------
+  set local role anon;
+  perform become_anon();
+  j := respond_verification('tok-alpha-0000000001', 'verified', null, 'Tom Bradley', 'Head Coach');
+  assert j->>'outcome' = 'verified', '40a: the answer is recorded';
+  set local role postgres;
+  select verification::text into txt from achievements where id = ach3;
+  assert txt = 'verified', '40a: the entry is verified, got ' || txt;
+  select verified_by into txt from record_entries where id = ach3;
+  assert txt = 'Tom Bradley, Head Coach', '40a: verified_by names the coach, got ' || coalesce(txt, 'null');
+  select status into txt from verification_requests where id = req_a;
+  assert txt = 'verified', '40b: the request is closed as verified, got ' || txt;
+  set local role anon;
+  perform become_anon();
+  begin
+    perform respond_verification('tok-alpha-0000000001', 'disputed', null, 'Tom Bradley', null);
+    assert false, '40c: a used link must be refused';
+  exception when sqlstate 'RS409' then
+    null;  -- expected
+  end;
+
+  -- 41. revoke, supersede, and edit all close a link ----------------------
+  set local role authenticated;
+  perform become(ava);
+  j := create_verification_request(ach3, ref_tom, tok_hash('tok-charlie-000000001'), null);
+  req_a := (j->>'id')::uuid;
+  perform become(stranger);
+  begin
+    perform revoke_verification_request(req_a);
+    assert false, '41a: only the athlete may revoke';
+  exception when sqlstate 'RS404' then
+    null;  -- expected
+  end;
+  perform become(ava);
+  j := revoke_verification_request(req_a);
+  assert j->>'status' = 'expired', '41a: a revoked request is expired';
+  set local role postgres;
+  select verification::text into txt from achievements where id = ach3;
+  assert txt = 'unverified', '41b: revoking the only open request clears submitted, got ' || txt;
+  set local role authenticated;
+  perform become(ava);
+  begin
+    perform revoke_verification_request(req_a);
+    assert false, '41c: revoking twice must be refused';
+  exception when sqlstate 'RS409' then
+    null;  -- expected
+  end;
+  set local role anon;
+  perform become_anon();
+  begin
+    perform respond_verification('tok-charlie-000000001', 'verified', null, 'Tom Bradley', null);
+    assert false, '41d: a revoked link must be refused';
+  exception when sqlstate 'RS410' then
+    null;  -- expected
+  end;
+
+  -- Supersede: a second link for the same entry kills the first.
+  set local role authenticated;
+  perform become(ava);
+  perform create_verification_request(ach3, ref_tom, tok_hash('tok-delta-0000000001'), null);
+  perform create_verification_request(ach3, ref_tom, tok_hash('tok-echo-00000000001'), null);
+  set local role postgres;
+  select status into txt from verification_requests where token_hash = tok_hash('tok-delta-0000000001');
+  assert txt = 'expired', '41e: a re-request supersedes the old link, got ' || txt;
+  select verification::text into txt from achievements where id = ach3;
+  assert txt = 'submitted', '41e: the entry stays submitted across a re-request, got ' || txt;
+
+  -- Edit: a substantive change expires the open link.
+  set local role authenticated;
+  perform become(ava);
+  update achievements set title = '200m Personal Best' where id = ach3;
+  set local role postgres;
+  select status into txt from verification_requests where token_hash = tok_hash('tok-echo-00000000001');
+  assert txt = 'expired', '41f: a substantive edit expires the open link, got ' || txt;
+
+  -- 42. "I don't know this athlete" is a flagged dispute -------------------
+  set local role authenticated;
+  perform become(ava);
+  perform create_verification_request(ach3, ref_tom, tok_hash('tok-foxtrot-000000001'), null);
+  set local role anon;
+  perform become_anon();
+  j := respond_verification('tok-foxtrot-000000001', 'verified', null, 'Tom Bradley', null, true);
+  assert j->>'outcome' = 'disputed', '42a: a flag forces disputed, got ' || (j->>'outcome');
+  set local role postgres;
+  select count(*) into n from verification_requests
+   where token_hash = tok_hash('tok-foxtrot-000000001')
+     and status = 'disputed' and flagged_unknown_athlete;
+  assert n = 1, '42b: the request records the flag';
+  select verification::text into txt from achievements where id = ach3;
+  assert txt = 'disputed', '42b: the entry is disputed, got ' || txt;
+
+  -- 43. the daily cap -----------------------------------------------------
+  set local role authenticated;
+  perform become(ava);
+  for n in 1..20 loop
+    begin
+      perform create_verification_request(ach3, ref_tom, tok_hash('tok-cap-' || n || '-000000'), null);
+    exception when sqlstate 'RS429' then
+      exit;
+    end;
+  end loop;
+  set local role postgres;
+  select count(*) into n from verification_requests where profile_id = ava;
+  assert n = 10, '43: the daily cap holds at 10 requests, got ' || n;
+
+  -- 44. feature_film swaps the featured clip in one call -------------------
+  set local role authenticated;
+  perform become(ava);
+  insert into film_clips (profile_id, title, url)
+  values (ava, 'Relay leg', 'https://youtu.be/aqz-KE-bpKQ')
+  returning id into clip_a;
+  insert into film_clips (profile_id, title, url)
+  values (ava, 'Hurdles', 'https://vimeo.com/76979872')
+  returning id into clip_b;
+
+  perform feature_film(clip_a);
+  select count(*) into n from film_clips where profile_id = ava and is_featured;
+  assert n = 1, '44a: exactly one featured clip after feature_film, got ' || n;
+  select count(*) into n from film_clips where id = clip_a and is_featured;
+  assert n = 1, '44b: the requested clip is the featured one';
+  perform feature_film(clip_b);
+  select count(*) into n from film_clips where id = clip_b and is_featured;
+  assert n = 1, '44c: featuring again moves the mark';
+  select count(*) into n from film_clips where profile_id = ava and is_featured;
+  assert n = 1, '44d: still exactly one featured clip, got ' || n;
+
+  perform become(stranger);
+  begin
+    perform feature_film(clip_a);
+    assert false, '44e: a stranger must not feature someone else''s clip';
+  exception when sqlstate 'RS404' then
+    null;  -- expected: not-found, never "forbidden"
+  end;
+
+  set local role anon;
+  perform become_anon();
+  begin
+    perform feature_film(clip_a);
+    assert false, '44f: anon must not be able to call feature_film';
+  exception when insufficient_privilege then
+    null;  -- expected
+  end;
+
+  -- 45. youtube thumbnails are derived on write -----------------------------
+  set local role postgres;
+  select thumbnail_url into txt from film_clips where id = clip_a;
+  assert txt = 'https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg',
+    '45a: youtube thumbnail should be derived, got ' || coalesce(txt, 'null');
+  select thumbnail_url into txt from film_clips where id = clip_b;
+  assert txt is null, '45b: non-youtube clips have no derived thumbnail';
+
+  -- 46. search escapes LIKE metacharacters and matches positions loosely ----
+  update profiles set display_name = 'Stran_ger 100%' where id = stranger;
+  set local role anon;
+  perform become_anon();
+  select count(*) into n from search_athletes(q => '%');
+  assert n = 1, '46a: a bare % matches only a literal percent sign, got ' || n;
+  select count(*) into n from search_athletes(q => 'n_g');
+  assert n = 1, '46b: _ is literal, so n_g matches Stran_ger only, got ' || n;
+  select count(*) into n from search_athletes(q => 'r_y');
+  assert n = 0, '46c: _ must not act as a wildcard (r_y would match Reyes), got ' || n;
+  select count(*) into n from search_athletes(athlete_positions => array['GUARD']);
+  assert n = 1, '46d: positions match case-insensitively, got ' || n;
+  select count(*) into n from search_athletes(athlete_positions => array['center']);
+  assert n = 0, '46e: an unheld position matches nobody, got ' || n;
+  set local role postgres;
+  update profiles set display_name = 'Stranger' where id = stranger;
+
+  -- 47. recruiter lists are the owner's alone -------------------------------
+  set local role authenticated;
+  perform become(coach);
+  insert into recruiter_lists (owner_id, name) values (coach, 'Sprinters')
+  returning id into rl;
+  insert into recruiter_list_members (list_id, profile_id) values (rl, ava);
+  select count(*) into n from recruiter_list_members where list_id = rl;
+  assert n = 1, '47a: the owner sees their list members, got ' || n;
+  begin
+    insert into recruiter_list_members (list_id, profile_id) values (rl, ben);
+    assert false, '47b: a private resume must not be saved to a list';
+  exception when insufficient_privilege then
+    null;  -- expected: RLS with-check refuses
+  end;
+
+  perform become(stranger);
+  select count(*) into n from recruiter_lists where id = rl;
+  assert n = 0, '47c: another member must not see the list';
+  select count(*) into n from recruiter_list_members where list_id = rl;
+  assert n = 0, '47d: another member must not see the list''s members';
+
+  raise notice 'ALL 47 CHECKS PASSED';
 end $$;

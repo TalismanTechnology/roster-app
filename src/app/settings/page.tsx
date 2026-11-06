@@ -7,8 +7,8 @@ import { EditorSection, Panel, VisibilitySection } from "@/components/editor/Pro
 import { Site } from "@/components/shell/Site";
 import { Corner, CORNER } from "@/components/ui/marks";
 import { signOut } from "@/lib/actions/auth";
-import { getRepository } from "@/lib/data";
-import { getCurrentUser } from "@/lib/data/auth";
+import { getCurrentProfile, getCurrentUser } from "@/lib/data/auth";
+import { siteHost } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Settings",
@@ -19,12 +19,12 @@ export const metadata: Metadata = {
  * The account, as distinct from the resume: sign-in email, password,
  * visibility (a shortcut to the editor's section), and the door out.
  */
-export default async function SettingsPage() {
+export default async function SettingsPage({ searchParams }: PageProps<"/settings">) {
+  const { password } = await searchParams;
   const user = await getCurrentUser();
   if (!user) redirect("/sign-in?next=/settings");
 
-  const repo = await getRepository();
-  const profile = await repo.getProfileById(user.id);
+  const profile = await getCurrentProfile();
   const isAthlete = profile?.account_kind === "athlete";
 
   return (
@@ -42,7 +42,7 @@ export default async function SettingsPage() {
                 {" · "}
                 {isAthlete ? (
                   <Link href={`/${profile.handle}`} className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
-                    roster.us/{profile.handle}
+                    {siteHost()}/{profile.handle}
                   </Link>
                 ) : (
                   <span className="capitalize">{profile.account_kind}</span>
@@ -50,6 +50,11 @@ export default async function SettingsPage() {
               </>
             )}
           </p>
+          {password === "reset" && (
+            <p role="status" className="label mt-4 border-t border-rule pt-4 text-ink">
+              [ Password reset ] You&apos;re signed in with your new password. Other devices were signed out.
+            </p>
+          )}
         </header>
 
         <div className="flex flex-col gap-12">

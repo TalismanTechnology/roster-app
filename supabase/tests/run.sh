@@ -63,7 +63,7 @@ psql -d postgres -c "create database roster_test;" >/dev/null
 psql -d roster_test -f "$HERE/_local_auth_shim.sql" >/dev/null
 
 for migration in "$MIGRATIONS"/*.sql; do
-  printf '  applying %-24s' "$(basename "$migration")"
+  printf '  applying %-34s' "$(basename "$migration")"
   psql -d roster_test -f "$migration" >/dev/null
   echo 'ok'
 done

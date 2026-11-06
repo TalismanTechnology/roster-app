@@ -1,14 +1,39 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { randomBytes } from "node:crypto";
+
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
-import { getRepository } from "@/lib/data";
-import { getCurrentUser } from "@/lib/data/auth";
-import { DataError } from "@/lib/data/types";
-import type { AchievementKind, AthleteLevel, ProfileVisibility } from "@/lib/database.types";
-import { isReservedHandle, HANDLE_PATTERN } from "@/lib/handles";
+import { onboardingDestination } from "@/lib/accounts";
+import { AVATAR_MAX_BYTES, sniffAvatarType } from "@/lib/avatars";
+import { getRepository, type Repository } from "@/lib/data";
+import { DataError, type MoveDirection } from "@/lib/data/types";
+import type { AthleteLevel, ProfileVisibility } from "@/lib/database.types";
+import { emailCoachRequest } from "@/lib/email/verification";
+import { LEVEL_OPTIONS } from "@/lib/format";
+import { handleFromName, isReservedHandle, HANDLE_PATTERN } from "@/lib/handles";
+import { toStateCode } from "@/lib/regions";
+import { limitAll } from "@/lib/rate-limit";
+import { revalidateProfile } from "@/lib/revalidate";
+
+import {
+  achievementSchema,
+  athleteOnboardingSchema,
+  coachSchema,
+  fieldErrorsOf,
+  httpUrl,
+  idSchema,
+  imperialMeasurablesSchema,
+  memberOnboardingSchema,
+  onboardingKind,
+  optionalNumber,
+  optionalText,
+  positionsField,
+  socialHandleField,
+  type OnboardingKind,
+} from "./schemas";
+import { clientKey, failed, formValues, requireUser, str, type FormValues } from "./shared";
 
 /**
  * Every write behind the resume editor.
@@ -23,104 +48,128 @@ import { isReservedHandle, HANDLE_PATTERN } from "@/lib/handles";
 export type FormState = {
   ok: boolean;
   error: string | null;
+  /** On failure, what was submitted — the form puts it back. */
+  values?: FormValues;
+  /** On a validation failure, each field's messages — shown beside the input. */
+  fieldErrors?: Record<string, string[]>;
+  /** On success, when the server saved it (epoch ms) — "Saved · 2m ago". */
+  savedAt?: number;
 };
 
-const IDLE: FormState = { ok: true, error: null };
-
-async function requireUser() {
-  const user = await getCurrentUser();
-  if (!user) redirect("/sign-in");
-  return { repo: await getRepository(), user };
+function saved(): FormState {
+  return { ok: true, error: null, savedAt: Date.now() };
 }
 
-function firstIssue(error: z.ZodError): string {
-  return error.issues[0].message;
+/** A validation failure, carrying the submitted fields back to the form. */
+function invalid(error: z.ZodError, formData: FormData): FormState {
+  return { ok: false, error: error.issues[0].message, values: formValues(formData), fieldErrors: fieldErrorsOf(error) };
 }
 
 /**
- * A field as a string, "" when absent. A form that omits an optional column
- * — or a direct POST that omits anything — must read as "empty", not as a
- * type error; the schemas' `optionalText` then turns "" into null.
+ * Refreshes the editor, the public resume, and search after a write that
+ * didn't hand back the profile row. A failed lookup still refreshes the
+ * editor; the public page catches up on its next render.
  */
-function str(formData: FormData, name: string): string {
-  const value = formData.get(name);
-  return typeof value === "string" ? value : "";
+async function refreshOwner(repo: Repository, userId: string): Promise<void> {
+  const profile = await repo.getProfileById(userId).catch(() => null);
+  revalidateProfile(profile?.handle);
 }
-
-/** Maps a thrown DataError to the form; anything else is a generic retry. */
-function failed(error: unknown, fallback: string): FormState {
-  if (error instanceof DataError) return { ok: false, error: error.message };
-  return { ok: false, error: fallback };
-}
-
-/** "" → null, so an emptied optional field clears the column instead of
- *  writing an empty string that renders as a blank line forever after. */
-const optionalText = z
-  .string()
-  .trim()
-  .transform((value) => (value === "" ? null : value));
-
-const optionalNumber = (schema: z.ZodNumber) =>
-  z
-    .string()
-    .trim()
-    .transform((value) => (value === "" ? null : Number(value)))
-    .pipe(schema.nullable());
-
-const uuidField = z.string().min(1);
 
 // ---------------------------------------------------------------------------
 // Onboarding — the one insert into profiles
 // ---------------------------------------------------------------------------
 
-const LEVELS: AthleteLevel[] = [
-  "high_school", "club", "juco", "ncaa_d3", "ncaa_d2", "ncaa_d1",
-  "naia", "semi_pro", "professional", "national_team", "olympic",
-];
+// The label maps in format.ts are the single source for both enums.
+const LEVELS = LEVEL_OPTIONS.map(([value]) => value);
 
-const onboardingSchema = z.object({
-  handle: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .regex(HANDLE_PATTERN, "Handles are 3–30 characters: lowercase letters, numbers, underscores.")
-    .refine((handle) => !isReservedHandle(handle), "That handle is reserved."),
-  display_name: z.string().trim().min(2, "Enter your name.").max(80),
-  level: z.enum(LEVELS as [AthleteLevel, ...AthleteLevel[]]),
-  primary_sport: optionalText,
-  grad_year: optionalNumber(z.number().int().min(1950).max(2100)),
-  visibility: z.enum(["private", "unlisted", "public"] satisfies ProfileVisibility[]).default("public"),
-});
+/** Tries before giving up on a generated handle; each collision draws a new suffix. */
+const GENERATED_HANDLE_TRIES = 5;
 
 export async function completeOnboarding(_prev: FormState, formData: FormData): Promise<FormState> {
   const { repo, user } = await requireUser();
+  const kind = onboardingKind.parse(str(formData, "account_kind"));
+  if (kind !== "athlete") return completeMemberOnboarding(repo, user.id, kind, formData);
 
-  const parsed = onboardingSchema.safeParse({
+  const parsed = athleteOnboardingSchema.safeParse({
     handle: str(formData, "handle"),
     display_name: str(formData, "display_name"),
     level: str(formData, "level"),
     primary_sport: str(formData, "primary_sport"),
     grad_year: str(formData, "grad_year"),
     visibility: str(formData, "visibility") || "public",
+    age_consent: str(formData, "age_consent"),
   });
 
-  if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
-  }
+  if (!parsed.success) return invalid(parsed.error, formData);
 
   try {
-    await repo.createProfile({ id: user.id, ...parsed.data });
+    await repo.createProfile({ id: user.id, ...parsed.data, consent_at: new Date().toISOString() });
   } catch (error) {
-    return failed(error, "Could not create your resume. Try again.");
+    return failed(error, "Could not create your resume. Try again.", formValues(formData));
   }
 
-  redirect("/resume");
+  revalidateProfile(parsed.data.handle);
+  redirect(onboardingDestination("athlete"));
 }
 
-/** Live availability for the onboarding form. Read-only; safe to call freely. */
-export async function checkHandle(handle: string): Promise<"available" | "taken" | "invalid"> {
-  const h = handle.trim().toLowerCase();
+/**
+ * The recruiter / coach branch (#52): name, program, title. The handle is
+ * generated — these accounts have no resume to share — and the profile is
+ * private, like the seeded staff accounts.
+ */
+async function completeMemberOnboarding(
+  repo: Repository,
+  userId: string,
+  kind: Exclude<OnboardingKind, "athlete">,
+  formData: FormData,
+): Promise<FormState> {
+  const parsed = memberOnboardingSchema.safeParse({
+    display_name: str(formData, "display_name"),
+    school: str(formData, "school"),
+    title: str(formData, "title"),
+  });
+  if (!parsed.success) return invalid(parsed.error, formData);
+
+  let created = false;
+  for (let i = 0; i < GENERATED_HANDLE_TRIES && !created; i++) {
+    const handle = handleFromName(parsed.data.display_name, randomBytes(3).toString("hex"));
+    try {
+      await repo.createProfile({ id: userId, handle, level: null, account_kind: kind, visibility: "private", ...parsed.data });
+      created = true;
+    } catch (error) {
+      // Only a handle collision is worth another draw.
+      if (error instanceof DataError && error.code === "conflict" && /handle/i.test(error.message)) continue;
+      return failed(error, "Could not set up your account. Try again.", formValues(formData));
+    }
+  }
+  if (!created) return { ok: false, error: "Could not set up your account. Try again.", values: formValues(formData) };
+
+  redirect(onboardingDestination(kind));
+}
+
+/**
+ * The handle checker's budget per client (#40). The form debounces 350ms,
+ * so even slow, deliberate typing stays far below this; a script walking
+ * the namespace to learn who has an account does not.
+ */
+const HANDLE_CHECKS_PER_MINUTE = 60;
+/** And per hour, so a patient script pacing itself under the minute budget still runs dry. */
+const HANDLE_CHECKS_PER_HOUR = 600;
+
+/**
+ * Live availability for the onboarding form. Read-only, but callable by
+ * anyone without an account, so it is throttled per client. The format
+ * check runs first and costs nothing, so it is not counted.
+ */
+export async function checkHandle(handle: string): Promise<"available" | "taken" | "invalid" | "rate_limited"> {
+  const h = String(handle ?? "").trim().toLowerCase();
   if (!HANDLE_PATTERN.test(h) || isReservedHandle(h)) return "invalid";
+  const client = await clientKey();
+  const withinBudget = limitAll([
+    { scope: "check-handle", key: client, limit: HANDLE_CHECKS_PER_MINUTE, windowMs: 60_000 },
+    { scope: "check-handle:hour", key: client, limit: HANDLE_CHECKS_PER_HOUR, windowMs: 60 * 60_000 },
+  ]);
+  if (!withinBudget) return "rate_limited";
   const repo = await getRepository();
   return (await repo.isHandleAvailable(h)) ? "available" : "taken";
 }
@@ -134,29 +183,31 @@ const identitySchema = z.object({
   bio: optionalText.pipe(z.string().max(500).nullable()),
   location: optionalText,
   region: optionalText.pipe(
-    z.string().length(2, "State is the two-letter code, e.g. MI.").toUpperCase().nullable(),
+    z
+      .string()
+      .transform((code, ctx) => {
+        const state = toStateCode(code);
+        if (!state) ctx.addIssue({ code: "custom", message: "Pick a state from the list." });
+        return state ?? z.NEVER;
+      })
+      .nullable(),
   ),
   school: optionalText.pipe(z.string().max(120).nullable()),
   primary_sport: optionalText,
   grad_year: optionalNumber(z.number().int().min(1950).max(2100)),
   level: z.enum(LEVELS as [AthleteLevel, ...AthleteLevel[]]),
-  positions: z
-    .string()
-    .transform((raw) =>
-      raw
-        .split(",")
-        .map((p) => p.trim())
-        .filter(Boolean)
-        .slice(0, 6),
-    ),
+  positions: positionsField,
   jersey: optionalText.pipe(z.string().max(4).nullable()),
-  height_cm: optionalNumber(z.number().int().min(90).max(260)),
-  weight_kg: optionalNumber(z.number().min(25).max(300)),
 });
 
 export async function updateIdentity(_prev: FormState, formData: FormData): Promise<FormState> {
   const { repo, user } = await requireUser();
 
+  const measurables = imperialMeasurablesSchema.safeParse({
+    height_ft: str(formData, "height_ft"),
+    height_in: str(formData, "height_in"),
+    weight_lbs: str(formData, "weight_lbs"),
+  });
   const parsed = identitySchema.safeParse({
     display_name: str(formData, "display_name"),
     bio: str(formData, "bio"),
@@ -166,22 +217,22 @@ export async function updateIdentity(_prev: FormState, formData: FormData): Prom
     primary_sport: str(formData, "primary_sport"),
     grad_year: str(formData, "grad_year"),
     level: str(formData, "level"),
-    positions: str(formData, "positions") ?? "",
+    positions: str(formData, "positions"),
     jersey: str(formData, "jersey"),
-    height_cm: str(formData, "height_cm"),
-    weight_kg: str(formData, "weight_kg"),
   });
 
-  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
+  if (!parsed.success) return invalid(parsed.error, formData);
+  if (!measurables.success) return invalid(measurables.error, formData);
 
+  let handle: string;
   try {
-    await repo.updateProfile(user.id, parsed.data);
+    ({ handle } = await repo.updateProfile(user.id, { ...parsed.data, ...measurables.data }));
   } catch (error) {
-    return failed(error, "Could not save. Try again.");
+    return failed(error, "Could not save. Try again.", formValues(formData));
   }
 
-  revalidatePath("/resume");
-  return IDLE;
+  revalidateProfile(handle);
+  return saved();
 }
 
 const academicsSchema = z.object({
@@ -201,25 +252,26 @@ export async function updateAcademics(_prev: FormState, formData: FormData): Pro
     ncaa_id: str(formData, "ncaa_id"),
   });
 
-  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
+  if (!parsed.success) return invalid(parsed.error, formData);
 
+  let handle: string;
   try {
-    await repo.updateProfile(user.id, parsed.data);
+    ({ handle } = await repo.updateProfile(user.id, parsed.data));
   } catch (error) {
-    return failed(error, "Could not save. Try again.");
+    return failed(error, "Could not save. Try again.", formValues(formData));
   }
 
-  revalidatePath("/resume");
-  return IDLE;
+  revalidateProfile(handle);
+  return saved();
 }
 
 const contactSchema = z.object({
   contact_email: optionalText.pipe(z.string().email("Enter a valid email.").nullable()),
   phone: optionalText.pipe(z.string().max(25).nullable()),
-  instagram: optionalText,
-  x_handle: optionalText,
-  hudl_url: optionalText.pipe(z.string().url("Enter a full URL.").nullable()),
-  results_url: optionalText.pipe(z.string().url("Enter a full URL.").nullable()),
+  instagram: socialHandleField("instagram", "Enter an Instagram handle or profile link."),
+  x_handle: socialHandleField("x", "Enter an X handle or profile link."),
+  hudl_url: optionalText.pipe(httpUrl.nullable()),
+  results_url: optionalText.pipe(httpUrl.nullable()),
 });
 
 export async function updateContact(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -234,21 +286,23 @@ export async function updateContact(_prev: FormState, formData: FormData): Promi
     results_url: str(formData, "results_url"),
   });
 
-  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
+  if (!parsed.success) return invalid(parsed.error, formData);
 
+  let handle: string;
   try {
-    await repo.updateProfile(user.id, parsed.data);
+    ({ handle } = await repo.updateProfile(user.id, parsed.data));
   } catch (error) {
-    return failed(error, "Could not save. Try again.");
+    return failed(error, "Could not save. Try again.", formValues(formData));
   }
 
-  revalidatePath("/resume");
-  return IDLE;
+  revalidateProfile(handle);
+  return saved();
 }
 
 const visibilitySchema = z.object({
   visibility: z.enum(["private", "unlisted", "public"] satisfies ProfileVisibility[]),
   is_recruitable: z.boolean(),
+  viewer_summary_opt_in: z.boolean(),
 });
 
 export async function updateVisibility(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -257,41 +311,76 @@ export async function updateVisibility(_prev: FormState, formData: FormData): Pr
   const parsed = visibilitySchema.safeParse({
     visibility: str(formData, "visibility"),
     is_recruitable: str(formData, "is_recruitable") === "on",
+    viewer_summary_opt_in: str(formData, "viewer_summary_opt_in") === "on",
   });
 
-  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
+  if (!parsed.success) return invalid(parsed.error, formData);
 
+  let handle: string;
   try {
-    await repo.updateProfile(user.id, parsed.data);
+    ({ handle } = await repo.updateProfile(user.id, parsed.data));
   } catch (error) {
-    return failed(error, "Could not save. Try again.");
+    return failed(error, "Could not save. Try again.", formValues(formData));
   }
 
-  revalidatePath("/resume");
-  return IDLE;
+  revalidateProfile(handle);
+  return saved();
+}
+
+// ---------------------------------------------------------------------------
+// Avatar
+// ---------------------------------------------------------------------------
+
+/**
+ * The editor crops and re-encodes in the browser (AvatarUpload) before
+ * calling this, so a real upload is a small square JPEG. Everything is
+ * re-checked here anyway — size, and the bytes' own signature rather than
+ * the declared type — because this endpoint takes a POST from anyone with
+ * a session, not just from that component.
+ */
+export async function updateAvatar(_prev: FormState, formData: FormData): Promise<FormState> {
+  const { repo, user } = await requireUser();
+  const file = formData.get("avatar");
+
+  if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Choose a photo to upload." };
+  if (file.size > AVATAR_MAX_BYTES) return { ok: false, error: "That photo is too large. Try a smaller one." };
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const type = sniffAvatarType(bytes);
+  if (!type) return { ok: false, error: "Use a JPEG, PNG, or WebP photo." };
+
+  let handle: string;
+  try {
+    ({ handle } = await repo.setAvatar(user.id, bytes, type));
+  } catch (error) {
+    return failed(error, "Could not save the photo. Try again.");
+  }
+
+  revalidateProfile(handle);
+  return saved();
+}
+
+export async function removeAvatar(_prev: FormState, _formData: FormData): Promise<FormState> {
+  void _formData;
+  const { repo, user } = await requireUser();
+
+  let handle: string;
+  try {
+    ({ handle } = await repo.removeAvatar(user.id));
+  } catch (error) {
+    return failed(error, "Could not remove the photo. Try again.");
+  }
+
+  revalidateProfile(handle);
+  return saved();
 }
 
 // ---------------------------------------------------------------------------
 // The record
 // ---------------------------------------------------------------------------
 
-const KINDS: AchievementKind[] = [
-  "personal_record", "result", "award", "record",
-  "captaincy", "commitment", "selection", "milestone",
-];
-
-const achievementSchema = z.object({
-  kind: z.enum(KINDS as [AchievementKind, ...AchievementKind[]]),
-  title: z.string().trim().min(3, "Give the entry a title.").max(120),
-  detail: optionalText.pipe(z.string().max(500).nullable()),
-  value_display: optionalText.pipe(z.string().max(20).nullable()),
-  competition: optionalText.pipe(z.string().max(120).nullable()),
-  location: optionalText.pipe(z.string().max(120).nullable()),
-  placement: optionalNumber(z.number().int().min(1).max(10000)),
-  field_size: optionalNumber(z.number().int().min(1).max(100000)),
-  achieved_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick the date it happened."),
-});
-
+// The schema (with its date ≤ today and placement ≤ field rules) lives in
+// ./schemas so the unit tests run exactly what this enforces.
 function readAchievement(formData: FormData) {
   return achievementSchema.safeParse({
     kind: str(formData, "kind"),
@@ -302,6 +391,7 @@ function readAchievement(formData: FormData) {
     location: str(formData, "location"),
     placement: str(formData, "placement"),
     field_size: str(formData, "field_size"),
+    unit: str(formData, "unit"),
     achieved_on: str(formData, "achieved_on"),
   });
 }
@@ -309,38 +399,40 @@ function readAchievement(formData: FormData) {
 export async function addAchievement(_prev: FormState, formData: FormData): Promise<FormState> {
   const { repo, user } = await requireUser();
   const parsed = readAchievement(formData);
-  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
+  if (!parsed.success) return invalid(parsed.error, formData);
 
   try {
     await repo.addEntry(user.id, parsed.data);
   } catch (error) {
-    return failed(error, "Could not add the entry. Try again.");
+    return failed(error, "Could not add the entry. Try again.", formValues(formData));
   }
 
-  revalidatePath("/resume");
-  return IDLE;
+  await refreshOwner(repo, user.id);
+  return saved();
 }
 
 export async function updateAchievement(_prev: FormState, formData: FormData): Promise<FormState> {
   const { repo, user } = await requireUser();
-  const id = uuidField.safeParse(str(formData, "id"));
+  const id = idSchema.safeParse(str(formData, "id"));
   const parsed = readAchievement(formData);
   if (!id.success) return { ok: false, error: "That entry was not found." };
-  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
+  if (!parsed.success) return invalid(parsed.error, formData);
 
   try {
+    // Changing the mark, date, or any other claim clears a verified badge
+    // and expires pending links — the repository enforces it.
     await repo.updateEntry(user.id, id.data, parsed.data);
   } catch (error) {
-    return failed(error, "Could not save the entry. Try again.");
+    return failed(error, "Could not save the entry. Try again.", formValues(formData));
   }
 
-  revalidatePath("/resume");
-  return IDLE;
+  await refreshOwner(repo, user.id);
+  return saved();
 }
 
 export async function deleteAchievement(formData: FormData): Promise<void> {
   const { repo, user } = await requireUser();
-  const id = uuidField.safeParse(str(formData, "id"));
+  const id = idSchema.safeParse(str(formData, "id"));
   if (!id.success) return;
 
   try {
@@ -349,42 +441,87 @@ export async function deleteAchievement(formData: FormData): Promise<void> {
     // A stale form pointing at a deleted row: nothing to do.
   }
 
-  revalidatePath("/resume");
+  await refreshOwner(repo, user.id);
 }
 
 export async function togglePinned(formData: FormData): Promise<void> {
   const { repo, user } = await requireUser();
-  const id = uuidField.safeParse(str(formData, "id"));
+  const id = idSchema.safeParse(str(formData, "id"));
   if (!id.success) return;
 
   const entry = (await repo.listEntries(user.id)).find((e) => e.id === id.data);
   if (!entry) return;
 
-  await repo.setPinned(user.id, id.data, !entry.is_pinned);
-  revalidatePath("/resume");
+  try {
+    await repo.setPinned(user.id, id.data, !entry.is_pinned);
+  } catch {
+    // Over the pin cap (the editor hides Pin at the cap, so only a stale
+    // page or a direct POST lands here) or a row deleted meanwhile. A row
+    // button has nowhere to show an error; the refreshed page shows the truth.
+  }
+  await refreshOwner(repo, user.id);
 }
 
 // ---------------------------------------------------------------------------
 // Verification requests
 // ---------------------------------------------------------------------------
 
-export type RequestState = FormState & { token?: string };
+export type RequestState = FormState & {
+  /** The raw token, returned this once — nothing stored can rebuild the link. */
+  token?: string;
+  requestId?: string;
+  /** The coach's address when the link was emailed to them, else null. */
+  emailedTo?: string | null;
+};
 
 export async function requestVerification(_prev: RequestState, formData: FormData): Promise<RequestState> {
   const { repo, user } = await requireUser();
-  const entryId = uuidField.safeParse(str(formData, "entry_id"));
-  const coachId = uuidField.safeParse(str(formData, "coach_id"));
+  const entryId = idSchema.safeParse(str(formData, "entry_id"));
+  const coachId = idSchema.safeParse(str(formData, "coach_id"));
   if (!entryId.success || !coachId.success) {
     return { ok: false, error: "Pick the entry and the coach who saw it." };
   }
 
+  let request;
   try {
-    const request = await repo.requestVerification(user.id, entryId.data, coachId.data);
-    revalidatePath("/resume");
-    return { ok: true, error: null, token: request.token };
+    request = await repo.requestVerification(user.id, entryId.data, coachId.data);
   } catch (error) {
     return failed(error, "Could not create the request. Try again.");
   }
+
+  // #75: the coach gets the link by email too. A failed send still leaves
+  // the athlete holding a working link to forward themselves.
+  const [profile, coaches, entries] = await Promise.all([
+    repo.getProfileById(user.id),
+    repo.listCoaches(user.id, user.id),
+    repo.listEntries(user.id),
+  ]);
+  const coach = coaches.find((c) => c.id === coachId.data);
+  const emailed = await emailCoachRequest({
+    coachEmail: coach?.email ?? null,
+    coachName: coach?.name ?? "Coach",
+    athleteName: profile?.display_name ?? "An athlete",
+    entryTitle: entries.find((e) => e.id === entryId.data)?.title ?? "an entry",
+    token: request.token,
+    expiresAt: request.expires_at,
+  });
+
+  revalidateProfile(profile?.handle);
+  return { ok: true, error: null, token: request.token, requestId: request.id, emailedTo: emailed ? (coach?.email ?? null) : null };
+}
+
+/** #41: the athlete closes a link that is still out — sent to the wrong coach, say. */
+export async function revokeVerification(formData: FormData): Promise<void> {
+  const { repo, user } = await requireUser();
+  const id = idSchema.safeParse(str(formData, "id"));
+  if (!id.success) return;
+
+  try {
+    await repo.revokeVerificationRequest(user.id, id.data);
+  } catch {
+    // Answered or revoked meanwhile; the refreshed page shows which.
+  }
+  await refreshOwner(repo, user.id);
 }
 
 // ---------------------------------------------------------------------------
@@ -393,11 +530,7 @@ export async function requestVerification(_prev: RequestState, formData: FormDat
 
 const filmSchema = z.object({
   title: z.string().trim().min(3, "Give the clip a title.").max(120),
-  url: z
-    .string()
-    .trim()
-    .url("Enter a full URL.")
-    .refine((url) => /^https?:\/\//i.test(url), "Film links must be web URLs."),
+  url: z.string().trim().pipe(httpUrl),
   season: optionalText.pipe(z.string().max(40).nullable()),
 });
 
@@ -410,21 +543,60 @@ export async function addFilm(_prev: FormState, formData: FormData): Promise<For
     season: str(formData, "season"),
   });
 
-  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
+  if (!parsed.success) return invalid(parsed.error, formData);
 
   try {
     await repo.addFilm(user.id, parsed.data);
   } catch (error) {
-    return failed(error, "Could not add the clip. Try again.");
+    return failed(error, "Could not add the clip. Try again.", formValues(formData));
   }
 
-  revalidatePath("/resume");
-  return IDLE;
+  await refreshOwner(repo, user.id);
+  return saved();
+}
+
+export async function updateFilm(_prev: FormState, formData: FormData): Promise<FormState> {
+  const { repo, user } = await requireUser();
+  const id = idSchema.safeParse(str(formData, "id"));
+  const parsed = filmSchema.safeParse({
+    title: str(formData, "title"),
+    url: str(formData, "url"),
+    season: str(formData, "season"),
+  });
+  if (!id.success) return { ok: false, error: "That clip was not found." };
+  if (!parsed.success) return invalid(parsed.error, formData);
+
+  try {
+    await repo.updateFilm(user.id, id.data, parsed.data);
+  } catch (error) {
+    return failed(error, "Could not save the clip. Try again.", formValues(formData));
+  }
+
+  await refreshOwner(repo, user.id);
+  return saved();
+}
+
+const directionSchema = z.enum(["up", "down"] satisfies MoveDirection[]);
+
+/** #56: one step up or down the athlete's film order. */
+export async function moveFilm(formData: FormData): Promise<void> {
+  const { repo, user } = await requireUser();
+  const id = idSchema.safeParse(str(formData, "id"));
+  const direction = directionSchema.safeParse(str(formData, "direction"));
+  if (!id.success || !direction.success) return;
+
+  try {
+    await repo.moveFilm(user.id, id.data, direction.data);
+  } catch {
+    // Stale form; the refreshed page shows the real order.
+  }
+
+  await refreshOwner(repo, user.id);
 }
 
 export async function deleteFilm(formData: FormData): Promise<void> {
   const { repo, user } = await requireUser();
-  const id = uuidField.safeParse(str(formData, "id"));
+  const id = idSchema.safeParse(str(formData, "id"));
   if (!id.success) return;
 
   try {
@@ -433,12 +605,12 @@ export async function deleteFilm(formData: FormData): Promise<void> {
     // Stale form; nothing to do.
   }
 
-  revalidatePath("/resume");
+  await refreshOwner(repo, user.id);
 }
 
 export async function featureFilm(formData: FormData): Promise<void> {
   const { repo, user } = await requireUser();
-  const id = uuidField.safeParse(str(formData, "id"));
+  const id = idSchema.safeParse(str(formData, "id"));
   if (!id.success) return;
 
   try {
@@ -447,24 +619,12 @@ export async function featureFilm(formData: FormData): Promise<void> {
     // Stale form; nothing to do.
   }
 
-  revalidatePath("/resume");
+  await refreshOwner(repo, user.id);
 }
 
 // ---------------------------------------------------------------------------
 // Coach contacts
 // ---------------------------------------------------------------------------
-
-const coachSchema = z
-  .object({
-    name: z.string().trim().min(2, "Enter the coach's name.").max(80),
-    role: optionalText.pipe(z.string().max(80).nullable()),
-    org_name: optionalText.pipe(z.string().max(120).nullable()),
-    email: optionalText.pipe(z.string().email("Enter a valid email.").nullable()),
-    phone: optionalText.pipe(z.string().max(25).nullable()),
-  })
-  .refine((coach) => coach.email !== null || coach.phone !== null, {
-    message: "A reference needs an email or a phone number.",
-  });
 
 export async function addCoach(_prev: FormState, formData: FormData): Promise<FormState> {
   const { repo, user } = await requireUser();
@@ -477,21 +637,64 @@ export async function addCoach(_prev: FormState, formData: FormData): Promise<Fo
     phone: str(formData, "phone"),
   });
 
-  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
+  if (!parsed.success) return invalid(parsed.error, formData);
 
   try {
     await repo.addCoach(user.id, parsed.data);
   } catch (error) {
-    return failed(error, "Could not add the reference. Try again.");
+    return failed(error, "Could not add the reference. Try again.", formValues(formData));
   }
 
-  revalidatePath("/resume");
-  return IDLE;
+  await refreshOwner(repo, user.id);
+  return saved();
+}
+
+export async function updateCoach(_prev: FormState, formData: FormData): Promise<FormState> {
+  const { repo, user } = await requireUser();
+  const id = idSchema.safeParse(str(formData, "id"));
+  const parsed = coachSchema.safeParse({
+    name: str(formData, "name"),
+    role: str(formData, "role"),
+    org_name: str(formData, "org_name"),
+    email: str(formData, "email"),
+    phone: str(formData, "phone"),
+  });
+  if (!id.success) return { ok: false, error: "That reference was not found." };
+  if (!parsed.success) return invalid(parsed.error, formData);
+
+  try {
+    await repo.updateCoach(user.id, id.data, parsed.data);
+  } catch (error) {
+    return failed(error, "Could not save the reference. Try again.", formValues(formData));
+  }
+
+  await refreshOwner(repo, user.id);
+  return saved();
+}
+
+/**
+ * #56: show or hide a reference on the public resume. A hidden reference
+ * still receives verification requests; only recruiters stop seeing it.
+ */
+export async function toggleCoachVisible(formData: FormData): Promise<void> {
+  const { repo, user } = await requireUser();
+  const id = idSchema.safeParse(str(formData, "id"));
+  if (!id.success) return;
+
+  const coach = (await repo.listCoaches(user.id, user.id)).find((c) => c.id === id.data);
+  if (!coach) return;
+
+  try {
+    await repo.updateCoach(user.id, id.data, { is_visible: !coach.is_visible });
+  } catch {
+    // Deleted meanwhile; the refreshed page shows the truth.
+  }
+  await refreshOwner(repo, user.id);
 }
 
 export async function deleteCoach(formData: FormData): Promise<void> {
   const { repo, user } = await requireUser();
-  const id = uuidField.safeParse(str(formData, "id"));
+  const id = idSchema.safeParse(str(formData, "id"));
   if (!id.success) return;
 
   try {
@@ -500,5 +703,5 @@ export async function deleteCoach(formData: FormData): Promise<void> {
     // Stale form; nothing to do.
   }
 
-  revalidatePath("/resume");
+  await refreshOwner(repo, user.id);
 }

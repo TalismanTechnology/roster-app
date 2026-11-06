@@ -6,9 +6,14 @@
  * desktop browser and immediately obvious on somebody's phone.
  *
  * Usage:
- *   node scripts/shots.mjs [route] [--tab=film] [--out=dir]
+ *   node scripts/shots.mjs [route] [--section=film] [--base=url] [--out=dir] [--dark]
  *
- * Requires a dev server on :3000 and the Playwright browser cache that
+ * `--section` opens one editor section through its `?section=` query param,
+ * the same URL the editor's own navigation uses (`--tab` is accepted as an
+ * old alias). The server is `--base`, else `BASE_URL`, else
+ * `http://localhost:$PORT` (PORT defaults to 3000).
+ *
+ * Requires a running server and the Playwright browser cache that
  * `npx playwright install chromium` populates.
  */
 
@@ -25,9 +30,15 @@ const BREAKPOINTS = [
 ];
 
 const args = process.argv.slice(2);
+const flag = (name) => args.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
+
 const route = args.find((arg) => !arg.startsWith("--")) ?? "/preview";
-const tab = args.find((arg) => arg.startsWith("--tab="))?.split("=")[1];
-const outDir = args.find((arg) => arg.startsWith("--out="))?.split("=")[1] ?? "./.shots";
+const section = flag("section") ?? flag("tab");
+const outDir = flag("out") ?? "./.shots";
+const base = (flag("base") ?? process.env.BASE_URL ?? `http://localhost:${process.env.PORT ?? 3000}`).replace(/\/$/, "");
+
+const target = new URL(route, base);
+if (section) target.searchParams.set("section", section);
 const colorScheme = args.includes("--dark") ? "dark" : "light";
 
 const browser = await chromium.launch({ channel: "chromium" });
@@ -35,12 +46,7 @@ await mkdir(outDir, { recursive: true });
 
 for (const { name, width, height } of BREAKPOINTS) {
   const page = await browser.newPage({ viewport: { width, height }, colorScheme });
-  await page.goto(`http://localhost:3000${route}`, { waitUntil: "networkidle" });
-
-  if (tab) {
-    await page.getByRole("tab", { name: new RegExp(tab, "i") }).click();
-    await page.waitForTimeout(400);
-  }
+  await page.goto(target.href, { waitUntil: "networkidle" });
 
   // Next's dev-mode indicator floats over the bottom-left corner, which is
   // exactly where the rail's footer sits. Hide it so shots show the design.
@@ -61,7 +67,7 @@ for (const { name, width, height } of BREAKPOINTS) {
     return { scrollWidth: doc.scrollWidth, clientWidth: doc.clientWidth, offenders };
   });
 
-  const suffix = `${tab ? `-${tab}` : ""}${colorScheme === "dark" ? "-dark" : ""}`;
+  const suffix = `${section ? `-${section}` : ""}${colorScheme === "dark" ? "-dark" : ""}`;
   await page.screenshot({ path: path.join(outDir, `${name}${suffix}.png`) });
 
   const isOverflowing = overflow.scrollWidth > overflow.clientWidth;

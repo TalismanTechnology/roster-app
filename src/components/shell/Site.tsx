@@ -1,17 +1,21 @@
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 
-import { getRepository } from "@/lib/data";
-import { getCurrentUser } from "@/lib/data/auth";
+import { getCurrentProfile, getCurrentUser } from "@/lib/data/auth";
 
 import { SiteFooter } from "./SiteFooter";
 import { SiteHeader, type HeaderUser } from "./SiteHeader";
 
 /**
- * Header + content + footer, with the signed-in state resolved once here so
- * pages don't each re-derive it. Server Component: the only client piece is
- * the header's scroll glass.
+ * Header + content + footer. Server Component: the only client pieces are
+ * the header's scroll glass and its phone menu.
+ *
+ * The signed-in state is the one per-visitor thing on most pages, so it is
+ * an island (#102): the header streams in behind a <Suspense> boundary
+ * while the page itself renders, rather than every page waiting on a
+ * session lookup (an auth round trip in Supabase mode) before its first
+ * byte. The fallback is the same bar with the account controls held blank.
  */
-export async function Site({
+export function Site({
   children,
   variant = "app",
   footer = true,
@@ -20,23 +24,33 @@ export async function Site({
   variant?: "landing" | "app";
   footer?: boolean;
 }) {
-  const user = await currentHeaderUser();
-
   return (
     <>
-      <SiteHeader user={user} variant={variant} />
+      <SiteHeaderIsland variant={variant} />
       {children}
       {footer && <SiteFooter />}
     </>
   );
 }
 
+/** The header with the visitor's account state, streamed. */
+export function SiteHeaderIsland({ variant = "app" }: { variant?: "landing" | "app" }) {
+  return (
+    <Suspense fallback={<SiteHeader user={null} variant={variant} pending />}>
+      <ResolvedHeader variant={variant} />
+    </Suspense>
+  );
+}
+
+async function ResolvedHeader({ variant }: { variant: "landing" | "app" }) {
+  return <SiteHeader user={await currentHeaderUser()} variant={variant} />;
+}
+
 export async function currentHeaderUser(): Promise<HeaderUser> {
   const user = await getCurrentUser();
   if (!user) return null;
 
-  const repo = await getRepository();
-  const profile = await repo.getProfileById(user.id);
+  const profile = await getCurrentProfile();
 
   return {
     email: user.email,

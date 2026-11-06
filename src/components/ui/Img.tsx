@@ -8,7 +8,8 @@ import { Corner, CORNER } from "./marks";
 /**
  * Page imagery, by id. Every photo the site uses is listed here so a missing
  * file degrades to an intentional placeholder rather than a broken box, and
- * so alt text lives in one place.
+ * so alt text lives in one place. The labelled placeholder is a development
+ * aid; in production a missing photo is just the frame's neutral fill.
  */
 export const IMAGES = {
   "hero-base": { file: "/img/bg-base.jpg", label: "Hero · base", alt: "" },
@@ -56,7 +57,11 @@ export function Img({
   return (
     <div className={`${position} overflow-hidden bg-paper-raised ${className}`}>
       {isMissing ? (
-        <Placeholder id={id} quiet={quiet} />
+        process.env.NODE_ENV === "production" ? (
+          <NeutralFill id={id} />
+        ) : (
+          <Placeholder id={id} quiet={quiet} />
+        )
       ) : (
         <Image
           src={meta.file}
@@ -70,6 +75,13 @@ export function Img({
       )}
     </div>
   );
+}
+
+/** Production fallback: the frame's own fill, with the alt text kept so the
+ *  page reads the same to a screen reader whether or not the file loaded. */
+function NeutralFill({ id }: { id: ImageId }) {
+  const { alt } = IMAGES[id];
+  return alt ? <div className="absolute inset-0" role="img" aria-label={alt} /> : null;
 }
 
 function Placeholder({ id, quiet }: { id: ImageId; quiet: boolean }) {
