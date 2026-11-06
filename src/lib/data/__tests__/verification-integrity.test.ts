@@ -84,7 +84,7 @@ describe("editing a verified entry", () => {
     const entry = await verifiedEntry(profile.id, coach.id);
     assert.equal(entry.verification, "verified");
     assert.ok(entry.verified_at);
-    assert.equal(entry.verified_by, "Tom Bradley");
+    assert.equal(entry.verified_by, "Tom Bradley, Head Coach");
     assert.equal((await repo.getProfileById(profile.id))!.verified_count, 1);
 
     const updated = await repo.updateEntry(profile.id, entry.id, { ...ENTRY, value_display: "52.10" });
@@ -125,7 +125,7 @@ describe("editing a verified entry", () => {
     const updated = await repo.updateEntry(profile.id, entry.id, { ...ENTRY });
     assert.equal(updated.verification, "verified");
     assert.ok(updated.verified_at);
-    assert.equal(updated.verified_by, "Tom Bradley");
+    assert.equal(updated.verified_by, "Tom Bradley, Head Coach");
   });
 
   it("treats an emptied optional field as the same empty", async () => {
@@ -232,6 +232,63 @@ describe("responding to a request", () => {
       repo.respondToVerification(first.token, "verified", null, { name: "Coach", role: null }, null),
       (e: unknown) => e instanceof DataError && /expired/i.test(e.message),
     );
+  });
+});
+
+describe("verified_by", () => {
+  it("omits the role when the verifier gave none", async () => {
+    const { profile, coach } = await athlete();
+    const entry = await repo.addEntry(profile.id, ENTRY);
+    const request = await repo.requestVerification(profile.id, entry.id, coach.id);
+    await repo.respondToVerification(request.token, "verified", null, { name: "Coach Diaz", role: null }, null);
+    assert.equal((await find(profile.id, entry.id)).verified_by, "Coach Diaz");
+  });
+
+  it("is null for a disputed entry", async () => {
+    const { profile, coach } = await athlete();
+    const entry = await repo.addEntry(profile.id, ENTRY);
+    const request = await repo.requestVerification(profile.id, entry.id, coach.id);
+    await repo.respondToVerification(request.token, "disputed", null, { name: "Coach Diaz", role: "Head Coach" }, null);
+    assert.equal((await find(profile.id, entry.id)).verified_by, null);
+  });
+});
+
+/**
+ * The owner-side half of guard_profile_privileged_columns() (0015): the
+ * database refuses these outright; the local adapter must not quietly accept
+ * them either.
+ */
+describe("profile privileged columns", () => {
+  it("an athlete cannot change their account kind, suspension, or identity badge", async () => {
+    const { profile } = await athlete();
+    const forged = {
+      account_kind: "staff",
+      suspended_at: "2026-01-01T00:00:00Z",
+      identity_verified_at: "2026-01-01T00:00:00Z",
+      verified_count: 99,
+      entry_count: 99,
+      bio: "Still editable.",
+    } as Partial<typeof profile>;
+    const updated = await repo.updateProfile(profile.id, forged);
+    assert.equal(updated.account_kind, "athlete");
+    assert.equal(updated.suspended_at, null);
+    assert.equal(updated.identity_verified_at, null);
+    assert.equal(updated.verified_count, 0);
+    assert.equal(updated.entry_count, 0);
+    assert.equal(updated.bio, "Still editable.");
+  });
+
+  it("sign-up cannot mint a staff account", async () => {
+    const user = await repo.signUp("would-be-staff@roster.local", "password123");
+    await assert.rejects(
+      repo.createProfile({ id: user.id, handle: "would_be_staff", display_name: "Nope", level: null, account_kind: "staff" }),
+      (e: unknown) => e instanceof DataError && e.code === "forbidden",
+    );
+  });
+
+  it("a new resume starts closed to recruiting", async () => {
+    const { profile } = await athlete();
+    assert.equal(profile.is_recruitable, false);
   });
 });
 

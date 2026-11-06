@@ -9,8 +9,8 @@
  * Callers: the onboarding action and form refuse a reserved handle before
  * submit, and the local adapter refuses one on insert.
  *
- * The migration that brings `reserved_handles` level with this list is
- * deferred (Wave 4); until then Supabase accepts the newer words here.
+ * Migration 0015 brought `reserved_handles` level with this list. A new
+ * entry here needs a matching `insert ... on conflict do nothing` migration.
  */
 
 export const RESERVED_HANDLES = new Set([

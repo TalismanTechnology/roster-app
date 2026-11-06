@@ -155,6 +155,8 @@ export class LocalRepository implements Repository {
     const handle = input.handle.toLowerCase();
     if (!HANDLE_PATTERN.test(handle)) throw new DataError("invalid", "That handle is not valid.");
     if (isReservedHandle(handle)) throw new DataError("invalid", "That handle is reserved.");
+    // Mirrors guard_profile_privileged_columns() (0015): staff is granted, not chosen.
+    if (input.account_kind === "staff") throw new DataError("forbidden", "That account type is not available.");
 
     return mutate((db) => {
       if (db.profiles.some((p) => p.handle === handle)) {
@@ -172,9 +174,15 @@ export class LocalRepository implements Repository {
   async updateProfile(id: string, patch: Partial<Profile>): Promise<Profile> {
     return mutate((db) => {
       const profile = requireProfile(db, id);
-      // Handles and counters are not editable through this path.
-      const { id: _id, handle: _handle, entry_count: _e, verified_count: _v, created_at: _c, ...safe } = patch;
-      void _id; void _handle; void _e; void _v; void _c;
+      // Handles and counters are not editable through this path, nor are the
+      // columns guard_profile_privileged_columns() (0015) keeps from the
+      // owner: account kind, moderation, and identity trust.
+      const {
+        id: _id, handle: _handle, entry_count: _e, verified_count: _v, created_at: _c,
+        account_kind: _k, suspended_at: _s, identity_verified_at: _iv,
+        ...safe
+      } = patch;
+      void _id; void _handle; void _e; void _v; void _c; void _k; void _s; void _iv;
       Object.assign(profile, safe, { updated_at: now() });
       return profile;
     });
@@ -450,6 +458,7 @@ export class LocalRepository implements Repository {
         method: "coach_attestation",
         note,
         verifier_name: verifier.name,
+        verifier_role: verifier.role,
         created_at: at,
       });
 
@@ -621,6 +630,7 @@ export function newProfile(input: NewProfile): Profile {
     account_kind: input.account_kind ?? "athlete",
     visibility: input.visibility ?? "public",
     display_name: input.display_name,
+    title: null,
     avatar_url: null,
     cover_url: null,
     bio: null,
@@ -678,13 +688,17 @@ export function toEntry(db: Db, a: AchievementRow): RecordEntry {
     org_logo_url: null,
     event_name: a.event_name,
     evidence_count: db.evidence.filter((e) => e.achievement_id === a.id).length,
-    verified_by:
-      a.verification === "verified"
-        ? (db.verifications
-            .filter((v) => v.achievement_id === a.id && v.outcome === "verified")
-            .sort((x, y) => y.created_at.localeCompare(x.created_at))[0]?.verifier_name ?? null)
-        : null,
+    verified_by: a.verification === "verified" ? verifiedBy(db, a.id) : null,
   };
+}
+
+/** record_entries.verified_by (0016): the newest verified decision's "Name, Role". */
+function verifiedBy(db: Db, achievementId: string): string | null {
+  const latest = db.verifications
+    .filter((v) => v.achievement_id === achievementId && v.outcome === "verified")
+    .sort((x, y) => y.created_at.localeCompare(x.created_at))[0];
+  if (!latest?.verifier_name) return null;
+  return [latest.verifier_name, latest.verifier_role].filter(Boolean).join(", ");
 }
 
 function byPinnedThenDate(a: RecordEntry, b: RecordEntry): number {

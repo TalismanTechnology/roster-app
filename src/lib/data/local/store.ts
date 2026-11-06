@@ -64,6 +64,8 @@ export type VerificationRow = {
   method: string | null;
   note: string | null;
   verifier_name: string | null;
+  /** Optional: rows written before 0016 parity have no role. */
+  verifier_role?: string | null;
   created_at: string;
 };
 

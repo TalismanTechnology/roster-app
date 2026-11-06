@@ -174,6 +174,7 @@ function toProfile(id: string, a: SeedAthlete, createdAt: string): Profile {
     account_kind: "athlete",
     visibility: a.visibility ?? "public",
     display_name: a.name,
+    title: null,
     avatar_url: null,
     cover_url: null,
     bio: a.bio,
