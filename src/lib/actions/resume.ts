@@ -9,6 +9,7 @@ import { emailCoachRequest } from "@/lib/email/verification";
 import { LEVEL_OPTIONS } from "@/lib/format";
 import { isReservedHandle, HANDLE_PATTERN } from "@/lib/handles";
 import { toStateCode } from "@/lib/regions";
+import { hit } from "@/lib/rate-limit";
 import { revalidateProfile } from "@/lib/revalidate";
 
 import {
@@ -22,7 +23,7 @@ import {
   requiredSport,
   socialHandleField,
 } from "./schemas";
-import { failed, formValues, requireUser, str, type FormValues } from "./shared";
+import { clientKey, failed, formValues, requireUser, str, type FormValues } from "./shared";
 
 /**
  * Every write behind the resume editor.
@@ -111,10 +112,22 @@ export async function completeOnboarding(_prev: FormState, formData: FormData): 
   redirect("/resume");
 }
 
-/** Live availability for the onboarding form. Read-only; safe to call freely. */
-export async function checkHandle(handle: string): Promise<"available" | "taken" | "invalid"> {
-  const h = handle.trim().toLowerCase();
+/**
+ * The handle checker's budget per client (#40). The form debounces 350ms,
+ * so even slow, deliberate typing stays far below this; a script walking
+ * the namespace to learn who has an account does not.
+ */
+const HANDLE_CHECKS_PER_MINUTE = 60;
+
+/**
+ * Live availability for the onboarding form. Read-only, but callable by
+ * anyone without an account, so it is throttled per client. The format
+ * check runs first and costs nothing, so it is not counted.
+ */
+export async function checkHandle(handle: string): Promise<"available" | "taken" | "invalid" | "rate_limited"> {
+  const h = String(handle ?? "").trim().toLowerCase();
   if (!HANDLE_PATTERN.test(h) || isReservedHandle(h)) return "invalid";
+  if (!hit("check-handle", await clientKey(), HANDLE_CHECKS_PER_MINUTE, 60_000)) return "rate_limited";
   const repo = await getRepository();
   return (await repo.isHandleAvailable(h)) ? "available" : "taken";
 }

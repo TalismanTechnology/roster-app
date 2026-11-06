@@ -26,3 +26,13 @@ export function parseFilmUrl(url: string): { provider: FilmProvider | null; exte
 
   return { provider: null, external_id: null };
 }
+
+/**
+ * Mirror of the thumbnail half of `parse_film_url()` (0018). Only YouTube
+ * serves a thumbnail at a URL derivable from the id.
+ */
+export function filmThumbnailUrl(parsed: { provider: FilmProvider | null; external_id: string | null }): string | null {
+  return parsed.provider === "youtube" && parsed.external_id
+    ? `https://i.ytimg.com/vi/${parsed.external_id}/hqdefault.jpg`
+    : null;
+}

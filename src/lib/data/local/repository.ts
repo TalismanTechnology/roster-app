@@ -9,6 +9,8 @@ import type { Repository } from "../repository";
 import {
   DataError,
   type AuthUser,
+  type EmailChangeResult,
+  type IssuedPasswordReset,
   type NewCoach,
   type NewEntry,
   type NewFilm,
@@ -33,11 +35,14 @@ import {
   REQUEST_TTL_DAYS,
   canSeeCoachContact,
   canViewProfile,
+  CURRENT_PASSWORD_MISMATCH,
   isSubstantiveEntryChange,
   MAX_PINNED,
+  PASSWORD_RESET_TTL_MINUTES,
+  SIGN_UP_CONFLICT_COPY,
   SUBSTANTIVE_ENTRY_FIELDS,
 } from "../rules";
-import { parseFilmUrl } from "./film";
+import { filmThumbnailUrl, parseFilmUrl } from "./film";
 import { hashPassword, verifyPassword, verifyPasswordConstantTime } from "./password";
 import { generateToken, hashToken } from "../tokens";
 import { searchProfiles } from "./search";
@@ -71,7 +76,8 @@ export class LocalRepository implements Repository {
     const normalized = email.trim().toLowerCase();
     return mutate((db) => {
       if (db.users.some((u) => u.email === normalized)) {
-        throw new DataError("conflict", "An account with that email already exists.");
+        // The same words Supabase's adapter uses: never "already exists".
+        throw new DataError("conflict", SIGN_UP_CONFLICT_COPY);
       }
       const user = {
         id: randomUUID(),
@@ -97,8 +103,10 @@ export class LocalRepository implements Repository {
     return user ? { id: user.id, email: user.email } : null;
   }
 
-  async updateEmail(userId: string, email: string): Promise<void> {
+  async updateEmail(userId: string, email: string): Promise<EmailChangeResult> {
     const normalized = email.trim().toLowerCase();
+    // Immediate: there is no mailbox to confirm against locally. Supabase
+    // answers `pending` until the new address clicks its link.
     await mutate((db) => {
       if (db.users.some((u) => u.email === normalized && u.id !== userId)) {
         throw new DataError("conflict", "That email is already in use.");
@@ -106,17 +114,61 @@ export class LocalRepository implements Repository {
       const user = requireUser(db, userId);
       user.email = normalized;
     });
+    return "updated";
   }
 
   async updatePassword(userId: string, current: string, next: string): Promise<void> {
     await mutate((db) => {
       const user = requireUser(db, userId);
       if (!verifyPassword(current, user.password_hash)) {
-        throw new DataError("forbidden", "Your current password did not match.");
+        throw new DataError("forbidden", CURRENT_PASSWORD_MISMATCH);
       }
       user.password_hash = hashPassword(next);
       // Every cookie issued before this moment stops working.
       user.session_version = (user.session_version ?? 0) + 1;
+    });
+  }
+
+  // Supabase's `redirectTo` is not taken: the local link always lands on /reset-password.
+  async requestPasswordReset(email: string): Promise<IssuedPasswordReset | null> {
+    const normalized = email.trim().toLowerCase();
+    return mutate((db) => {
+      const user = db.users.find((u) => u.email === normalized);
+      if (!user) return null;
+      const at = new Date();
+      // One live link per account: asking again retires the last one, as
+      // Supabase does with its recovery tokens.
+      for (const r of db.password_resets) {
+        if (r.user_id === user.id && r.used_at === null) r.used_at = at.toISOString();
+      }
+      const token = generateToken();
+      const expiresAt = new Date(at.getTime() + PASSWORD_RESET_TTL_MINUTES * 60_000).toISOString();
+      db.password_resets.push({
+        token_hash: hashToken(token),
+        user_id: user.id,
+        created_at: at.toISOString(),
+        expires_at: expiresAt,
+        used_at: null,
+      });
+      return { email: user.email, token, expiresAt };
+    });
+  }
+
+  async canResetPassword(token: string | null): Promise<boolean> {
+    return Boolean(token && findLiveReset(readDb(), token));
+  }
+
+  async resetPassword(token: string | null, next: string): Promise<AuthUser> {
+    return mutate((db) => {
+      const reset = token ? findLiveReset(db, token) : undefined;
+      if (!reset) throw new DataError("forbidden", "This reset link has expired or was already used. Request a new one.");
+      const user = requireUser(db, reset.user_id);
+      reset.used_at = now();
+      user.password_hash = hashPassword(next);
+      // Whoever knew the old password is signed out everywhere; the caller
+      // issues this device a fresh cookie at the new version.
+      user.session_version = (user.session_version ?? 0) + 1;
+      return { id: user.id, email: user.email };
     });
   }
 
@@ -130,6 +182,7 @@ export class LocalRepository implements Repository {
     await mutate((db) => {
       const mine = new Set(db.achievements.filter((a) => a.profile_id === userId).map((a) => a.id));
       db.users = db.users.filter((u) => u.id !== userId);
+      db.password_resets = db.password_resets.filter((r) => r.user_id !== userId);
       db.profiles = db.profiles.filter((p) => p.id !== userId);
       db.memberships = db.memberships.filter((m) => m.profile_id !== userId);
       db.achievements = db.achievements.filter((a) => a.profile_id !== userId);
@@ -315,10 +368,7 @@ export class LocalRepository implements Repository {
         url: input.url,
         provider: parsed.provider,
         external_id: parsed.external_id,
-        thumbnail_url:
-          parsed.provider === "youtube" && parsed.external_id
-            ? `https://i.ytimg.com/vi/${parsed.external_id}/hqdefault.jpg`
-            : null,
+        thumbnail_url: filmThumbnailUrl(parsed),
         season: input.season,
         sport: profile.primary_sport,
         duration_s: null,
@@ -640,6 +690,18 @@ export class LocalRepository implements Repository {
     });
   }
 
+  async renameList(ownerId: string, listId: string, name: string): Promise<RecruiterList> {
+    return mutate((db) => {
+      const list = requireList(db, ownerId, listId);
+      if (db.recruiter_lists.some((l) => l.owner_id === ownerId && l.name === name && l.id !== listId)) {
+        throw new DataError("conflict", "You already have a list with that name.");
+      }
+      list.name = name;
+      list.updated_at = now();
+      return withCount(db, list);
+    });
+  }
+
   async deleteList(ownerId: string, listId: string): Promise<void> {
     await mutate((db) => {
       requireList(db, ownerId, listId);
@@ -844,6 +906,13 @@ function expirePendingRequests(db: Db, achievementId: string): void {
   for (const r of db.verification_requests) {
     if (r.achievement_id === achievementId && r.status === "pending") r.status = "expired";
   }
+}
+
+/** A reset row for this raw token that is unused and in date, or undefined. */
+function findLiveReset(db: Db, token: string) {
+  const hash = hashToken(token);
+  const at = now();
+  return db.password_resets.find((r) => r.token_hash === hash && r.used_at === null && r.expires_at > at);
 }
 
 function requireUser(db: Db, userId: string) {

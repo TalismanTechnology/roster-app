@@ -14,7 +14,7 @@ import { SPORTS } from "@/lib/sports";
 
 const IDLE: FormState = { ok: false, error: null };
 
-type Availability = "idle" | "checking" | "available" | "taken" | "invalid";
+type Availability = "idle" | "checking" | "available" | "taken" | "invalid" | "rate_limited";
 
 const STEPS = [
   { n: "01", title: "Claim your handle", fields: ["handle"] },
@@ -198,6 +198,9 @@ export function OnboardingForm() {
               </>
             )}
             {availability === "taken" && <span className="text-disputed">That handle is taken.</span>}
+            {availability === "rate_limited" && (
+              <span className="text-ink-muted">Too many checks at once — pause a moment, then keep typing.</span>
+            )}
             {availability === "invalid" && (
               <span className="text-disputed">3–30 characters, lowercase letters, numbers, underscores. Some words are reserved.</span>
             )}

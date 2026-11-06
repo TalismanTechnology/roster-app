@@ -80,6 +80,11 @@ const nextConfig: NextConfig = {
         source: "/verify/:token*",
         headers: [{ key: "Referrer-Policy", value: "no-referrer" }],
       },
+      {
+        // Same for a local password-reset link: ?token= is the credential.
+        source: "/reset-password",
+        headers: [{ key: "Referrer-Policy", value: "no-referrer" }],
+      },
     ];
   },
 };

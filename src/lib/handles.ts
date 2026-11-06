@@ -18,9 +18,11 @@ export const RESERVED_HANDLES = new Set([
   // the route (or shadow it). The handles test fails if a new route is
   // added without its name landing in this block.
   "auth",
+  "forgot-password",
   "lists",
   "onboarding",
   "preview",
+  "reset-password",
   "resume",
   "search",
   "settings",

@@ -94,7 +94,10 @@ export async function signOutEverywhere(): Promise<void> {
     return;
   }
   const supabase = await createClient();
-  await supabase.auth.signOut();
+  const { error } = await supabase.auth.signOut();
+  // Refused server-side (an account deleted a moment ago has no session left
+  // to revoke): still drop this device's cookies.
+  if (error) await supabase.auth.signOut({ scope: "local" });
 }
 
 /**

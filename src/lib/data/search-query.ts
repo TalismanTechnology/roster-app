@@ -29,7 +29,8 @@ export function allowsFuzzy(q: string | null): boolean {
 /**
  * Escapes LIKE / ILIKE metacharacters so user input matches literally.
  * Postgres's default escape character is backslash, so the backslash
- * itself is escaped first.
+ * itself is escaped first. The same transform as `like_literal()` (0018),
+ * which search_athletes now applies itself — pass it raw text.
  */
 export function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);

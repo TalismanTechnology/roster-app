@@ -16,7 +16,7 @@ import { SPORTS, sportName } from "@/lib/sports";
 
 export const metadata: Metadata = {
   title: "Find athletes",
-  description: "Search verified athlete resumes by sport, level, class year, and state.",
+  description: "Search verified athlete resumes by sport, level, position, class year, and state.",
   alternates: { canonical: "/search" },
 };
 
@@ -29,8 +29,12 @@ type Filters = {
   level: string | null;
   gradYear: number | null;
   region: string | null;
+  position: string | null;
   verifiedOnly: boolean;
 };
+
+/** Longer than any position anyone lists ("4x400 anchor"). */
+const MAX_POSITION_LENGTH = 30;
 
 /**
  * Discovery. A plain GET form — every filter lives in the URL, so a recruiter
@@ -48,6 +52,7 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
     level: str(params.level),
     gradYear: int(params.class),
     region: toStateCode(str(params.state)),
+    position: str(params.position)?.slice(0, MAX_POSITION_LENGTH) ?? null,
     verifiedOnly: params.verified === "1",
   };
 
@@ -60,6 +65,7 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
     level: filters.level && LEVEL_VALUES.has(filters.level) ? (filters.level as AthleteLevel) : null,
     gradYear: filters.gradYear,
     region: filters.region,
+    position: filters.position,
     verifiedOnly: filters.verifiedOnly,
     page: int(params.page) ?? 1,
     pageSize: PAGE_SIZE,
@@ -118,6 +124,9 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
                     </option>
                   ))}
                 </Select>
+              </Field>
+              <Field label="Position">
+                <TextInput name="position" defaultValue={filters.position ?? ""} placeholder="WR" maxLength={MAX_POSITION_LENGTH} />
               </Field>
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Class of">
@@ -246,6 +255,7 @@ function Pager({ page, hasMore, filters }: { page: number; hasMore: boolean; fil
     if (filters.level) search.set("level", filters.level);
     if (filters.gradYear) search.set("class", String(filters.gradYear));
     if (filters.region) search.set("state", filters.region);
+    if (filters.position) search.set("position", filters.position);
     if (filters.verifiedOnly) search.set("verified", "1");
     if (target > 1) search.set("page", String(target));
     return `/search?${search.toString()}`;
@@ -276,6 +286,7 @@ function describe(f: Filters): string[] {
     f.level && levelLabel(f.level as AthleteLevel),
     f.gradYear && `Class of ${f.gradYear}`,
     f.region,
+    f.position && `Plays ${f.position}`,
     f.verifiedOnly && "Verified only",
   ].filter((x): x is string => Boolean(x));
 }

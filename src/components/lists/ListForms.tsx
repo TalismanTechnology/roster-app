@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 
-import { createList, type ListFormState } from "@/lib/actions/lists";
+import { createList, renameList, type ListFormState } from "@/lib/actions/lists";
 import { Field, FieldErrors, FormNotice, TextInput } from "@/components/ui/fields";
 import { SubmitButton } from "@/components/ui/SubmitButton";
 
@@ -25,6 +25,27 @@ export function CreateListForm() {
       <div className="flex items-center gap-4">
         <SubmitButton className="btn-outline" pendingLabel="Creating…">
           Create list
+        </SubmitButton>
+        <FormNotice ok={state.ok} error={state.error} />
+      </div>
+    </form>
+  );
+}
+
+/** Inline on the list page, behind a disclosure: renaming is rare. */
+export function RenameListForm({ listId, name }: { listId: string; name: string }) {
+  const [state, formAction] = useActionState(renameList, IDLE);
+  return (
+    <form action={formAction} className="flex flex-col gap-4">
+      <input type="hidden" name="list_id" value={listId} />
+      <FieldErrors errors={state.fieldErrors}>
+        <Field label="List name">
+          <TextInput name="name" defaultValue={state.values?.name ?? name} required minLength={2} maxLength={60} />
+        </Field>
+      </FieldErrors>
+      <div className="flex items-center gap-4">
+        <SubmitButton className="btn-outline" pendingLabel="Saving…">
+          Save name
         </SubmitButton>
         <FormNotice ok={state.ok} error={state.error} />
       </div>

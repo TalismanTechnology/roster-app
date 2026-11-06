@@ -2,6 +2,8 @@ import type { CoachContact, FilmClip, Profile, RecordEntry } from "@/lib/databas
 
 import type {
   AuthUser,
+  EmailChangeResult,
+  IssuedPasswordReset,
   NewCoach,
   NewEntry,
   NewFilm,
@@ -38,8 +40,31 @@ export interface Repository {
   /** Null on a bad email/password pair — never says which. */
   signIn(email: string, password: string): Promise<AuthUser | null>;
   getUser(userId: string): Promise<AuthUser | null>;
-  updateEmail(userId: string, email: string): Promise<void>;
+  /** `pending` when the new address must confirm a link before it takes effect. */
+  updateEmail(userId: string, email: string): Promise<EmailChangeResult>;
+  /**
+   * Re-checks `current` before changing anything; a mismatch throws
+   * `forbidden`. Every other session is signed out; this one survives.
+   */
   updatePassword(userId: string, current: string, next: string): Promise<void>;
+  /**
+   * Starts a reset. Never says whether the email has an account: the local
+   * adapter returns null for an unknown address and a token for a known one,
+   * and the caller shows the same message either way. `redirectTo` is where
+   * Supabase's own recovery link lands.
+   */
+  requestPasswordReset(email: string, redirectTo: string): Promise<IssuedPasswordReset | null>;
+  /**
+   * Whether a reset may be completed right now: a live local token, or a
+   * Supabase recovery session (the link landed via /auth/callback).
+   */
+  canResetPassword(token: string | null): Promise<boolean>;
+  /**
+   * Sets a new password without the old one, on the authority of the reset.
+   * Single use; signs out every session. Throws `forbidden` when the token
+   * or recovery session is missing, used, or expired.
+   */
+  resetPassword(token: string | null, next: string): Promise<AuthUser>;
   /** Removes the account and everything it owns. */
   deleteAccount(userId: string): Promise<void>;
 
@@ -122,8 +147,12 @@ export interface Repository {
   // --- recruiter lists ----------------------------------------------------
   listLists(ownerId: string): Promise<RecruiterList[]>;
   getList(ownerId: string, listId: string): Promise<RecruiterListDetail | null>;
+  /** Throws `conflict` when the owner already has a list by that name. */
   createList(ownerId: string, name: string, note: string | null): Promise<RecruiterList>;
+  /** Same `conflict` rule as create; `not_found` for a list that isn't the owner's. */
+  renameList(ownerId: string, listId: string, name: string): Promise<RecruiterList>;
   deleteList(ownerId: string, listId: string): Promise<void>;
+  /** Idempotent. `not_found` when the resume is not visible to the owner. */
   addToList(ownerId: string, listId: string, profileId: string, note: string | null): Promise<void>;
   removeFromList(ownerId: string, listId: string, profileId: string): Promise<void>;
   /** Which of the owner's lists already hold this athlete. */

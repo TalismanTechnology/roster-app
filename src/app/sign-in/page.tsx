@@ -16,6 +16,7 @@ export const metadata: Metadata = {
 /** Copy for the `?error=` codes other routes send here. */
 const ERRORS: Record<string, string> = {
   confirmation: "That confirmation link didn't work — it may have expired or already been used. Sign in, or create your account again for a fresh link.",
+  reset: "That reset link didn't work — it may have expired or already been used. Request a new one from “Forgot password?” below.",
 };
 
 export default async function SignInPage({ searchParams }: PageProps<"/sign-in">) {

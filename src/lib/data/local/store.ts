@@ -89,6 +89,18 @@ export type RecruiterListMemberRow = {
   added_at: string;
 };
 
+/**
+ * A password reset link (local mode's stand-in for Supabase recovery). Like
+ * verification links, only the token's sha256 is kept.
+ */
+export type PasswordResetRow = {
+  token_hash: string;
+  user_id: string;
+  created_at: string;
+  expires_at: string;
+  used_at: string | null;
+};
+
 export type Db = {
   version: 1;
   users: LocalUser[];
@@ -104,6 +116,8 @@ export type Db = {
   profile_views: ProfileView[];
   recruiter_lists: RecruiterListRow[];
   recruiter_list_members: RecruiterListMemberRow[];
+  /** Files written before Wave 6 have none; `upgrade` adds the array. */
+  password_resets: PasswordResetRow[];
 };
 
 export function emptyDb(): Db {
@@ -122,6 +136,7 @@ export function emptyDb(): Db {
     profile_views: [],
     recruiter_lists: [],
     recruiter_list_members: [],
+    password_resets: [],
   };
 }
 
@@ -165,6 +180,7 @@ function upgrade(db: Db): Db {
     }
     row.flagged_unknown_athlete ??= false;
   }
+  db.password_resets ??= [];
   return db;
 }
 

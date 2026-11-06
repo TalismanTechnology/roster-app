@@ -1,5 +1,6 @@
 import "server-only";
 
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { getRepository } from "@/lib/data";
@@ -57,4 +58,18 @@ export async function requireUser(signIn = "/sign-in?next=/resume") {
   const user = await getCurrentUser();
   if (!user) redirect(signIn);
   return { repo: await getRepository(), user };
+}
+
+/**
+ * The caller's address as the proxy in front of us reports it, for the rate
+ * limiter (lib/rate-limit.ts): the first hop of X-Forwarded-For, then
+ * X-Real-IP. "unknown" when neither is present — a bare local `next start` —
+ * which puts every such caller in one shared budget. Only as trustworthy as
+ * the proxy: Vercel overwrites X-Forwarded-For, but a server exposed directly
+ * would let a client pick its own key, which turns the limit advisory.
+ */
+export async function clientKey(): Promise<string> {
+  const h = await headers();
+  const forwarded = h.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return forwarded || h.get("x-real-ip")?.trim() || "unknown";
 }

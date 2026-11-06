@@ -113,6 +113,8 @@ export type SearchParams = {
   level?: AthleteLevel | null;
   gradYear?: number | null;
   region?: string | null;
+  /** One position, matched case-insensitively against the athlete's list. */
+  position?: string | null;
   verifiedOnly?: boolean;
   page?: number;
   pageSize?: number;
@@ -141,6 +143,20 @@ export type VerificationResponse = {
   athleteEmail: string | null;
   entryTitle: string;
 };
+
+/**
+ * What changing the sign-in email did. `updated`: it is the new address now
+ * (local mode). `pending`: Supabase sent a confirmation link to the new
+ * address, and the old one stays in force until it is clicked.
+ */
+export type EmailChangeResult = "updated" | "pending";
+
+/**
+ * A password reset the app must deliver itself (local mode): the raw token,
+ * this once — only its hash is stored — and where to send it. Supabase
+ * delivers its own recovery mail, so its adapter hands back null.
+ */
+export type IssuedPasswordReset = { email: string; token: string; expiresAt: string };
 
 export type DataErrorCode = "conflict" | "not_found" | "forbidden" | "invalid" | "rate_limited" | "unavailable";
 

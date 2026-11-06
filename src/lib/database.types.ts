@@ -408,6 +408,10 @@ export type Database = {
       };
       /** 0017. Owner only; marks a pending request expired. */
       revoke_verification_request: { Args: { p_request_id: string }; Returns: Json };
+      /** 0018. Owner only; unfeatures the athlete's other clips and features this one, atomically. */
+      feature_film: { Args: { clip: string }; Returns: void };
+      /** 0018. Escapes LIKE metacharacters (backslash, `%`, `_`) so a value matches literally. */
+      like_literal: { Args: { value: string }; Returns: string };
       search_athletes: {
         Args: {
           q?: string | null;

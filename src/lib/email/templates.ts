@@ -1,5 +1,6 @@
 /**
- * The two verification emails, as plain data: subject, text, and HTML.
+ * Transactional emails — the two verification notices and the password
+ * reset — as plain data: subject, text, and HTML.
  * Pure functions — no I/O — so tests can assert on exactly what a coach or
  * an athlete would read.
  *
@@ -100,6 +101,27 @@ export function verificationAnsweredEmail(input: {
     verdict,
     [para(`Hi ${athleteName},`, true), note ? para(`“${note}”`) : "", para(next, true)].join("\n"),
     { href: editorUrl, text: outcome === "verified" ? "See your resume" : "Fix & request again" },
+  );
+  return { subject, text, html };
+}
+
+export function passwordResetEmail(input: { url: string; expiresInMinutes: number }): RenderedEmail {
+  const { url, expiresInMinutes } = input;
+  const span =
+    expiresInMinutes % 60 === 0 && expiresInMinutes >= 60
+      ? `${expiresInMinutes / 60} hour${expiresInMinutes === 60 ? "" : "s"}`
+      : `${expiresInMinutes} minutes`;
+  const subject = "Reset your Roster password";
+  const lines = [
+    "Someone asked to reset the password for this email on Roster. If it was you, choose a new one with the link below.",
+    "If it wasn't, ignore this — your password stays as it is.",
+  ];
+  const text = [...lines, "", url, "", `The link works once and expires within ${span}.`].join("\n");
+  const html = layout(
+    "Password reset",
+    "Choose a new password.",
+    para(lines[0]) + "\n" + para(lines[1], true) + "\n" + para(`Works once · expires within ${span}`, true),
+    { href: url, text: "Reset password" },
   );
   return { subject, text, html };
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState } from "react";
 
 import type { AuthFormState } from "@/lib/actions/auth";
@@ -56,6 +57,15 @@ export function AuthForm({
           required
         />
       </Field>
+
+      {!isSignUp && (
+        <Link
+          href="/forgot-password"
+          className="label -mt-3 w-fit text-ink-muted underline decoration-transparent underline-offset-4 transition-colors hover:text-ink hover:decoration-ink"
+        >
+          Forgot password?
+        </Link>
+      )}
 
       {state.error && (
         <p role="alert" className="text-sm text-disputed">

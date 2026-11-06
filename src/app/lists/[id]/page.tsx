@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
+import { RenameListForm } from "@/components/lists/ListForms";
 import { Site } from "@/components/shell/Site";
 import { Corner, CORNER, Verified } from "@/components/ui/marks";
 import { deleteList, removeFromList } from "@/lib/actions/lists";
@@ -52,6 +53,15 @@ export default async function ListPage({ params }: PageProps<"/lists/[id]">) {
             </button>
           </form>
         </header>
+
+        <details className="mb-8 border-t border-rule pt-4">
+          <summary className="label w-fit cursor-pointer text-ink-subtle underline decoration-transparent underline-offset-4 transition-colors hover:text-ink hover:decoration-ink">
+            Rename list
+          </summary>
+          <div className="mt-4 max-w-md">
+            <RenameListForm listId={list.id} name={list.name} />
+          </div>
+        </details>
 
         {members.length === 0 ? (
           <p className="border-y border-rule py-8 text-ink-muted">

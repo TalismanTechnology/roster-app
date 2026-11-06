@@ -1,6 +1,6 @@
 import type { CoachContact, Profile, RecordEntry } from "@/lib/database.types";
 
-import type { NewEntry, VerificationRequest } from "./types";
+import { DataError, type NewEntry, type VerificationRequest } from "./types";
 
 /**
  * The visibility model, in TypeScript.
@@ -33,6 +33,16 @@ export function canViewProfile(
   if (isStaff(viewer)) return true;
   if (target.suspended_at !== null) return false;
   return target.visibility === "public" || target.visibility === "unlisted";
+}
+
+/**
+ * The position filter from `search_athletes` (0018): any of the athlete's
+ * positions, case-insensitively — athletes type "WR", recruiters "wr".
+ */
+export function holdsPosition(positions: readonly string[], wanted: string | null | undefined): boolean {
+  const w = wanted?.trim().toLowerCase();
+  if (!w) return true;
+  return positions.some((p) => p.trim().toLowerCase() === w);
 }
 
 /** The discovery rule from `search_athletes`: public athletes only. */
@@ -183,4 +193,92 @@ export function isSubstantiveEntryChange(
   return SUBSTANTIVE_ENTRY_FIELDS.some(
     (field) => field in patch && patch[field] !== undefined && norm(patch[field]) !== norm(current[field]),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Accounts
+// ---------------------------------------------------------------------------
+
+/** How long a password reset link works. The email copy says "within an hour". */
+export const PASSWORD_RESET_TTL_MINUTES = 60;
+
+/**
+ * Whether the session came from a password-recovery link, recently. The
+ * `amr` claim records how the session was established and survives token
+ * refreshes, so the timestamp bounds how long "I clicked the reset link"
+ * stands in for the old password — the same hour a local reset link lives.
+ */
+export function isRecentRecovery(amr: unknown, nowS = Date.now() / 1000): boolean {
+  if (!Array.isArray(amr)) return false;
+  return amr.some(
+    (entry) =>
+      typeof entry === "object" &&
+      entry !== null &&
+      (entry as { method?: unknown }).method === "recovery" &&
+      typeof (entry as { timestamp?: unknown }).timestamp === "number" &&
+      nowS - (entry as { timestamp: number }).timestamp <= PASSWORD_RESET_TTL_MINUTES * 60,
+  );
+}
+
+/** What a duplicate sign-up hears, in both modes — never "already registered". */
+export const SIGN_UP_CONFLICT_COPY =
+  "We couldn't create an account with that email. If it's yours, sign in or reset your password.";
+
+/** Wrong current password on a change, in both modes. The e2e run asserts "did not match". */
+export const CURRENT_PASSWORD_MISMATCH = "Your current password did not match.";
+
+/** The shape of a Supabase AuthError that matters here; nothing else is read. */
+export type AuthErrorLike = { code?: string | null; status?: number | null; message?: string | null };
+
+function isRateLimit(error: AuthErrorLike): boolean {
+  return error.status === 429 || /^over_.*_limit$/.test(error.code ?? "") || /rate limit/i.test(error.message ?? "");
+}
+
+/**
+ * A Supabase sign-up refusal as copy safe to show a stranger (#33). The raw
+ * message ("User already registered") is never passed through: it confirms
+ * which emails have accounts.
+ */
+export function signUpError(error: AuthErrorLike): DataError {
+  if (isRateLimit(error)) {
+    return new DataError("rate_limited", "Too many attempts. Wait a minute and try again.");
+  }
+  if (
+    error.code === "user_already_exists" ||
+    error.code === "email_exists" ||
+    error.status === 409 ||
+    /already (been )?registered|already exists/i.test(error.message ?? "")
+  ) {
+    return new DataError("conflict", SIGN_UP_CONFLICT_COPY);
+  }
+  if (
+    error.code === "weak_password" ||
+    error.code === "validation_failed" ||
+    error.code === "email_address_invalid" ||
+    error.status === 400 ||
+    error.status === 422
+  ) {
+    return new DataError("invalid", "Check the email address, and use a password of at least 8 characters that is hard to guess.");
+  }
+  return new DataError("unavailable", "Could not create your account. Try again.");
+}
+
+/** The same mapping for a change of sign-in email: an address in use is not confirmed either. */
+export function emailChangeError(error: AuthErrorLike): DataError {
+  if (isRateLimit(error)) return new DataError("rate_limited", "Too many attempts. Wait a minute and try again.");
+  if (error.code === "email_exists" || error.code === "user_already_exists" || error.status === 409 || /already/i.test(error.message ?? "")) {
+    return new DataError("conflict", "That email can't be used. Try another.");
+  }
+  if (error.code === "same_email") return new DataError("invalid", "That's already your sign-in email.");
+  return new DataError("invalid", "Check the email address and try again.");
+}
+
+/** The same for a new password Supabase refuses (too weak, reused). */
+export function newPasswordError(error: AuthErrorLike): DataError {
+  if (isRateLimit(error)) return new DataError("rate_limited", "Too many attempts. Wait a minute and try again.");
+  if (error.code === "same_password") return new DataError("invalid", "Choose a password you haven't used here before.");
+  if (error.code === "weak_password" || error.status === 422) {
+    return new DataError("invalid", "Choose a stronger password — at least 8 characters, hard to guess.");
+  }
+  return new DataError("unavailable", "Could not update your password. Try again.");
 }

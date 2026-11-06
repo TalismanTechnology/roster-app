@@ -1,11 +1,11 @@
 import type { Profile } from "@/lib/database.types";
 
-import { isListed } from "../rules";
+import { holdsPosition, isListed } from "../rules";
 import { allowsFuzzy, clampPage, clampPageSize, normalizeSearchQuery } from "../search-query";
 import type { SearchParams, SearchResult } from "../types";
 
 /**
- * Mirror of `search_athletes()` in migration 0007: the listing rule, the
+ * Mirror of `search_athletes()` (0007, revised in 0018): the listing rule, the
  * filters, a name match that tolerates misspelling, and verified-first
  * ranking — in one pass.
  *
@@ -24,6 +24,7 @@ export function searchProfiles(profiles: Profile[], params: SearchParams): Searc
     if (params.level && p.level !== params.level) return false;
     if (params.gradYear && p.grad_year !== params.gradYear) return false;
     if (params.region && p.region !== params.region.toUpperCase()) return false;
+    if (!holdsPosition(p.positions, params.position)) return false;
     if (params.verifiedOnly && p.verified_count <= 0) return false;
     if (qLower === "") return true;
 

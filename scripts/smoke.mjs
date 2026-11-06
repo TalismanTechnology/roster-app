@@ -386,6 +386,12 @@ await step("a recruiter manages lists: create, save from search, open, remove", 
   await shot("list");
   await page.getByRole("button", { name: /^remove$/i }).first().click();
   await page.getByText("Nobody here yet").waitFor({ timeout: 15_000 });
+
+  // Rename in place; the heading follows.
+  await page.locator("summary", { hasText: "Rename list" }).click();
+  await page.locator('input[name="name"]').fill(`${listName} renamed`);
+  await page.getByRole("button", { name: /save name/i }).click();
+  await page.getByRole("heading", { name: `${listName} renamed` }).waitFor({ timeout: 15_000 });
 });
 
 await step("settings: wrong current password is refused, sign out works", async () => {
@@ -484,6 +490,77 @@ await step("changing the password signs out every other session", async () => {
     await other.close();
     await mine.close();
   }
+});
+
+await step("forgot password: one answer for any email; the emailed link resets once", async () => {
+  const email = `smoke-${stamp}@roster.local`;
+  await context.clearCookies();
+  await page.goto(`${base}/sign-in`, { waitUntil: "networkidle" });
+  await page.getByRole("link", { name: /forgot password/i }).click();
+  await page.waitForURL(/\/forgot-password$/, { timeout: 15_000 });
+
+  // The answer must not depend on whether the account exists.
+  const answerFor = async (address) => {
+    await page.goto(`${base}/forgot-password`, { waitUntil: "networkidle" });
+    await page.getByLabel("Email").fill(address);
+    await page.getByRole("button", { name: /send reset link/i }).click();
+    const status = page.locator('[role="status"]').filter({ hasText: "Check your email." });
+    await status.waitFor({ timeout: 15_000 });
+    return ((await status.textContent()) ?? "").replace(address, "<email>");
+  };
+  const unknown = await answerFor(`nobody-${stamp}@roster.local`);
+  const known = await answerFor(email);
+  if (unknown !== known) throw new Error(`reset answer differs for an unknown email: "${unknown}" vs "${known}"`);
+
+  const messages = outbox();
+  if (!messages) return; // --base= run: no outbox to read
+  if (messages.some((m) => m.tag === "password_reset" && m.to === `nobody-${stamp}@roster.local`)) {
+    throw new Error("a reset email went to an address with no account");
+  }
+  const mail = messages.filter((m) => m.tag === "password_reset" && m.to === email).at(-1);
+  const link = mail?.text.match(/https?:\/\/\S+\/reset-password\?token=\S+/)?.[0];
+  if (!link) throw new Error(`no reset link emailed to ${email}`);
+  const resetPath = `${new URL(link).pathname}${new URL(link).search}`;
+
+  const reset = await fetch(`${base}${resetPath}`);
+  if (reset.headers.get("referrer-policy") !== "no-referrer") throw new Error("reset page leaks its token in a Referer");
+
+  await page.goto(`${base}${resetPath}`, { waitUntil: "networkidle" });
+  await page.locator('input[name="password"]').fill("password789");
+  await page.locator('input[name="confirm"]').fill("password789");
+  await page.getByRole("button", { name: /set new password/i }).click();
+  await page.waitForURL(/\/settings\?password=reset$/, { timeout: 15_000 });
+  await expectText("Password reset");
+
+  // Single use.
+  await page.locator("main").getByRole("button", { name: /sign out/i }).click();
+  await page.waitForURL(/\/$/, { timeout: 15_000 });
+  await page.goto(`${base}${resetPath}`, { waitUntil: "networkidle" });
+  await expectText("Link expired.");
+
+  // The old password is gone; the new one works.
+  await page.goto(`${base}/sign-in`, { waitUntil: "networkidle" });
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill("password456");
+  await page.getByRole("button", { name: /sign in/i }).click();
+  await expectText("did not work");
+  await page.getByLabel("Password").fill("password789");
+  await page.getByRole("button", { name: /sign in/i }).click();
+  await page.waitForURL(/\/resume$/, { timeout: 15_000 });
+});
+
+await step("deleting the account removes it and signs out", async () => {
+  await page.goto(`${base}/settings`, { waitUntil: "networkidle" });
+  await page.locator('input[name="confirm_handle"]').fill(`smoke_${stamp}`);
+  await page.getByRole("button", { name: /delete my account/i }).click();
+  await page.waitForURL(/\/$/, { timeout: 15_000 });
+  const gone = await page.goto(`${base}/smoke_${stamp}`, { waitUntil: "networkidle" });
+  if (gone.status() !== 404) throw new Error(`deleted resume still serves ${gone.status()}`);
+  await page.goto(`${base}/sign-in`, { waitUntil: "networkidle" });
+  await page.getByLabel("Email").fill(`smoke-${stamp}@roster.local`);
+  await page.getByLabel("Password").fill("password789");
+  await page.getByRole("button", { name: /sign in/i }).click();
+  await expectText("did not work");
 });
 
 await step("no Content-Security-Policy violations on any page visited", async () => {

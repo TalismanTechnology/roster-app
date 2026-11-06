@@ -4,9 +4,10 @@ import { safeNext } from "@/lib/safe-next";
 import { createClient } from "@/lib/supabase/server";
 
 /**
- * Lands the email-confirmation (and any future OAuth) redirect. Supabase puts
- * a one-time code in the query string; exchanging it here sets the session
- * cookies, and the user continues to onboarding.
+ * Lands every link Supabase mails — sign-up confirmation, email change, and
+ * password recovery (next=/reset-password) — and any future OAuth redirect.
+ * Supabase puts a one-time code in the query string; exchanging it here sets
+ * the session cookies, and the user continues to `next`.
  */
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = request.nextUrl;
@@ -25,5 +26,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.redirect(`${origin}/sign-in?error=confirmation`);
+  // A dead recovery link says so, rather than talking about confirmation.
+  const reason = next.startsWith("/reset-password") ? "reset" : "confirmation";
+  return NextResponse.redirect(`${origin}/sign-in?error=${reason}`);
 }

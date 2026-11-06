@@ -90,6 +90,9 @@ declare
   j         jsonb;
   req_a     uuid;
   req_b     uuid;
+  clip_a    uuid;
+  clip_b    uuid;
+  rl        uuid;
 begin
   set local role authenticated;
 
@@ -765,5 +768,89 @@ begin
   select count(*) into n from verification_requests where profile_id = ava;
   assert n = 10, '43: the daily cap holds at 10 requests, got ' || n;
 
-  raise notice 'ALL 43 CHECKS PASSED';
+  -- 44. feature_film swaps the featured clip in one call -------------------
+  set local role authenticated;
+  perform become(ava);
+  insert into film_clips (profile_id, title, url)
+  values (ava, 'Relay leg', 'https://youtu.be/aqz-KE-bpKQ')
+  returning id into clip_a;
+  insert into film_clips (profile_id, title, url)
+  values (ava, 'Hurdles', 'https://vimeo.com/76979872')
+  returning id into clip_b;
+
+  perform feature_film(clip_a);
+  select count(*) into n from film_clips where profile_id = ava and is_featured;
+  assert n = 1, '44a: exactly one featured clip after feature_film, got ' || n;
+  select count(*) into n from film_clips where id = clip_a and is_featured;
+  assert n = 1, '44b: the requested clip is the featured one';
+  perform feature_film(clip_b);
+  select count(*) into n from film_clips where id = clip_b and is_featured;
+  assert n = 1, '44c: featuring again moves the mark';
+  select count(*) into n from film_clips where profile_id = ava and is_featured;
+  assert n = 1, '44d: still exactly one featured clip, got ' || n;
+
+  perform become(stranger);
+  begin
+    perform feature_film(clip_a);
+    assert false, '44e: a stranger must not feature someone else''s clip';
+  exception when sqlstate 'RS404' then
+    null;  -- expected: not-found, never "forbidden"
+  end;
+
+  set local role anon;
+  perform become_anon();
+  begin
+    perform feature_film(clip_a);
+    assert false, '44f: anon must not be able to call feature_film';
+  exception when insufficient_privilege then
+    null;  -- expected
+  end;
+
+  -- 45. youtube thumbnails are derived on write -----------------------------
+  set local role postgres;
+  select thumbnail_url into txt from film_clips where id = clip_a;
+  assert txt = 'https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg',
+    '45a: youtube thumbnail should be derived, got ' || coalesce(txt, 'null');
+  select thumbnail_url into txt from film_clips where id = clip_b;
+  assert txt is null, '45b: non-youtube clips have no derived thumbnail';
+
+  -- 46. search escapes LIKE metacharacters and matches positions loosely ----
+  update profiles set display_name = 'Stran_ger 100%' where id = stranger;
+  set local role anon;
+  perform become_anon();
+  select count(*) into n from search_athletes(q => '%');
+  assert n = 1, '46a: a bare % matches only a literal percent sign, got ' || n;
+  select count(*) into n from search_athletes(q => 'n_g');
+  assert n = 1, '46b: _ is literal, so n_g matches Stran_ger only, got ' || n;
+  select count(*) into n from search_athletes(q => 'r_y');
+  assert n = 0, '46c: _ must not act as a wildcard (r_y would match Reyes), got ' || n;
+  select count(*) into n from search_athletes(athlete_positions => array['GUARD']);
+  assert n = 1, '46d: positions match case-insensitively, got ' || n;
+  select count(*) into n from search_athletes(athlete_positions => array['center']);
+  assert n = 0, '46e: an unheld position matches nobody, got ' || n;
+  set local role postgres;
+  update profiles set display_name = 'Stranger' where id = stranger;
+
+  -- 47. recruiter lists are the owner's alone -------------------------------
+  set local role authenticated;
+  perform become(coach);
+  insert into recruiter_lists (owner_id, name) values (coach, 'Sprinters')
+  returning id into rl;
+  insert into recruiter_list_members (list_id, profile_id) values (rl, ava);
+  select count(*) into n from recruiter_list_members where list_id = rl;
+  assert n = 1, '47a: the owner sees their list members, got ' || n;
+  begin
+    insert into recruiter_list_members (list_id, profile_id) values (rl, ben);
+    assert false, '47b: a private resume must not be saved to a list';
+  exception when insufficient_privilege then
+    null;  -- expected: RLS with-check refuses
+  end;
+
+  perform become(stranger);
+  select count(*) into n from recruiter_lists where id = rl;
+  assert n = 0, '47c: another member must not see the list';
+  select count(*) into n from recruiter_list_members where list_id = rl;
+  assert n = 0, '47d: another member must not see the list''s members';
+
+  raise notice 'ALL 47 CHECKS PASSED';
 end $$;

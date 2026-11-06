@@ -19,7 +19,8 @@ export const metadata: Metadata = {
  * The account, as distinct from the resume: sign-in email, password,
  * visibility (a shortcut to the editor's section), and the door out.
  */
-export default async function SettingsPage() {
+export default async function SettingsPage({ searchParams }: PageProps<"/settings">) {
+  const { password } = await searchParams;
   const user = await getCurrentUser();
   if (!user) redirect("/sign-in?next=/settings");
 
@@ -49,6 +50,11 @@ export default async function SettingsPage() {
               </>
             )}
           </p>
+          {password === "reset" && (
+            <p role="status" className="label mt-4 border-t border-rule pt-4 text-ink">
+              [ Password reset ] You&apos;re signed in with your new password. Other devices were signed out.
+            </p>
+          )}
         </header>
 
         <div className="flex flex-col gap-12">

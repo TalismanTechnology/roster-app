@@ -60,6 +60,28 @@ export async function createList(_prev: ListFormState, formData: FormData): Prom
   return IDLE;
 }
 
+export async function renameList(_prev: ListFormState, formData: FormData): Promise<ListFormState> {
+  const { repo, user } = await requireUser();
+  const id = idSchema.safeParse(str(formData, "list_id"));
+  const name = nameSchema.safeParse(str(formData, "name"));
+  const values = formValues(formData);
+  if (!id.success) return { ok: false, error: "That list was not found." };
+  if (!name.success) {
+    const fieldErrors = { name: name.error.issues.map((i) => i.message) };
+    return { ok: false, error: fieldErrors.name[0], values, fieldErrors };
+  }
+
+  try {
+    await repo.renameList(user.id, id.data, name.data);
+  } catch (error) {
+    return failed(error, "Could not rename the list.", values);
+  }
+
+  refresh();
+  revalidatePath(`/lists/${id.data}`);
+  return IDLE;
+}
+
 export async function deleteList(formData: FormData): Promise<void> {
   const { repo, user } = await requireUser();
   const id = idSchema.safeParse(str(formData, "list_id"));

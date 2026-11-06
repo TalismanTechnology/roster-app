@@ -4,20 +4,30 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { CoachContact, Database, FilmClip, Profile, RecordEntry } from "@/lib/database.types";
 import { HANDLE_PATTERN, isReservedHandle } from "@/lib/handles";
+import { absoluteUrl } from "@/lib/site";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 import type { Repository } from "../repository";
 import {
+  CURRENT_PASSWORD_MISMATCH,
   DAILY_REQUEST_CAP,
+  emailChangeError,
+  isRecentRecovery,
   isSubstantiveEntryChange,
   MAX_PINNED,
+  newPasswordError,
   REQUEST_TTL_DAYS,
+  signUpError,
   SUBSTANTIVE_ENTRY_FIELDS,
 } from "../rules";
 import { generateToken, hashToken } from "../tokens";
-import { clampPage, clampPageSize, escapeLike, normalizeSearchQuery } from "../search-query";
+import { clampPage, clampPageSize, normalizeSearchQuery } from "../search-query";
 import {
   DataError,
   type AuthUser,
+  type EmailChangeResult,
+  type IssuedPasswordReset,
+  type ListedAthlete,
   type NewCoach,
   type NewEntry,
   type NewFilm,
@@ -55,6 +65,18 @@ function requireAffected(
   if (result.error) throw new DataError("unavailable", `Could not save the ${noun}. Try again.`);
   if (result.count === 0) throw new DataError("not_found", `That ${noun} was not found.`);
 }
+
+/** A recruiter_lists row with its member count embedded (PostgREST aggregate). */
+type ListRow = Omit<RecruiterList, "member_count"> & { recruiter_list_members: { count: number }[] };
+
+const LIST_COLUMNS = "id,owner_id,name,note,created_at,updated_at,recruiter_list_members(count)";
+
+function toList(row: ListRow): RecruiterList {
+  const { recruiter_list_members: members, ...list } = row;
+  return { ...list, member_count: members[0]?.count ?? 0 };
+}
+
+const LIST_CONFLICT = "You already have a list with that name.";
 
 /** Every readable column of verification_requests — `select *` is refused (0017). */
 const REQUEST_COLUMNS =
@@ -96,7 +118,9 @@ function requestError(error: { code?: string; message: string }, fallback: strin
  *
  * Status: compiles against the hand-written types; NOT exercised against a
  * live project during the local-mode build. The by-link verification flow
- * runs on the 0017 functions; supabase/tests covers them against Postgres.
+ * runs on the 0017 functions, featured film and search on 0018;
+ * supabase/tests covers them against Postgres. Account deletion needs
+ * SUPABASE_SERVICE_ROLE_KEY (see supabase/admin.ts).
  */
 export class SupabaseRepository implements Repository {
   constructor(private readonly client: Client) {}
@@ -105,7 +129,12 @@ export class SupabaseRepository implements Repository {
 
   async signUp(email: string, password: string): Promise<AuthUser> {
     const { data, error } = await this.client.auth.signUp({ email, password });
-    if (error || !data.user) throw new DataError("conflict", error?.message ?? "Could not create the account.");
+    // Mapped, never passed through: the raw text says which emails exist.
+    if (error) throw signUpError(error);
+    if (!data.user) throw new DataError("unavailable", "Could not create your account. Try again.");
+    // With confirmation on, a taken email comes back as a user with no
+    // identities and no session — Supabase's own non-enumerating answer.
+    // It reads as "check your email" here too, which is the point.
     return { id: data.user.id, email: data.user.email ?? email };
   }
 
@@ -120,20 +149,91 @@ export class SupabaseRepository implements Repository {
     return data.user ? { id: data.user.id, email: data.user.email ?? "" } : null;
   }
 
-  async updateEmail(_userId: string, email: string): Promise<void> {
-    const { error } = await this.client.auth.updateUser({ email });
-    if (error) throw new DataError("invalid", error.message);
+  async updateEmail(_userId: string, email: string): Promise<EmailChangeResult> {
+    // The confirmation link lands back in Settings through the callback.
+    const { data, error } = await this.client.auth.updateUser(
+      { email },
+      { emailRedirectTo: absoluteUrl("/auth/callback?next=/settings") },
+    );
+    if (error) throw emailChangeError(error);
+    // Until the new address clicks its link, `email` is still the old one
+    // and `new_email` holds the request. A project with confirmation off
+    // swaps immediately.
+    return data.user?.email?.toLowerCase() === email.trim().toLowerCase() ? "updated" : "pending";
   }
 
-  async updatePassword(_userId: string, _current: string, next: string): Promise<void> {
+  async updatePassword(_userId: string, current: string, next: string): Promise<void> {
+    // #28: a session alone is not enough to change the password — a borrowed
+    // laptop would be. Re-authenticate with the current one first. A success
+    // replaces this device's session with a fresh one for the same user.
+    const { data: me } = await this.client.auth.getUser();
+    if (!me.user?.email) throw new DataError("forbidden", "Sign in to do that.");
+    const check = await this.client.auth.signInWithPassword({ email: me.user.email, password: current });
+    if (check.error || check.data.user?.id !== me.user.id) {
+      if (check.error?.status === 429) throw newPasswordError(check.error);
+      throw new DataError("forbidden", CURRENT_PASSWORD_MISMATCH);
+    }
+
     const { error } = await this.client.auth.updateUser({ password: next });
-    if (error) throw new DataError("invalid", error.message);
+    if (error) throw newPasswordError(error);
     // Revoke every other device's refresh token; this one stays signed in.
     await this.client.auth.signOut({ scope: "others" });
   }
 
-  async deleteAccount(): Promise<void> {
-    throw new DataError("unavailable", "Account deletion needs the service role; not wired yet.");
+  async requestPasswordReset(email: string, redirectTo: string): Promise<IssuedPasswordReset | null> {
+    // Supabase mails the link itself. Its answer is the same for known and
+    // unknown addresses; a rate limit is the one refusal worth surfacing.
+    const { error } = await this.client.auth.resetPasswordForEmail(email.trim().toLowerCase(), { redirectTo });
+    if (error && error.status === 429) {
+      throw new DataError("rate_limited", "Too many reset requests. Wait a few minutes and try again.");
+    }
+    if (error) console.error(`[auth] resetPasswordForEmail failed (${error.status ?? "?"}): ${error.code ?? ""}`);
+    return null;
+  }
+
+  async canResetPassword(): Promise<boolean> {
+    // The link's code was exchanged in /auth/callback; what remains is a
+    // session whose verified claims say it came from recovery.
+    const { data, error } = await this.client.auth.getClaims();
+    if (error || !data) return false;
+    return isRecentRecovery(data.claims.amr);
+  }
+
+  async resetPassword(_token: string | null, next: string): Promise<AuthUser> {
+    if (!(await this.canResetPassword())) {
+      throw new DataError("forbidden", "This reset link has expired or was already used. Request a new one.");
+    }
+    const { data, error } = await this.client.auth.updateUser({ password: next });
+    if (error || !data.user) throw newPasswordError(error ?? {});
+    const user = { id: data.user.id, email: data.user.email ?? "" };
+
+    // Every other session goes. This one is swapped for a password session,
+    // so the recovery session cannot be used for a second reset.
+    await this.client.auth.signOut({ scope: "others" });
+    if (user.email) await this.client.auth.signInWithPassword({ email: user.email, password: next });
+    return user;
+  }
+
+  async deleteAccount(userId: string): Promise<void> {
+    // The admin client acts for nobody, so confirm with the user's own
+    // session that the account being deleted is the one signed in.
+    const { data } = await this.client.auth.getUser();
+    if (!data.user || data.user.id !== userId) throw new DataError("forbidden", "Sign in to do that.");
+
+    const admin = createAdminClient();
+    if (!admin) {
+      throw new DataError(
+        "unavailable",
+        "Account deletion isn't available on this server right now. Email support and we'll remove it for you.",
+      );
+    }
+    // auth.users → profiles cascades (0002), and from profiles to everything
+    // the account owns: entries, film, references, requests, lists.
+    const { error } = await admin.auth.admin.deleteUser(userId);
+    if (error) {
+      console.error(`[auth] deleteUser failed (${error.status ?? "?"}): ${error.code ?? error.message}`);
+      throw new DataError("unavailable", "Could not delete the account. Try again.");
+    }
   }
 
   // --- profiles -----------------------------------------------------------
@@ -188,9 +288,20 @@ export class SupabaseRepository implements Repository {
   }
 
   async addEntry(profileId: string, input: NewEntry): Promise<RecordEntry> {
+    // Same default as the local adapter: an entry with no sport of its own
+    // belongs to the athlete's primary sport, not to none.
+    let sport = input.sport ?? null;
+    if (!sport) {
+      const { data: profile } = await this.client
+        .from("profiles")
+        .select("primary_sport")
+        .eq("id", profileId)
+        .maybeSingle<Pick<Profile, "primary_sport">>();
+      sport = profile?.primary_sport ?? null;
+    }
     const { data, error } = await this.client
       .from("achievements")
-      .insert({ profile_id: profileId, ...input })
+      .insert({ profile_id: profileId, ...input, sport })
       .select("id")
       .single();
     if (error || !data) {
@@ -279,6 +390,8 @@ export class SupabaseRepository implements Repository {
   }
 
   async addFilm(profileId: string, input: NewFilm): Promise<FilmClip> {
+    // provider, external_id, and thumbnail_url are derived by the
+    // parse_film_url trigger (0018), as the local adapter derives them.
     const { data, error } = await this.client
       .from("film_clips")
       .insert({ profile_id: profileId, ...input })
@@ -295,11 +408,15 @@ export class SupabaseRepository implements Repository {
     );
   }
 
-  async featureFilm(profileId: string, clipId: string): Promise<void> {
-    // Unset-then-set. The partial unique index in 0004 guarantees at most one
-    // featured clip survives even if two of these race.
-    await this.client.from("film_clips").update({ is_featured: false }).eq("profile_id", profileId).eq("is_featured", true);
-    await this.client.from("film_clips").update({ is_featured: true }).eq("id", clipId).eq("profile_id", profileId);
+  async featureFilm(_profileId: string, clipId: string): Promise<void> {
+    // One transaction (0018): the old two-UPDATE version could leave the
+    // athlete with nothing featured if the second write failed. The function
+    // checks ownership against the JWT, not the id passed in.
+    const { error } = await this.client.rpc("feature_film", { clip: clipId });
+    if (!error) return;
+    if (error.code === "RS404") throw new DataError("not_found", "That clip was not found.");
+    if (error.code === "RS403") throw new DataError("forbidden", "Sign in to do that.");
+    throw new DataError("unavailable", "Could not feature the clip. Try again.");
   }
 
   // --- references (RLS strips rows the viewer may not see) ----------------
@@ -452,15 +569,16 @@ export class SupabaseRepository implements Repository {
   async searchAthletes(params: SearchParams): Promise<SearchResult> {
     const pageSize = clampPageSize(params.pageSize);
     const q = normalizeSearchQuery(params.q);
+    const position = params.position?.trim();
     const args = {
-      // The function interpolates q into ILIKE '%' || q || '%', so % and _
-      // in a name typed by a stranger must match literally.
-      q: q ? escapeLike(q) : null,
+      // Raw: search_athletes escapes % and _ itself (0018) and needs the
+      // unescaped text for its similarity ranking.
+      q,
       sport: params.sport ?? null,
       levels: params.level ? [params.level] : null,
       grad_years: params.gradYear ? [params.gradYear] : null,
       regions: params.region ? [params.region.toUpperCase()] : null,
-      athlete_positions: null,
+      athlete_positions: position ? [position] : null,
       verified_only: params.verifiedOnly ?? false,
     };
     const fetchPage = (page: number) =>
@@ -483,38 +601,150 @@ export class SupabaseRepository implements Repository {
   }
 
   // --- recruiter lists ----------------------------------------------------
-  // The tables exist (0005) but are not in database.types.ts yet; wire once
-  // `npm run db:types` can run against the linked project.
+  // RLS (0006) is the authorization: every row is the owner's or invisible,
+  // and a member insert re-checks can_view_profile(). The owner filters here
+  // make a stale id fail as not-found instead of silently matching nothing.
 
-  async listLists(): Promise<RecruiterList[]> {
-    return [];
+  async listLists(ownerId: string): Promise<RecruiterList[]> {
+    const { data, error } = await this.client
+      .from("recruiter_lists")
+      .select(LIST_COLUMNS)
+      .eq("owner_id", ownerId)
+      .order("updated_at", { ascending: false })
+      .returns<ListRow[]>();
+    if (error) throw new DataError("unavailable", "Could not load your lists. Try again.");
+    return (data ?? []).map(toList);
   }
 
-  async getList(): Promise<RecruiterListDetail | null> {
-    return null;
+  async getList(ownerId: string, listId: string): Promise<RecruiterListDetail | null> {
+    const { data: row, error } = await this.client
+      .from("recruiter_lists")
+      .select(LIST_COLUMNS)
+      .eq("id", listId)
+      .eq("owner_id", ownerId)
+      .maybeSingle<ListRow>();
+    if (error) throw new DataError("unavailable", "Could not load the list. Try again.");
+    if (!row) return null;
+
+    const { data: rows, error: membersError } = await this.client
+      .from("recruiter_list_members")
+      .select("note,added_at,profile:profiles(*)")
+      .eq("list_id", listId)
+      .order("added_at", { ascending: false })
+      .returns<{ note: string | null; added_at: string; profile: Profile | null }[]>();
+    if (membersError) throw new DataError("unavailable", "Could not load the list. Try again.");
+
+    // A resume that went private since it was saved embeds as null under
+    // RLS and drops out, exactly as the local adapter filters it.
+    const members: ListedAthlete[] = (rows ?? []).flatMap((m) =>
+      m.profile ? [{ ...m.profile, list_note: m.note, added_at: m.added_at }] : [],
+    );
+    return { list: toList(row), members };
   }
 
-  async createList(): Promise<RecruiterList> {
-    throw new DataError("unavailable", "Lists are not wired to Supabase yet.");
+  async createList(ownerId: string, name: string, note: string | null): Promise<RecruiterList> {
+    const { data, error } = await this.client
+      .from("recruiter_lists")
+      .insert({ owner_id: ownerId, name, note })
+      .select("id,owner_id,name,note,created_at,updated_at")
+      .single<Omit<RecruiterList, "member_count">>();
+    if (error) {
+      if (error.code === "23505") throw new DataError("conflict", LIST_CONFLICT);
+      throw new DataError("unavailable", "Could not create the list. Try again.");
+    }
+    return { ...data, member_count: 0 };
   }
 
-  async deleteList(): Promise<void> {
-    throw new DataError("unavailable", "Lists are not wired to Supabase yet.");
+  async renameList(ownerId: string, listId: string, name: string): Promise<RecruiterList> {
+    const { data, error } = await this.client
+      .from("recruiter_lists")
+      .update({ name })
+      .eq("id", listId)
+      .eq("owner_id", ownerId)
+      .select(LIST_COLUMNS)
+      .maybeSingle<ListRow>();
+    if (error) {
+      if (error.code === "23505") throw new DataError("conflict", LIST_CONFLICT);
+      throw new DataError("unavailable", "Could not rename the list. Try again.");
+    }
+    if (!data) throw new DataError("not_found", "List not found.");
+    return toList(data);
   }
 
-  async addToList(): Promise<void> {
-    throw new DataError("unavailable", "Lists are not wired to Supabase yet.");
+  async deleteList(ownerId: string, listId: string): Promise<void> {
+    // Members go with it: list_id cascades (0005).
+    const result = await this.client
+      .from("recruiter_lists")
+      .delete({ count: "exact" })
+      .eq("id", listId)
+      .eq("owner_id", ownerId);
+    if (result.error) throw new DataError("unavailable", "Could not delete the list. Try again.");
+    if (result.count === 0) throw new DataError("not_found", "List not found.");
   }
 
-  async removeFromList(): Promise<void> {
-    throw new DataError("unavailable", "Lists are not wired to Supabase yet.");
+  async addToList(ownerId: string, listId: string, profileId: string, note: string | null): Promise<void> {
+    await this.requireList(ownerId, listId);
+    // ON CONFLICT DO NOTHING: saving someone twice is a no-op, as locally.
+    const { error } = await this.client
+      .from("recruiter_list_members")
+      .upsert({ list_id: listId, profile_id: profileId, note }, { onConflict: "list_id,profile_id", ignoreDuplicates: true });
+    if (error) {
+      // 42501: the with-check's can_view_profile() refused; 23503: no such profile.
+      if (error.code === "42501" || error.code === "23503") {
+        throw new DataError("not_found", "That athlete's resume is not available.");
+      }
+      throw new DataError("unavailable", "Could not save to the list. Try again.");
+    }
+    await this.touchList(listId);
   }
 
-  async listsContaining(): Promise<string[]> {
-    return [];
+  async removeFromList(ownerId: string, listId: string, profileId: string): Promise<void> {
+    await this.requireList(ownerId, listId);
+    const { error } = await this.client
+      .from("recruiter_list_members")
+      .delete()
+      .eq("list_id", listId)
+      .eq("profile_id", profileId);
+    if (error) throw new DataError("unavailable", "Could not update the list. Try again.");
+    await this.touchList(listId);
   }
 
-  async listsContainingMany(_ownerId: string, profileIds: string[]): Promise<Record<string, string[]>> {
-    return Object.fromEntries(profileIds.map((id) => [id, []]));
+  async listsContaining(ownerId: string, profileId: string): Promise<string[]> {
+    return (await this.listsContainingMany(ownerId, [profileId]))[profileId] ?? [];
+  }
+
+  async listsContainingMany(ownerId: string, profileIds: string[]): Promise<Record<string, string[]>> {
+    const out: Record<string, string[]> = Object.fromEntries(profileIds.map((id) => [id, []]));
+    if (profileIds.length === 0) return out;
+    // The inner join pins the owner explicitly; RLS would hide other
+    // owners' rows anyway.
+    const { data, error } = await this.client
+      .from("recruiter_list_members")
+      .select("list_id,profile_id,recruiter_lists!inner(owner_id)")
+      .eq("recruiter_lists.owner_id", ownerId)
+      .in("profile_id", profileIds)
+      .returns<{ list_id: string; profile_id: string }[]>();
+    // A decoration on search rows; a failed read shows "not saved" rather
+    // than taking the page down.
+    if (error) return out;
+    for (const m of data ?? []) out[m.profile_id]?.push(m.list_id);
+    return out;
+  }
+
+  /** The owner's list, or not-found — for writes that touch only member rows. */
+  private async requireList(ownerId: string, listId: string): Promise<void> {
+    const { data, error } = await this.client
+      .from("recruiter_lists")
+      .select("id")
+      .eq("id", listId)
+      .eq("owner_id", ownerId)
+      .maybeSingle();
+    if (error) throw new DataError("unavailable", "Could not update the list. Try again.");
+    if (!data) throw new DataError("not_found", "List not found.");
+  }
+
+  /** Bumps updated_at (the 0005 trigger sets it) so the list sorts as recently used. */
+  private async touchList(listId: string): Promise<void> {
+    await this.client.from("recruiter_lists").update({ updated_at: new Date().toISOString() }).eq("id", listId);
   }
 }
