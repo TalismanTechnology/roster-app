@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { AVATAR_EXTENSION, type AvatarType } from "@/lib/avatars";
 import type { CoachContact, Database, FilmClip, Profile, RecordEntry } from "@/lib/database.types";
 import { HANDLE_PATTERN, isReservedHandle } from "@/lib/handles";
 import { absoluteUrl } from "@/lib/site";
@@ -26,6 +27,7 @@ import {
   DataError,
   type AuthUser,
   type EmailChangeResult,
+  type IndexablePage,
   type IssuedPasswordReset,
   type ListedAthlete,
   type NewCoach,
@@ -75,6 +77,12 @@ function toList(row: ListRow): RecruiterList {
   const { recruiter_list_members: members, ...list } = row;
   return { ...list, member_count: members[0]?.count ?? 0 };
 }
+
+/** Supabase Storage bucket for avatars (0019). Objects live under `<profile id>/`. */
+const AVATAR_BUCKET = "avatars";
+
+/** PostgREST's default `max-rows`: a longer range comes back silently short. */
+const POSTGREST_MAX_ROWS = 1000;
 
 const LIST_CONFLICT = "You already have a list with that name.";
 
@@ -227,6 +235,9 @@ export class SupabaseRepository implements Repository {
         "Account deletion isn't available on this server right now. Email support and we'll remove it for you.",
       );
     }
+    // Storage is not part of the cascade: clear the avatar prefix first, as
+    // the user, while their session still satisfies the owner policy.
+    await this.removeAvatarObjects(userId).catch(() => undefined);
     // auth.users → profiles cascades (0002), and from profiles to everything
     // the account owns: entries, film, references, requests, lists.
     const { error } = await admin.auth.admin.deleteUser(userId);
@@ -272,6 +283,39 @@ export class SupabaseRepository implements Repository {
     const { data, error } = await this.client.from("profiles").update(patch).eq("id", id).select("*").single<Profile>();
     if (error) throw new DataError("invalid", "Could not save.");
     return data;
+  }
+
+  async setAvatar(profileId: string, bytes: Uint8Array, type: AvatarType): Promise<Profile> {
+    const storage = this.client.storage.from(AVATAR_BUCKET);
+    // A new name per upload: the public URL is cached hard (and by the image
+    // optimizer), so replacing an object in place would show the old face.
+    const objectPath = `${profileId}/avatar-${Date.now().toString(36)}.${AVATAR_EXTENSION[type]}`;
+    const { error } = await storage.upload(objectPath, bytes, {
+      contentType: type,
+      cacheControl: "31536000",
+      upsert: false,
+    });
+    // The owner-prefix policy (0019) refuses any path outside the caller's own folder.
+    if (error) throw new DataError("unavailable", "Could not upload the photo. Try again.");
+
+    const { data } = storage.getPublicUrl(objectPath);
+    const profile = await this.updateProfile(profileId, { avatar_url: data.publicUrl });
+    await this.removeAvatarObjects(profileId, objectPath).catch(() => undefined);
+    return profile;
+  }
+
+  async removeAvatar(profileId: string): Promise<Profile> {
+    const profile = await this.updateProfile(profileId, { avatar_url: null });
+    await this.removeAvatarObjects(profileId).catch(() => undefined);
+    return profile;
+  }
+
+  /** Deletes the profile's stored avatars, except `keep`. Best effort: an orphaned file is harmless. */
+  private async removeAvatarObjects(profileId: string, keep: string | null = null): Promise<void> {
+    const storage = this.client.storage.from(AVATAR_BUCKET);
+    const { data } = await storage.list(profileId, { limit: 100 });
+    const stale = (data ?? []).map((f) => `${profileId}/${f.name}`).filter((p) => p !== keep);
+    if (stale.length > 0) await storage.remove(stale);
   }
 
   // --- the record ---------------------------------------------------------
@@ -598,6 +642,37 @@ export class SupabaseRepository implements Repository {
     const { data, error } = page === requested ? first : await fetchPage(page);
     if (error) throw new DataError("unavailable", "Search is unavailable right now.");
     return { athletes: data ?? [], total, page, pageSize };
+  }
+
+  async listIndexableProfiles(offset: number, limit: number): Promise<IndexablePage> {
+    // The same rule as search_athletes' listing (and isListed()), as plain
+    // filters: profiles_select already hides everything but public and
+    // unlisted rows from anon, so this only narrows further.
+    const page = (from: number, to: number, count: boolean) =>
+      this.client
+        .from("profiles")
+        .select("handle,updated_at", count ? { count: "exact" } : undefined)
+        .eq("account_kind", "athlete")
+        .eq("visibility", "public")
+        .is("suspended_at", null)
+        .gt("entry_count", 0)
+        .order("handle", { ascending: true })
+        .range(from, to)
+        .returns<IndexablePage["profiles"]>();
+
+    const profiles: IndexablePage["profiles"] = [];
+    let total = 0;
+    // In chunks of PostgREST's row cap, so a sitemap shard larger than it
+    // still comes back whole.
+    for (let from = offset; from < offset + limit; from += POSTGREST_MAX_ROWS) {
+      const to = Math.min(from + POSTGREST_MAX_ROWS, offset + limit) - 1;
+      const { data, error, count } = await page(from, to, from === offset);
+      if (error) throw new DataError("unavailable", "Could not list profiles.");
+      if (from === offset) total = count ?? 0;
+      profiles.push(...(data ?? []));
+      if ((data?.length ?? 0) < to - from + 1) break;
+    }
+    return { profiles, total };
   }
 
   // --- recruiter lists ----------------------------------------------------

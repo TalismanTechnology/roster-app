@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 
 import { FinalCta } from "@/components/landing/FinalCta";
 import { ForCoaches } from "@/components/landing/ForCoaches";
@@ -9,8 +10,7 @@ import { Sports } from "@/components/landing/Sports";
 import { Ticker } from "@/components/landing/Ticker";
 import { Visibility } from "@/components/landing/Visibility";
 import { SiteFooter } from "@/components/shell/SiteFooter";
-import { SiteHeader } from "@/components/shell/SiteHeader";
-import { currentHeaderUser } from "@/components/shell/Site";
+import { currentHeaderUser, SiteHeaderIsland } from "@/components/shell/Site";
 
 export const metadata: Metadata = {
   alternates: { canonical: "/" },
@@ -22,12 +22,12 @@ export const metadata: Metadata = {
  * the coach search inside it are live reads from the repository, so the
  * page never promises a rendering the app can't produce.
  */
-export default async function HomePage() {
-  const user = await currentHeaderUser();
-
+export default function HomePage() {
+  // The visitor's account state is streamed into the two places it shows
+  // (the header and the closing CTA), so the landing never waits on it.
   return (
     <>
-      <SiteHeader user={user} variant="landing" />
+      <SiteHeaderIsland variant="landing" />
       <main>
         <Hero />
         <Ticker />
@@ -36,9 +36,15 @@ export default async function HomePage() {
         <Sports />
         <ForCoaches />
         <Visibility />
-        <FinalCta signedIn={user !== null} />
+        <Suspense fallback={<FinalCta signedIn={false} />}>
+          <FinalCtaForVisitor />
+        </Suspense>
       </main>
       <SiteFooter />
     </>
   );
+}
+
+async function FinalCtaForVisitor() {
+  return <FinalCta signedIn={(await currentHeaderUser()) !== null} />;
 }

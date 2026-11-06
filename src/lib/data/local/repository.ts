@@ -2,6 +2,7 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 
+import type { AvatarType } from "@/lib/avatars";
 import type { CoachContact, FilmClip, Profile, RecordEntry } from "@/lib/database.types";
 import { HANDLE_PATTERN, isReservedHandle } from "@/lib/handles";
 
@@ -10,6 +11,7 @@ import {
   DataError,
   type AuthUser,
   type EmailChangeResult,
+  type IndexablePage,
   type IssuedPasswordReset,
   type NewCoach,
   type NewEntry,
@@ -30,6 +32,7 @@ import {
   canPinAnother,
   canRespondToRequest,
   DAILY_REQUEST_CAP,
+  isListed,
   isLiveRequest,
   isOverDailyCap,
   REQUEST_TTL_DAYS,
@@ -42,6 +45,7 @@ import {
   SIGN_UP_CONFLICT_COPY,
   SUBSTANTIVE_ENTRY_FIELDS,
 } from "../rules";
+import { removeAvatars, writeAvatar } from "./avatars";
 import { filmThumbnailUrl, parseFilmUrl } from "./film";
 import { hashPassword, verifyPassword, verifyPasswordConstantTime } from "./password";
 import { generateToken, hashToken } from "../tokens";
@@ -198,6 +202,7 @@ export class LocalRepository implements Repository {
         (m) => !lists.has(m.list_id) && m.profile_id !== userId,
       );
     });
+    removeAvatars(userId);
   }
 
   // --- profiles -----------------------------------------------------------
@@ -254,6 +259,20 @@ export class LocalRepository implements Repository {
       Object.assign(profile, safe, { updated_at: now() });
       return profile;
     });
+  }
+
+  async setAvatar(profileId: string, bytes: Uint8Array, type: AvatarType): Promise<Profile> {
+    requireProfile(readDb(), profileId);
+    const url = writeAvatar(profileId, bytes, type);
+    const profile = await this.updateProfile(profileId, { avatar_url: url });
+    removeAvatars(profileId, url);
+    return profile;
+  }
+
+  async removeAvatar(profileId: string): Promise<Profile> {
+    const profile = await this.updateProfile(profileId, { avatar_url: null });
+    removeAvatars(profileId);
+    return profile;
   }
 
   // --- the record ---------------------------------------------------------
@@ -640,6 +659,16 @@ export class LocalRepository implements Repository {
 
   async searchAthletes(params: SearchParams): Promise<SearchResult> {
     return searchProfiles(readDb().profiles, params);
+  }
+
+  async listIndexableProfiles(offset: number, limit: number): Promise<IndexablePage> {
+    const all = readDb()
+      .profiles.filter((p) => isListed(p) && p.entry_count > 0)
+      .sort((a, b) => (a.handle < b.handle ? -1 : a.handle > b.handle ? 1 : 0));
+    return {
+      total: all.length,
+      profiles: all.slice(offset, offset + limit).map((p) => ({ handle: p.handle, updated_at: p.updated_at })),
+    };
   }
 
   // --- recruiter lists ----------------------------------------------------

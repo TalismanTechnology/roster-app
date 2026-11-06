@@ -53,6 +53,8 @@ type Props = {
   user: HeaderUser;
   /** `landing` floats transparent over the hero; `app` is a glass bar with a hairline. */
   variant?: "landing" | "app";
+  /** Streaming fallback: the account state is not known yet, so its controls hold their space blank. */
+  pending?: boolean;
 };
 
 /**
@@ -61,7 +63,7 @@ type Props = {
  * product; signed in it is the way back to your own resume. Below sm the
  * secondary links fold into a "[ Menu ]" disclosure under the bar.
  */
-export function SiteHeader({ user, variant = "app" }: Props) {
+export function SiteHeader({ user, variant = "app", pending = false }: Props) {
   const [isScrolled, setIsScrolled] = useState(false);
   // The phone menu remembers the path it was opened on, so any navigation
   // closes it without an effect writing state on every route change.
@@ -113,7 +115,12 @@ export function SiteHeader({ user, variant = "app" }: Props) {
             Find athletes
           </Link>
 
-          {user ? (
+          {pending ? (
+            // Roughly the signed-out pill's footprint, so nothing shifts when the real controls land.
+            <span aria-hidden className={`invisible inline-flex whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-bold sm:px-4 ${glass}`}>
+              Create<span className="max-sm:hidden"> your</span> resume
+            </span>
+          ) : user ? (
             <>
               {user.handle && (
                 <Link href="/lists" className="hidden rounded-full px-3.5 py-1.5 text-sm text-ink-muted transition-colors hover:text-ink sm:inline">
@@ -154,6 +161,7 @@ export function SiteHeader({ user, variant = "app" }: Props) {
 
           <button
             ref={menuButtonRef}
+            hidden={pending}
             type="button"
             aria-expanded={isMenuOpen}
             aria-controls="site-menu"

@@ -120,14 +120,7 @@ export function RecordList({ entries, isOwner }: { entries: RecordEntry[]; isOwn
                   {context && <> · {context}</>}
                 </p>
                 {e.detail && <p className="mt-2 max-w-2xl leading-normal">{e.detail}</p>}
-                {e.verification === "verified" && e.verified_by && (
-                  <p className="label mt-1.5 text-ink-muted">Verified by {e.verified_by}</p>
-                )}
-                {e.verification === "unverified" && (
-                  <p className="label mt-1.5 flex items-center gap-1.5 text-ink-subtle">
-                    <Unverified /> Self-reported
-                  </p>
-                )}
+                <Provenance entry={e} />
               </div>
 
               <div className="flex max-w-[45%] items-center justify-end gap-2.5 pt-0.5 text-right">
@@ -141,6 +134,78 @@ export function RecordList({ entries, isOwner }: { entries: RecordEntry[]; isOwn
         );
       })}
     </ol>
+  );
+}
+
+/**
+ * Where an entry's status came from (#71), in the words a recruiter needs.
+ * The chip says *what* the state is; this says who stood behind it and
+ * when, or — for the states short of verified — what the state means for
+ * how much weight the entry should carry.
+ */
+function Provenance({ entry }: { entry: RecordEntry }) {
+  switch (entry.verification) {
+    case "verified":
+      if (!entry.verified_by && !entry.verified_at) return null;
+      return (
+        <p className="label mt-1.5 text-ink-muted">
+          {entry.verified_by ? <>Verified by {entry.verified_by}</> : "Verified by a coach"}
+          {entry.verified_at && (
+            <>
+              {" · "}
+              <time dateTime={entry.verified_at} title={fullDate(entry.verified_at.slice(0, 10))}>
+                {fullDate(entry.verified_at.slice(0, 10))}
+              </time>
+            </>
+          )}
+        </p>
+      );
+    case "disputed":
+      return (
+        <p className="mt-1.5 max-w-2xl text-sm leading-snug text-ink-muted">
+          <span className="font-bold text-disputed">Disputed.</span> The coach asked to confirm this did not. Read it as
+          self-reported until it is corrected and confirmed — or ask the athlete about it.
+        </p>
+      );
+    case "submitted":
+      return <p className="label mt-1.5 text-ink-subtle">Sent to a coach to confirm · awaiting their answer</p>;
+    case "rejected":
+      return (
+        <p className="mt-1.5 max-w-2xl text-sm leading-snug text-ink-muted">
+          Reviewed and not substantiated. Treat it as an unsupported claim.
+        </p>
+      );
+    default:
+      return (
+        <p className="label mt-1.5 flex items-center gap-1.5 text-ink-subtle">
+          <Unverified /> Self-reported
+        </p>
+      );
+  }
+}
+
+/** How a mark is earned, once per record, for a reader deciding how far to trust it. */
+export function VerificationNote() {
+  return (
+    <aside aria-labelledby="how-verification-works" className="mt-6 grid gap-3 border border-rule p-5 @3xl:grid-cols-[14rem_1fr] @3xl:gap-8">
+      <p id="how-verification-works" className="label font-mono text-ink-muted">
+        [ How verification works ]
+      </p>
+      <ol className="grid gap-2 text-sm leading-snug text-ink-muted @xl:grid-cols-3 @xl:gap-6">
+        <li>
+          <span className="label font-mono text-ink-subtle">01 </span>
+          The athlete names a coach from their references for one entry.
+        </li>
+        <li>
+          <span className="label font-mono text-ink-subtle">02 </span>
+          The coach gets a single-use link and confirms or disputes it. Their name and role are recorded with the answer.
+        </li>
+        <li>
+          <span className="label font-mono text-ink-subtle">03 </span>
+          Changing a verified entry&rsquo;s result removes its mark until a coach confirms it again.
+        </li>
+      </ol>
+    </aside>
   );
 }
 

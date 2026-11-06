@@ -1,6 +1,8 @@
 import type { Profile } from "@/lib/database.types";
 import { updateAcademics, updateContact, updateIdentity, updateVisibility } from "@/lib/actions/resume";
+import { AvatarUpload } from "@/components/editor/AvatarUpload";
 import { EditorForm } from "@/components/editor/EditorForm";
+import { Avatar } from "@/components/record/Avatar";
 import { Checkbox, Field, Select, TextArea, TextInput } from "@/components/ui/fields";
 import { Corner, CORNER } from "@/components/ui/marks";
 import { LEVEL_OPTIONS } from "@/lib/format";
@@ -56,7 +58,21 @@ export function Panel({ children, className = "" }: { children: React.ReactNode;
 
 export function IdentitySection({ profile }: { profile: Profile }) {
   return (
-    <EditorSection id="identity" title="Identity" lede="Name, sport, school, and the two sentences a recruiter reads first.">
+    <EditorSection id="identity" title="Identity" lede="Photo, name, sport, school, and the two sentences a recruiter reads first.">
+      <Panel className="mb-6">
+        <div className="flex flex-wrap items-center gap-6">
+          <Avatar url={profile.avatar_url} name={profile.display_name} className="size-24" />
+          <div className="min-w-0 flex-1">
+            <p className="label text-ink-muted">Photo</p>
+            <p className="mt-1 max-w-prose text-sm leading-relaxed text-ink-muted">
+              A clear, recent head-and-shoulders shot. It&rsquo;s cropped square and resized on your device before upload.
+            </p>
+            <div className="mt-4">
+              <AvatarUpload hasAvatar={Boolean(profile.avatar_url)} />
+            </div>
+          </div>
+        </div>
+      </Panel>
       <Panel>
         <EditorForm action={updateIdentity} submitLabel="Save identity">
           <Field label="Name">

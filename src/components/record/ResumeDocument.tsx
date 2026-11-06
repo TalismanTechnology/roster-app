@@ -4,6 +4,7 @@ import { Corner, CORNER } from "@/components/ui/marks";
 import type { CoachContact, FilmClip, Profile, RecordEntry } from "@/lib/database.types";
 
 import { IdentityBand } from "./IdentityBand";
+import { PrintColophon } from "./PrintColophon";
 import {
   AcademicsSection,
   FilmSection,
@@ -12,6 +13,7 @@ import {
   RecordList,
   ReferencesSection,
   SectionHeading,
+  VerificationNote,
 } from "./RecordSections";
 
 /**
@@ -69,6 +71,7 @@ export function ResumeDocument({
           <div className={entries.some((e) => e.is_pinned) ? "mt-8" : ""}>
             <RecordList entries={entries} isOwner={isOwner} />
           </div>
+          {entries.length > 0 && <VerificationNote />}
         </Block>
 
         {film.length > 0 && (
@@ -93,6 +96,8 @@ export function ResumeDocument({
           <Corner d={CORNER.bl} />
           Verified entries were confirmed by the coach named beside them. Roster — the athlete&rsquo;s resume.
         </p>
+
+        <PrintColophon profile={profile} asOf={new Date().toISOString().slice(0, 10)} />
       </div>
     </article>
   );

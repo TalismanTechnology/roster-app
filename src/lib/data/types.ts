@@ -120,6 +120,12 @@ export type SearchParams = {
   pageSize?: number;
 };
 
+/** A resume the sitemap lists: public, listed, and with something on it. */
+export type IndexableProfile = Pick<Profile, "handle" | "updated_at">;
+
+/** One slice of the sitemap and the size of the whole set. */
+export type IndexablePage = { profiles: IndexableProfile[]; total: number };
+
 /** One page of search results and the size of the whole match. `page` is
  *  the page actually served — out-of-range requests are clamped. */
 export type SearchResult = {

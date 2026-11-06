@@ -20,6 +20,7 @@ export const RESERVED_HANDLES = new Set([
   "auth",
   "forgot-password",
   "lists",
+  "media",
   "onboarding",
   "preview",
   "reset-password",
@@ -71,4 +72,16 @@ export function isReservedHandle(handle: string): boolean {
 
 export function isValidHandle(handle: string): boolean {
   return HANDLE_PATTERN.test(handle) && !isReservedHandle(handle);
+}
+
+/**
+ * The handle a request path addresses — the resume itself or its share-card
+ * images — or null for every other route. Used by the proxy to decide which
+ * requests are worth a visibility lookup.
+ */
+export function handleFromPath(pathname: string): string | null {
+  const match = /^\/([^/]+)(?:\/(?:opengraph|twitter)-image[^/]*)?\/?$/.exec(pathname);
+  if (!match) return null;
+  const handle = match[1].toLowerCase();
+  return isValidHandle(handle) ? handle : null;
 }

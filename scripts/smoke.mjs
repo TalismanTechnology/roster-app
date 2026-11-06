@@ -15,6 +15,7 @@
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { crc32, deflateSync } from "node:zlib";
 
 import { chromium } from "playwright-core";
 
@@ -100,6 +101,49 @@ await step("public resume renders with verified entries", async () => {
   await expectText("40-yard dash");
 });
 
+await step("public resume: share card, Twitter card, and ProfilePage JSON-LD", async () => {
+  const html = await (await fetch(`${base}/jordanreyes`)).text();
+  const meta = (attr, name) => html.match(new RegExp(`<meta ${attr}="${name}" content="([^"]+)"`))?.[1] ?? null;
+  const ogImage = meta("property", "og:image");
+  if (!ogImage || !/^https?:\/\/[^/]+\/jordanreyes\/opengraph-image/.test(ogImage)) throw new Error(`og:image is ${ogImage}`);
+  if (meta("name", "twitter:card") !== "summary_large_image") throw new Error(`twitter:card is ${meta("name", "twitter:card")}`);
+  if (!meta("name", "twitter:image")) throw new Error("no twitter:image");
+  const ld = html.match(/<script type="application\/ld\+json">(.+?)<\/script>/)?.[1];
+  const data = ld ? JSON.parse(ld) : null;
+  if (data?.["@type"] !== "ProfilePage" || data.mainEntity?.name !== "Jordan Reyes") throw new Error(`JSON-LD: ${ld}`);
+
+  const card = await fetch(`${base}${new URL(ogImage).pathname}${new URL(ogImage).search}`);
+  if (!card.ok || card.headers.get("content-type") !== "image/png") throw new Error(`card: ${card.status} ${card.headers.get("content-type")}`);
+  if ((await card.arrayBuffer()).byteLength < 5000) throw new Error("card is suspiciously small");
+  if ((await fetch(`${base}/graceokoro/opengraph-image`)).status !== 404) throw new Error("a private resume has a share card");
+});
+
+await step("public resume explains verification; the printout carries a QR and an as-of date", async () => {
+  await page.goto(`${base}/jordanreyes`, { waitUntil: "networkidle" });
+  await expectText("How verification works");
+  await page.locator("li").filter({ hasText: "Verified by" }).first().locator("time").first().waitFor({ timeout: 10_000 });
+  const colophon = page.locator('aside[aria-label="Printed record"]');
+  if (await colophon.isVisible()) throw new Error("print colophon shows on screen");
+  await page.emulateMedia({ media: "print" });
+  try {
+    await colophon.waitFor({ state: "visible", timeout: 5_000 });
+    if (!/Verified as of/.test((await colophon.textContent()) ?? "")) throw new Error("no as-of line");
+    const qr = colophon.locator('svg[role="img"][aria-label*="/jordanreyes"] path');
+    if ((await qr.getAttribute("d"))?.length < 200) throw new Error("QR path missing");
+  } finally {
+    await page.emulateMedia({ media: null });
+  }
+});
+
+await step("sitemap is sharded, robots lists the shards, unlisted stays out", async () => {
+  const robots = await (await fetch(`${base}/robots.txt`)).text();
+  const shard = robots.match(/Sitemap: (\S+\/sitemap\/0\.xml)/)?.[1];
+  if (!shard) throw new Error(`robots.txt lists no shard:\n${robots}`);
+  const xml = await (await fetch(`${base}${new URL(shard).pathname}`)).text();
+  if (!xml.includes("/jordanreyes</loc>")) throw new Error("public athlete missing from sitemap");
+  if (xml.includes("/elijahbrooks<")) throw new Error("unlisted athlete in sitemap");
+});
+
 await step("unlisted resume opens by link but is not searchable", async () => {
   await page.goto(`${base}/elijahbrooks`, { waitUntil: "networkidle" });
   await expectText("Elijah Brooks");
@@ -107,6 +151,14 @@ await step("unlisted resume opens by link but is not searchable", async () => {
   if (await page.getByText("Elijah Brooks").first().isVisible().catch(() => false)) {
     throw new Error("unlisted athlete appeared in search");
   }
+});
+
+await step("unlisted resume is X-Robots-Tag noindex and carries no JSON-LD", async () => {
+  const unlisted = await fetch(`${base}/elijahbrooks`);
+  if (unlisted.headers.get("x-robots-tag") !== "noindex, noarchive") throw new Error(`X-Robots-Tag: ${unlisted.headers.get("x-robots-tag")}`);
+  if ((await unlisted.text()).includes("application/ld+json")) throw new Error("unlisted resume emits structured data");
+  const listed = await fetch(`${base}/jordanreyes`);
+  if (listed.headers.get("x-robots-tag")) throw new Error(`public resume has X-Robots-Tag ${listed.headers.get("x-robots-tag")}`);
 });
 
 await step("private resume is not found", async () => {
@@ -127,6 +179,58 @@ await step("sign in as a seeded athlete lands in the editor", async () => {
   await page.getByRole("button", { name: /sign in/i }).click();
   await page.waitForURL(/\/resume$/, { timeout: 15_000 });
   await expectText("Jordan Reyes");
+});
+
+/** A solid-colour PNG, built by hand so the smoke needs no image library. */
+function png(width, height, [r, g, b]) {
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([len, body, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 2; // truecolour
+  const row = Buffer.concat([Buffer.from([0]), Buffer.from(Array.from({ length: width }, () => [r, g, b]).flat())]);
+  const raw = Buffer.concat(Array.from({ length: height }, () => row));
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+await step("an athlete uploads a photo: resized in the browser, shown on the resume and the card", async () => {
+  await page.goto(`${base}/resume?section=identity`, { waitUntil: "networkidle" });
+  await page.locator('input[type="file"][name="avatar"]').setInputFiles({
+    name: "portrait.png",
+    mimeType: "image/png",
+    buffer: png(900, 600, [200, 40, 40]),
+  });
+  const notice = page.locator("#identity").locator('[role="status"], [role="alert"]').first();
+  await notice.waitFor({ state: "visible", timeout: 20_000 });
+  const verdict = (await notice.textContent())?.trim() ?? "";
+  if (!/^Saved/.test(verdict)) throw new Error(`upload said: ${verdict}`);
+  await page.getByRole("img", { name: "Photo of Jordan Reyes" }).first().waitFor({ timeout: 10_000 });
+
+  await page.goto(`${base}/jordanreyes`, { waitUntil: "networkidle" });
+  const img = page.getByRole("img", { name: "Photo of Jordan Reyes" }).first();
+  await img.waitFor({ timeout: 10_000 });
+  const src = await img.getAttribute("src");
+  if (!src?.startsWith("/media/avatars/")) throw new Error(`avatar src ${src}`);
+  const file = await fetch(`${base}${src}`);
+  if (file.headers.get("content-type") !== "image/jpeg") throw new Error(`stored as ${file.headers.get("content-type")}`);
+  // Cropped square and scaled down on the client: a 900×600 PNG arrives as a 512² JPEG.
+  const { width, height } = await img.evaluate((el) => ({ width: el.naturalWidth, height: el.naturalHeight }));
+  if (width !== height || width > 512) throw new Error(`stored avatar is ${width}×${height}`);
+  const html = await (await fetch(`${base}/jordanreyes`)).text();
+  if (!/"image":"https?:\/\/[^"]+\/media\/avatars\//.test(html)) throw new Error("JSON-LD has no image");
 });
 
 await step("a hostile next= never leaves the site", async () => {

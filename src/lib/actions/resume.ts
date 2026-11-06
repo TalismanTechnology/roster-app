@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
+import { AVATAR_MAX_BYTES, sniffAvatarType } from "@/lib/avatars";
 import { getRepository, type Repository } from "@/lib/data";
 import type { AthleteLevel, ProfileVisibility } from "@/lib/database.types";
 import { emailCoachRequest } from "@/lib/email/verification";
@@ -283,6 +284,54 @@ export async function updateVisibility(_prev: FormState, formData: FormData): Pr
     ({ handle } = await repo.updateProfile(user.id, parsed.data));
   } catch (error) {
     return failed(error, "Could not save. Try again.", formValues(formData));
+  }
+
+  revalidateProfile(handle);
+  return saved();
+}
+
+// ---------------------------------------------------------------------------
+// Avatar
+// ---------------------------------------------------------------------------
+
+/**
+ * The editor crops and re-encodes in the browser (AvatarUpload) before
+ * calling this, so a real upload is a small square JPEG. Everything is
+ * re-checked here anyway — size, and the bytes' own signature rather than
+ * the declared type — because this endpoint takes a POST from anyone with
+ * a session, not just from that component.
+ */
+export async function updateAvatar(_prev: FormState, formData: FormData): Promise<FormState> {
+  const { repo, user } = await requireUser();
+  const file = formData.get("avatar");
+
+  if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Choose a photo to upload." };
+  if (file.size > AVATAR_MAX_BYTES) return { ok: false, error: "That photo is too large. Try a smaller one." };
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const type = sniffAvatarType(bytes);
+  if (!type) return { ok: false, error: "Use a JPEG, PNG, or WebP photo." };
+
+  let handle: string;
+  try {
+    ({ handle } = await repo.setAvatar(user.id, bytes, type));
+  } catch (error) {
+    return failed(error, "Could not save the photo. Try again.");
+  }
+
+  revalidateProfile(handle);
+  return saved();
+}
+
+export async function removeAvatar(_prev: FormState, _formData: FormData): Promise<FormState> {
+  void _formData;
+  const { repo, user } = await requireUser();
+
+  let handle: string;
+  try {
+    ({ handle } = await repo.removeAvatar(user.id));
+  } catch (error) {
+    return failed(error, "Could not remove the photo. Try again.");
   }
 
   revalidateProfile(handle);

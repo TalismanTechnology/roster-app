@@ -1,8 +1,10 @@
+import type { AvatarType } from "@/lib/avatars";
 import type { CoachContact, FilmClip, Profile, RecordEntry } from "@/lib/database.types";
 
 import type {
   AuthUser,
   EmailChangeResult,
+  IndexablePage,
   IssuedPasswordReset,
   NewCoach,
   NewEntry,
@@ -77,6 +79,14 @@ export interface Repository {
   /** Throws `conflict` when the handle is taken, `invalid` when reserved. */
   createProfile(input: NewProfile): Promise<Profile>;
   updateProfile(id: string, patch: Partial<Profile>): Promise<Profile>;
+  /**
+   * Stores an already-resized image as the owner's avatar and points
+   * `avatar_url` at it; earlier uploads are removed. The bytes are checked
+   * by the caller (`sniffAvatarType`) — `type` is what they are.
+   */
+  setAvatar(profileId: string, bytes: Uint8Array, type: AvatarType): Promise<Profile>;
+  /** Clears `avatar_url` and removes the stored files. */
+  removeAvatar(profileId: string): Promise<Profile>;
 
   // --- the record ---------------------------------------------------------
   listEntries(profileId: string): Promise<RecordEntry[]>;
@@ -143,6 +153,12 @@ export interface Repository {
   // --- discovery ----------------------------------------------------------
   /** Listed athletes only. The query is normalized and the page clamped here. */
   searchAthletes(params: SearchParams): Promise<SearchResult>;
+  /**
+   * The sitemap's rows: the search listing rule plus "has at least one
+   * entry" (an empty resume is noindex). Ordered by handle so slices are
+   * stable between requests; `limit` is the caller's, not clamped.
+   */
+  listIndexableProfiles(offset: number, limit: number): Promise<IndexablePage>;
 
   // --- recruiter lists ----------------------------------------------------
   listLists(ownerId: string): Promise<RecruiterList[]>;

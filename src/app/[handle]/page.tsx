@@ -6,8 +6,7 @@ import { ResumeDocument } from "@/components/record/ResumeDocument";
 import { Site } from "@/components/shell/Site";
 import { getRepository } from "@/lib/data";
 import { getCurrentUser } from "@/lib/data/auth";
-import { levelLabel } from "@/lib/format";
-import { sportName } from "@/lib/sports";
+import { profileDescriptor, profileJsonLd, serializeJsonLd } from "@/lib/seo";
 
 /**
  * An athlete's resume — the link they send a recruiter.
@@ -27,10 +26,9 @@ export async function generateMetadata({ params }: PageProps<"/[handle]">): Prom
     return { title: "Not found", robots: { index: false, follow: false } };
   }
 
-  const descriptor = [levelLabel(profile.level), sportName(profile.primary_sport), profile.grad_year ? `Class of ${profile.grad_year}` : null]
-    .filter(Boolean)
-    .join(" · ");
+  const descriptor = profileDescriptor(profile);
   const description = profile.bio ?? `${profile.display_name} on Roster. ${descriptor}`;
+  const isPublic = profile.visibility === "public";
 
   return {
     title: profile.display_name,
@@ -42,12 +40,18 @@ export async function generateMetadata({ params }: PageProps<"/[handle]">): Prom
       type: "profile",
       url: `/${profile.handle}`,
     },
+    // The image itself comes from ./opengraph-image and ./twitter-image.
+    // A public resume gets the large card; an unlisted one is shared by
+    // hand, one link at a time, so it keeps the small card and no bio.
+    twitter: isPublic
+      ? { card: "summary_large_image", title: `${profile.display_name} — ${descriptor}`, description }
+      : { card: "summary", title: profile.display_name },
     // Only a public resume with something on it is indexable. Unlisted means
     // "reachable by link but not findable", and letting a crawler index it
     // would break that promise; an empty record is a thin page that would
     // sit in search results under the athlete's name saying nothing.
     robots:
-      profile.visibility === "public" && profile.entry_count > 0
+      isPublic && profile.entry_count > 0
         ? { index: true, follow: true }
         : { index: false, follow: false },
   };
@@ -84,6 +88,10 @@ export default async function ResumePage({ params }: PageProps<"/[handle]">) {
 
   return (
     <Site>
+      {/* Structured data is for indexing, so only a public resume carries it. */}
+      {profile.visibility === "public" && (
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: serializeJsonLd(profileJsonLd(profile)) }} />
+      )}
       <main>
         <ResumeDocument profile={profile} entries={entries} film={film} coaches={coaches} isOwner={viewerId === profile.id} />
       </main>

@@ -8,6 +8,7 @@ import { recordLinks, socialLinks } from "@/lib/links";
 import { siteHost } from "@/lib/site";
 import { sportName } from "@/lib/sports";
 
+import { Avatar } from "./Avatar";
 import { ShareBar } from "./ShareBar";
 
 /**
@@ -70,14 +71,19 @@ export function IdentityBand({
             {label}
           </p>
 
-          <h1 className="font-display text-display-lg mt-4 flex flex-wrap items-center gap-x-3 leading-[0.95] tracking-tight">
-            {profile.display_name}
-            {profile.identity_verified_at && <Verified className="text-[0.5em]" label="Identity verified" />}
-          </h1>
+          <div className="mt-4 flex items-end gap-5">
+            {profile.avatar_url && <Avatar url={profile.avatar_url} name={profile.display_name} className="size-20 @xl:size-28" sizes="112px" />}
+            <div className="min-w-0">
+              <h1 className="font-display text-display-lg flex flex-wrap items-center gap-x-3 leading-[0.95] tracking-tight">
+                {profile.display_name}
+                {profile.identity_verified_at && <Verified className="text-[0.5em]" label="Identity verified" />}
+              </h1>
 
-          <p className="mt-2 text-ink-muted">
-            {siteHost()}/{profile.handle}
-          </p>
+              <p className="mt-2 text-ink-muted">
+                {siteHost()}/{profile.handle}
+              </p>
+            </div>
+          </div>
 
           {roster.length > 0 && <p className="mt-5 text-lg font-bold">{roster.join(" · ")}</p>}
           {context.length > 0 && <p className="mt-1 text-ink-muted">{context.join(" · ")}</p>}
