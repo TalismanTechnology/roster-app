@@ -27,15 +27,23 @@ export function ScaledPreview({ scale, children }: { scale: number; children: Re
     return () => observer.disconnect();
   }, [scale]);
 
+  // At full size there is nothing to do — and no transform to turn the box
+  // into a containing block for the page's own sticky and fixed parts.
+  const isScaled = scale !== 1;
+
   return (
-    <div className="relative overflow-hidden" style={{ height: height ?? undefined }}>
+    <div className={isScaled ? "relative overflow-hidden" : "relative"} style={{ height: isScaled ? (height ?? undefined) : undefined }}>
       <div
         ref={innerRef}
-        style={{
-          width: `${100 / scale}%`,
-          transform: `scale(${scale})`,
-          transformOrigin: "top left",
-        }}
+        style={
+          isScaled
+            ? {
+                width: `${100 / scale}%`,
+                transform: `scale(${scale})`,
+                transformOrigin: "top left",
+              }
+            : undefined
+        }
       >
         {children}
       </div>

@@ -59,7 +59,7 @@ export function OnboardingForm({ host }: { host: string }) {
           {ROLES.map((r) => (
             <label
               key={r.value}
-              className="relative flex cursor-pointer flex-col gap-0.5 border border-rule px-4 py-3 transition-colors has-[:checked]:border-ink has-[:focus-visible]:outline has-[:focus-visible]:outline-2"
+              className="relative flex min-h-14 cursor-pointer flex-col justify-center gap-0.5 border border-rule px-4 py-3 transition-colors has-[:checked]:border-ink has-[:focus-visible]:outline has-[:focus-visible]:outline-2"
             >
               <input
                 type="radio"
@@ -125,11 +125,11 @@ function MemberOnboarding({ kind }: { kind: Exclude<OnboardingKind, "athlete"> }
 
       <p className="label text-ink-muted">
         By continuing you agree to the{" "}
-        <Link href="/terms" target="_blank" className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+        <Link href="/terms" target="_blank" className="tap-inline text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
           Terms
         </Link>{" "}
         and{" "}
-        <Link href="/privacy" target="_blank" className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+        <Link href="/privacy" target="_blank" className="tap-inline text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
           Privacy Policy
         </Link>
         .
@@ -251,7 +251,7 @@ function AthleteOnboarding({ host }: { host: string }) {
       <input type="hidden" name="account_kind" value="athlete" />
       {/* Progress: the numerals, the current one in ink. Finished steps are
           buttons back; steps ahead open only through Continue. */}
-      <ol className="flex items-center gap-4" aria-label="Progress">
+      <ol className="flex items-center gap-2 sm:gap-4" aria-label="Progress">
         {STEPS.map((s, i) => (
           <li key={s.n} className="flex items-center gap-2">
             <button
@@ -259,7 +259,7 @@ function AthleteOnboarding({ host }: { host: string }) {
               onClick={() => i < step && setStep(i)}
               disabled={i > step}
               aria-current={i === step ? "step" : undefined}
-              className={`font-display text-2xl tracking-tighter transition-colors disabled:cursor-default ${
+              className={`font-display inline-flex min-h-11 min-w-11 items-center justify-center text-2xl tracking-tighter transition-colors disabled:cursor-default ${
                 i === step ? "cursor-default text-ink" : i < step ? "cursor-pointer text-ink-muted hover:text-ink" : "text-ink-subtle"
               }`}
             >
@@ -406,11 +406,11 @@ function AthleteOnboarding({ host }: { host: string }) {
             <p className="label mt-2 text-ink-muted">
               Under 18? Your contact details are shown only to signed-in recruiters and coaches, and only while you&rsquo;re open to recruiting. By
               creating your resume you agree to the{" "}
-              <Link href="/terms" target="_blank" className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+              <Link href="/terms" target="_blank" className="tap-inline text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
                 Terms
               </Link>{" "}
               and{" "}
-              <Link href="/privacy" target="_blank" className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+              <Link href="/privacy" target="_blank" className="tap-inline text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
                 Privacy Policy
               </Link>
               .

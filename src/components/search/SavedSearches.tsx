@@ -42,7 +42,7 @@ export function SavedSearches({ searches, current }: { searches: SavedSearch[]; 
                 <Link
                   href={s.query ? `/search?${s.query}` : "/search"}
                   aria-current={active ? "page" : undefined}
-                  className={`truncate font-bold underline decoration-transparent underline-offset-4 hover:decoration-ink ${active ? "text-ink" : "text-ink-muted hover:text-ink"}`}
+                  className={`truncate font-bold underline max-sm:-my-2 max-sm:py-2 decoration-transparent underline-offset-4 hover:decoration-ink ${active ? "text-ink" : "text-ink-muted hover:text-ink"}`}
                 >
                   {active && <span aria-hidden>▸ </span>}
                   {s.name}
@@ -55,14 +55,14 @@ export function SavedSearches({ searches, current }: { searches: SavedSearch[]; 
                       type="submit"
                       aria-pressed={s.digest}
                       aria-label={`Weekly digest for ${s.name}`}
-                      className="label cursor-pointer font-mono text-ink-subtle hover:text-ink"
+                      className="label min-h-10 cursor-pointer font-mono text-ink-subtle hover:text-ink"
                     >
                       [ digest {s.digest ? "on" : "off"} ]
                     </button>
                   </form>
                   <form action={deleteSavedSearch}>
                     <input type="hidden" name="id" value={s.id} />
-                    <button type="submit" aria-label={`Delete saved search ${s.name}`} className="label cursor-pointer text-ink-subtle hover:text-disputed">
+                    <button type="submit" aria-label={`Delete saved search ${s.name}`} className="label min-h-10 cursor-pointer px-1 text-ink-subtle hover:text-disputed">
                       Delete
                     </button>
                   </form>
@@ -86,7 +86,7 @@ export function SavedSearches({ searches, current }: { searches: SavedSearch[]; 
             defaultValue={state.values?.name}
             className={control}
           />
-          <label className="label flex cursor-pointer items-center gap-2 text-ink-muted">
+          <label className="label flex min-h-10 cursor-pointer items-center gap-2 text-ink-muted">
             <input type="checkbox" name="digest" className="size-4 cursor-pointer accent-current" />
             Weekly digest of new matches
           </label>

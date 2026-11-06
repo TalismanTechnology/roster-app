@@ -41,7 +41,7 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
               <>
                 {" · "}
                 {isAthlete ? (
-                  <Link href={`/${profile.handle}`} className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+                  <Link href={`/${profile.handle}`} className="tap-inline text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
                     {siteHost()}/{profile.handle}
                   </Link>
                 ) : (

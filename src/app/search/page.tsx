@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { Avatar } from "@/components/record/Avatar";
+import { FilterDisclosure } from "@/components/search/FilterDisclosure";
 import { SavedSearches } from "@/components/search/SavedSearches";
 import { SaveToList } from "@/components/search/SaveToList";
 import { Site } from "@/components/shell/Site";
@@ -70,113 +71,143 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
   ]);
 
   const active = describeFilters(filters);
+  const chips = filterChips(filters);
   const query = filtersToQuery(filters);
   const positionOptions = filters.sport ? positionsFor(filters.sport) : allPositions();
 
   return (
     <Site>
       <main style={{ paddingInline: "var(--pad-x)" }}>
-        <header className="flex flex-col gap-4 py-8 lg:flex-row lg:items-end lg:justify-between">
+        <header className="flex flex-col gap-4 py-5 sm:py-8 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="label flex items-center gap-2 text-ink-muted">
               <Corner d={CORNER.tl} /> Find athletes
             </p>
-            <h1 className="font-display text-display-lg mt-4 leading-[0.95] tracking-tight">
+            <h1 className="font-display mt-3 text-display leading-[0.95] tracking-tight sm:mt-4 sm:text-display-lg">
               Search the record.
             </h1>
           </div>
-          <p className="max-w-sm text-ink-muted">
+          {/* On a phone the results are the point; the reassurance can wait for a wider screen. */}
+          <p className="max-w-sm text-ink-muted max-sm:hidden">
             Public resumes only, verified first. Open any result without an account.
           </p>
         </header>
 
-        <div className="grid gap-8 pb-16 lg:grid-cols-12">
-          <Frame className="self-start lg:sticky lg:top-[calc(var(--header-h)+1rem)] lg:col-span-3">
-            <div className="flex flex-col gap-5" style={{ padding: "var(--feature-pad)" }}>
-              <form method="GET" role="search" aria-label="Filters" className="flex flex-col gap-5">
-                <Field label="Name or handle">
-                  <TextInput name="q" type="search" defaultValue={filters.q ?? ""} placeholder="Reyes" maxLength={MAX_QUERY_LENGTH} />
-                </Field>
-                <Field label="Sport">
-                  <Select name="sport" defaultValue={filters.sport ?? ""}>
-                    <option value="">Any sport</option>
-                    {SPORTS.map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Level">
-                  <Select name="level" defaultValue={filters.level ?? ""}>
-                    <option value="">Any level</option>
-                    {LEVEL_OPTIONS.map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Position" hint={filters.sport ? `${sportName(filters.sport)} positions suggested.` : undefined}>
-                  <TextInput
-                    name="position"
-                    list="position-options"
-                    defaultValue={filters.position ?? ""}
-                    placeholder="WR"
-                    maxLength={MAX_POSITION_LENGTH}
-                    autoComplete="off"
-                  />
-                  <datalist id="position-options">
-                    {positionOptions.map((p) => (
-                      <option key={p} value={p} />
-                    ))}
-                  </datalist>
-                </Field>
-                <div className="grid grid-cols-2 gap-4">
-                  <Field label="Class of">
-                    <TextInput name="class" type="number" min={1950} max={2100} defaultValue={filters.gradYear ?? ""} placeholder="2027" />
-                  </Field>
-                  <Field label="State">
-                    <Select name="state" defaultValue={filters.region ?? ""}>
-                      <option value="">Any</option>
-                      {US_STATES.map(([code, name]) => (
-                        <option key={code} value={code}>
-                          {code} — {name}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <Field label="Min GPA">
-                    <TextInput name="gpa" type="number" min={0} max={5} step="0.1" inputMode="decimal" defaultValue={filters.minGpa ?? ""} placeholder="3.0" />
-                  </Field>
-                  <Field label="Sort">
-                    <Select name="sort" defaultValue={filters.sort}>
-                      {SORT_OPTIONS.map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                </div>
-                <Checkbox name="verified" value="1" defaultChecked={filters.verifiedOnly} label="Verified only" hint="At least one coach-verified entry." />
-                <div className="flex items-center justify-between gap-3 border-t border-rule pt-4">
-                  <button type="submit" className="btn-primary min-h-9 px-4 text-sm">
-                    Search
-                  </button>
-                  {query !== "" && (
-                    <Link href="/search" className="label text-ink-muted underline decoration-transparent underline-offset-4 hover:text-ink hover:decoration-ink">
-                      Clear
-                    </Link>
-                  )}
-                </div>
-              </form>
+        <div className="grid grid-cols-1 gap-4 pb-16 sm:gap-8 lg:grid-cols-12">
+          {/* Below lg the column dissolves into the page grid, so saved
+              searches can follow the results instead of pushing them down. */}
+          <div className="flex flex-col gap-5 self-start max-lg:contents lg:sticky lg:top-[calc(var(--header-h)+var(--safe-top)+1rem)] lg:col-span-3">
+            <Frame>
+              <div style={{ padding: "var(--feature-pad)" }}>
+                <form method="GET" role="search" aria-label="Filters" className="flex flex-col gap-3 lg:gap-5">
+                  {/* The query bar: always on screen, whatever is folded. */}
+                  <div className="flex items-end gap-2">
+                    <label className="block min-w-0 flex-1">
+                      <span className="mb-2 block text-sm font-bold max-lg:sr-only">Name or handle</span>
+                      <TextInput
+                        name="q"
+                        type="search"
+                        defaultValue={filters.q ?? ""}
+                        placeholder="Name or handle"
+                        maxLength={MAX_QUERY_LENGTH}
+                      />
+                    </label>
+                    <button type="submit" className="btn-primary shrink-0 self-stretch px-4 lg:hidden">
+                      Search
+                    </button>
+                  </div>
 
-              {canSave && <SavedSearches searches={saved} current={query} />}
-            </div>
-          </Frame>
+                  <FilterDisclosure count={chips.length} chips={chips.length > 0 ? <FilterChips chips={chips} /> : null}>
+                    <Field label="Sport">
+                      <Select name="sport" defaultValue={filters.sport ?? ""}>
+                        <option value="">Any sport</option>
+                        {SPORTS.map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                    <Field label="Level">
+                      <Select name="level" defaultValue={filters.level ?? ""}>
+                        <option value="">Any level</option>
+                        {LEVEL_OPTIONS.map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                    <Field label="Position" hint={filters.sport ? `${sportName(filters.sport)} positions suggested.` : undefined}>
+                      <TextInput
+                        name="position"
+                        list="position-options"
+                        defaultValue={filters.position ?? ""}
+                        placeholder="WR"
+                        maxLength={MAX_POSITION_LENGTH}
+                        autoComplete="off"
+                      />
+                      <datalist id="position-options">
+                        {positionOptions.map((p) => (
+                          <option key={p} value={p} />
+                        ))}
+                      </datalist>
+                    </Field>
+                    <div className="grid grid-cols-2 gap-4">
+                      <Field label="Class of">
+                        <TextInput name="class" type="number" min={1950} max={2100} defaultValue={filters.gradYear ?? ""} placeholder="2027" />
+                      </Field>
+                      <Field label="State">
+                        <Select name="state" defaultValue={filters.region ?? ""}>
+                          <option value="">Any</option>
+                          {US_STATES.map(([code, name]) => (
+                            <option key={code} value={code}>
+                              {code} — {name}
+                            </option>
+                          ))}
+                        </Select>
+                      </Field>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <Field label="Min GPA">
+                        <TextInput name="gpa" type="number" min={0} max={5} step="0.1" inputMode="decimal" defaultValue={filters.minGpa ?? ""} placeholder="3.0" />
+                      </Field>
+                      <Field label="Sort">
+                        <Select name="sort" defaultValue={filters.sort}>
+                          {SORT_OPTIONS.map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </Select>
+                      </Field>
+                    </div>
+                    <Checkbox name="verified" value="1" defaultChecked={filters.verifiedOnly} label="Verified only" hint="At least one coach-verified entry." />
+                    <div className="flex items-center justify-between gap-3 border-t border-rule pt-4">
+                      <button type="submit" className="btn-primary min-h-9 px-4 text-sm max-lg:flex-1">
+                        <span className="lg:hidden">Show results</span>
+                        <span className="max-lg:hidden">Search</span>
+                      </button>
+                      {query !== "" && (
+                        <Link
+                          href="/search"
+                          className="label inline-flex min-h-11 items-center px-2 text-ink-muted underline decoration-transparent underline-offset-4 hover:text-ink hover:decoration-ink lg:min-h-0 lg:px-0"
+                        >
+                          Clear
+                        </Link>
+                      )}
+                    </div>
+                  </FilterDisclosure>
+                </form>
+              </div>
+            </Frame>
+
+            {canSave && (
+              <div className="order-last lg:order-none" style={{ paddingInline: "var(--feature-pad)" }}>
+                <SavedSearches searches={saved} current={query} />
+              </div>
+            )}
+          </div>
 
           <section aria-label="Results" className="min-w-0 lg:col-span-9">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rule pb-3">
@@ -185,8 +216,9 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
                 {pages > 1 && ` · page ${page} of ${pages}`}
                 {filters.sort !== "verified_count" && ` · ${SORT_OPTIONS.find(([v]) => v === filters.sort)?.[1]}`}
               </p>
+              {/* Below lg the same chips sit beside the Filters button. */}
               {active.length > 0 && (
-                <ul className="flex flex-wrap gap-2" aria-label="Active filters">
+                <ul className="flex flex-wrap gap-2 max-lg:hidden" aria-label="Active filters">
                   {active.map((a) => (
                     <li key={a} className="chip">
                       {a}
@@ -220,6 +252,47 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
   );
 }
 
+type Chip = { label: string; href: string };
+
+/**
+ * Each applied filter (but the name, which is in the bar) with the URL that
+ * drops just it — a chip is a one-tap undo.
+ */
+function filterChips(filters: SearchFilters): Chip[] {
+  const without = (patch: Partial<SearchFilters>): string => {
+    const query = filtersToQuery({ ...filters, ...patch });
+    return query ? `/search?${query}` : "/search";
+  };
+  const chips: (Chip | null)[] = [
+    filters.sport ? { label: sportName(filters.sport) ?? filters.sport, href: without({ sport: null, position: null }) } : null,
+    filters.level ? { label: levelLabel(filters.level) ?? filters.level, href: without({ level: null }) } : null,
+    filters.position ? { label: `Plays ${filters.position}`, href: without({ position: null }) } : null,
+    filters.gradYear ? { label: `Class of ${filters.gradYear}`, href: without({ gradYear: null }) } : null,
+    filters.region ? { label: filters.region, href: without({ region: null }) } : null,
+    filters.minGpa !== null ? { label: `GPA ${filters.minGpa.toFixed(1)}+`, href: without({ minGpa: null }) } : null,
+    filters.verifiedOnly ? { label: "Verified only", href: without({ verifiedOnly: false }) } : null,
+  ];
+  return chips.filter((c): c is Chip => c !== null);
+}
+
+/** The applied filters as a thumb-swipeable strip; it scrolls, the page doesn't. */
+function FilterChips({ chips }: { chips: Chip[] }) {
+  return (
+    <ul className="scrollbar-none -my-1 flex min-w-0 flex-1 gap-1.5 overflow-x-auto overscroll-x-contain py-1" aria-label="Active filters">
+      {chips.map((c) => (
+        <li key={c.label} className="shrink-0">
+          <Link href={c.href} className="chip min-h-9 whitespace-nowrap hover:border-ink" aria-label={`Remove filter: ${c.label}`}>
+            {c.label}
+            <span aria-hidden className="text-ink-subtle">
+              ×
+            </span>
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 // ---------------------------------------------------------------------------
 
 /**
@@ -248,12 +321,17 @@ function AthleteRow({
 
   return (
     <li className="group relative">
-      <div className="grid grid-cols-[auto_1fr_auto] items-center gap-x-5 gap-y-3 py-4 sm:grid-cols-[auto_1.6fr_1.2fr_auto]">
-        <Avatar url={athlete.avatar_url} name={athlete.display_name} className="size-14" sizes="56px" />
+      <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3.5 gap-y-3 py-4 sm:grid-cols-[auto_1.6fr_1.2fr_auto] sm:gap-x-5">
+        <Avatar url={athlete.avatar_url} name={athlete.display_name} className="size-12 sm:size-14" sizes="56px" />
 
         <div className="min-w-0">
-          <Link href={`/${athlete.handle}`} className="font-bold after:absolute after:inset-0 hover:underline">
-            {athlete.display_name}
+          {/* The link's ::after covers the row, so the whole card opens the
+              resume; the link itself is still a 40px target on its own. */}
+          <Link
+            href={`/${athlete.handle}`}
+            className="-my-2.5 flex min-h-10 min-w-0 items-center font-bold after:absolute after:inset-0 hover:underline sm:my-0 sm:inline sm:min-h-0"
+          >
+            <span className="truncate">{athlete.display_name}</span>
           </Link>
           <p className="label mt-0.5 truncate text-ink-muted">{line}</p>
           <p className="label mt-0.5 truncate text-ink-subtle">{meta}</p>
@@ -264,29 +342,34 @@ function AthleteRow({
           )}
         </div>
 
-        <div className="col-span-full min-w-0 sm:col-span-1">
+        <div className="col-span-full min-w-0 max-sm:col-start-2 max-sm:-mt-1 sm:col-span-1">
           {mark ? (
-            <p className="flex min-w-0 items-baseline gap-2">
+            <p className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
               <Verified className="shrink-0 self-center" />
               {mark.value_display && (
-                <span className="font-display text-lg tracking-tight" data-numeric>
+                <span className="font-display min-w-0 text-lg tracking-tight [overflow-wrap:anywhere]" data-numeric>
                   {mark.value_display}
                   {mark.unit && <span className="ml-0.5 text-sm font-normal text-ink-muted">{mark.unit}</span>}
                 </span>
               )}
-              <span className="label truncate text-ink-muted">{mark.title}</span>
+              <span className="label min-w-0 max-w-full truncate text-ink-muted">{mark.title}</span>
             </p>
           ) : (
             <p className="label text-ink-subtle">{athlete.entry_count} {athlete.entry_count === 1 ? "entry" : "entries"} · none verified</p>
           )}
         </div>
 
-        <p className="label row-start-1 flex items-center gap-1.5 justify-self-end whitespace-nowrap sm:row-start-auto" style={{ gridColumn: "-2 / -1" }} data-numeric>
-          <Verified className={athlete.verified_count > 0 ? "" : "opacity-30"} /> {athlete.verified_count} verified
+        <p
+          className="label row-start-1 flex items-center gap-1.5 self-start justify-self-end whitespace-nowrap max-sm:pt-0.5 sm:row-start-auto sm:self-center"
+          style={{ gridColumn: "-2 / -1" }}
+          data-numeric
+        >
+          <Verified className={athlete.verified_count > 0 ? "" : "opacity-30"} /> {athlete.verified_count}
+          <span className="max-sm:sr-only">verified</span>
         </p>
 
         {lists && (
-          <div className="relative z-10 col-span-full">
+          <div className="relative z-10 col-span-full min-w-0">
             <SaveToList profileId={athlete.id} lists={lists} savedIn={savedIn} />
           </div>
         )}

@@ -10,7 +10,7 @@ const IDLE: ListFormState = { ok: false, error: null };
 const NEW = "__new__";
 
 const control =
-  "label rounded-(--radius-input) border border-rule-strong bg-paper-raised/60 px-2 py-1.5 text-ink placeholder:text-ink-subtle focus:border-ink focus:outline-none";
+  "label rounded-(--radius-input) border border-rule-strong bg-paper-raised/60 px-2 py-1.5 text-ink placeholder:text-ink-subtle focus:border-ink focus:outline-none max-sm:min-h-11 max-sm:min-w-0 max-sm:flex-1";
 
 /**
  * One row's "save" control for a signed-in recruiter. With lists, a select
@@ -39,11 +39,11 @@ export function SaveToList({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <form action={formAction} className="flex flex-wrap items-center gap-2">
+      <form action={formAction} className="flex items-center gap-2 max-sm:w-full sm:flex-wrap">
         <input type="hidden" name="profile_id" value={profileId} />
 
         {lists.length > 0 && (
-          <select name="list_id" value={effective} onChange={(e) => setListId(e.target.value)} className={`${control} max-w-44 cursor-pointer`} aria-label="List">
+          <select name="list_id" value={effective} onChange={(e) => setListId(e.target.value)} className={`${control} cursor-pointer sm:max-w-44`} aria-label="List">
             {available.map((l) => (
               <option key={l.id} value={l.id}>
                 {l.name}
@@ -61,11 +61,11 @@ export function SaveToList({
             minLength={2}
             maxLength={60}
             aria-label="New list name"
-            className={`${control} min-w-36`}
+            className={`${control} sm:min-w-36`}
           />
         )}
 
-        <SubmitButton className="btn-outline min-h-8 px-3 text-sm" pendingLabel="Saving…">
+        <SubmitButton className="btn-outline min-h-8 shrink-0 px-3 text-sm" pendingLabel="Saving…">
           Save
         </SubmitButton>
       </form>
@@ -74,7 +74,7 @@ export function SaveToList({
         <ul className="flex flex-wrap items-center gap-2" aria-label="Saved in">
           {saved.map((l) => (
             <li key={l.id} className="label flex items-center border border-rule-strong">
-              <span className="px-2 py-1 text-ink-muted">In {l.name}</span>
+              <span className="max-w-48 truncate px-2 py-1 text-ink-muted">In {l.name}</span>
               <form action={removeFromList}>
                 <input type="hidden" name="list_id" value={l.id} />
                 <input type="hidden" name="profile_id" value={profileId} />
@@ -82,7 +82,7 @@ export function SaveToList({
                   type="submit"
                   aria-label={`Remove from ${l.name}`}
                   title={`Remove from ${l.name}`}
-                  className="cursor-pointer border-l border-rule-strong px-2 py-1 text-ink-subtle transition-colors hover:bg-wash hover:text-disputed"
+                  className="cursor-pointer self-stretch border-l border-rule-strong px-2 py-1 text-ink-subtle transition-colors hover:bg-wash hover:text-disputed max-sm:min-h-10 max-sm:min-w-10"
                 >
                   ×
                 </button>

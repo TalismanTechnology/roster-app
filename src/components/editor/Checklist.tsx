@@ -103,7 +103,7 @@ export function firstUnfinished(items: ChecklistItem[]): SectionId {
 }
 
 /** The checklist as a strip: a progress bar, then each item as a link. */
-export function Checklist({ items, active, pendingRequests = 0 }: { items: ChecklistItem[]; active: SectionId; pendingRequests?: number }) {
+export function Checklist({ items, active }: { items: ChecklistItem[]; active: SectionId }) {
   const done = items.filter((i) => i.isDone).length;
   const pct = Math.round((done / items.length) * 100);
   const next = nextItem(items);
@@ -120,7 +120,7 @@ export function Checklist({ items, active, pendingRequests = 0 }: { items: Check
           {next ? (
             <p className="text-sm text-ink-muted">
               Next:{" "}
-              <Link href={`/resume?section=${next.id}`} className="font-bold text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+              <Link href={`/resume?section=${next.id}`} className="tap-inline font-bold text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
                 {next.label}
               </Link>{" "}
               — {next.why}
@@ -140,7 +140,7 @@ export function Checklist({ items, active, pendingRequests = 0 }: { items: Check
               <Link
                 href={`/resume?section=${i.id}`}
                 aria-current={i.key === currentKey ? "page" : undefined}
-                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-bold transition-colors ${
+                className={`flex min-h-10 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-bold transition-colors sm:min-h-0 sm:px-2.5 ${
                   i.id === active ? "bg-ink text-paper" : "text-ink-muted hover:bg-wash hover:text-ink"
                 }`}
               >
@@ -153,23 +153,6 @@ export function Checklist({ items, active, pendingRequests = 0 }: { items: Check
               </Link>
             </li>
           ))}
-          {/* Not a completeness item, but the phone has no other way to it. */}
-          <li className="lg:hidden">
-            <Link
-              href="/resume?section=requests"
-              aria-current={active === "requests" ? "page" : undefined}
-              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-bold transition-colors ${
-                active === "requests" ? "bg-ink text-paper" : "text-ink-muted hover:bg-wash hover:text-ink"
-              }`}
-            >
-              Requests
-              {pendingRequests > 0 && (
-                <span className="rounded-full bg-pending-bg px-1.5 text-pending" data-numeric>
-                  {pendingRequests}
-                </span>
-              )}
-            </Link>
-          </li>
         </ol>
       </div>
     </section>

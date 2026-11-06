@@ -22,7 +22,7 @@ export function CreateListForm() {
           </Field>
         </div>
       </FieldErrors>
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center gap-4">
         <SubmitButton className="btn-outline" pendingLabel="Creating…">
           Create list
         </SubmitButton>
@@ -43,7 +43,7 @@ export function RenameListForm({ listId, name }: { listId: string; name: string 
           <TextInput name="name" defaultValue={state.values?.name ?? name} required minLength={2} maxLength={60} />
         </Field>
       </FieldErrors>
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center gap-4">
         <SubmitButton className="btn-outline" pendingLabel="Saving…">
           Save name
         </SubmitButton>
@@ -71,7 +71,7 @@ export function ListNoteForm({ listId, profileId, note, athleteName }: { listId:
         aria-label={`Note on ${athleteName}`}
         className="min-w-0 flex-1 basis-56 border-0 border-b border-rule bg-transparent px-0 py-2.5 text-base text-ink sm:py-1.5 sm:text-sm placeholder:text-ink-subtle focus:border-ink focus:outline-none"
       />
-      <SubmitButton className="label cursor-pointer text-ink-subtle underline decoration-transparent underline-offset-4 hover:text-ink hover:decoration-ink" pendingLabel="Saving…">
+      <SubmitButton className="btn-row shrink-0" pendingLabel="Saving…">
         Save note
       </SubmitButton>
       <FormNotice ok={state.ok} error={state.error} />

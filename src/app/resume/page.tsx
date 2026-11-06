@@ -13,7 +13,7 @@ import {
 } from "@/components/editor/ProfileSections";
 import { CoachSection, FilmSection, RecordSection } from "@/components/editor/RecordSections";
 import { RequestsSection } from "@/components/editor/RequestsSection";
-import { ScaledPreview } from "@/components/editor/ScaledPreview";
+import { PreviewPane, PreviewProvider, SectionBar } from "@/components/editor/MobileWorkspace";
 import { ResumeDocument } from "@/components/record/ResumeDocument";
 import { ShareBar } from "@/components/record/ShareBar";
 import { Site } from "@/components/shell/Site";
@@ -87,6 +87,7 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
   return (
     <Site>
       <main className="flex flex-col gap-6 pb-16" style={{ paddingInline: "var(--pad-x)", paddingTop: "1.5rem" }}>
+        <PreviewProvider>
         <DirtyGuard />
         {/* Share bar: the link, the numbers, and the door to the public page. */}
         <section aria-label="Your resume" className="panel">
@@ -124,17 +125,28 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
 
             <div className="flex flex-wrap items-center gap-2">
               <ShareBar handle={profile.handle} title={`${profile.display_name} · Roster`} print={false} />
-              <Link href={`/${profile.handle}`} className="btn-primary min-h-10 px-4 text-sm">
+              <Link href={`/${profile.handle}`} className="btn-primary min-h-10 whitespace-nowrap px-4 text-sm max-sm:flex-1">
                 View as a recruiter
               </Link>
             </div>
           </div>
         </section>
 
-        <Checklist items={checklist} active={active} pendingRequests={pendingCount} />
+        <Checklist items={checklist} active={active} />
 
-        <div className="grid min-w-0 gap-8 lg:grid-cols-12">
-          {/* Section nav — desktop only; on phones the checklist chips navigate. */}
+        {/* Below lg: the sections as a sticky strip, with the preview behind a button. */}
+        <SectionBar
+          active={active}
+          sections={SECTIONS.map((s) => ({
+            id: s.id,
+            label: s.label,
+            badge: s.id === "requests" ? pendingCount : undefined,
+            isUnfinished: s.id !== "requests" && checklist.some((c) => c.key === s.id && !c.isDone),
+          }))}
+        />
+
+        <div className="grid min-w-0 grid-cols-1 gap-8 lg:grid-cols-12">
+          {/* Section nav — desktop only; below lg the SectionBar strip navigates. */}
           <nav aria-label="Sections" className="print-hidden hidden min-w-0 lg:col-span-2 lg:block">
             <ol className="-mx-2 flex gap-1 overflow-x-auto px-2 pb-1 lg:sticky lg:top-[calc(var(--header-h)+1rem)] lg:mx-0 lg:flex-col lg:gap-1 lg:px-0">
               {SECTIONS.map((s) => {
@@ -181,20 +193,11 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
           </div>
 
           {/* Live preview — the real page, as a recruiter sees it. */}
-          <aside className="hidden lg:col-span-4 lg:block" aria-label="Live preview">
-            <div className="sticky top-[calc(var(--header-h)+1rem)]">
-              <p className="mb-2 flex items-center justify-between text-sm text-ink-muted">
-                <span className="font-bold text-ink">Live preview</span>
-                <span>As a recruiter sees it · updates on save</span>
-              </p>
-              <div className="max-h-[calc(100svh-var(--header-h)-4.5rem)] overflow-y-auto border border-rule bg-paper">
-                <ScaledPreview scale={0.55}>
-                  <ResumeDocument profile={profile} entries={entries} film={film} coaches={publicCoaches} />
-                </ScaledPreview>
-              </div>
-            </div>
-          </aside>
+          <PreviewPane>
+            <ResumeDocument profile={profile} entries={entries} film={film} coaches={publicCoaches} />
+          </PreviewPane>
         </div>
+        </PreviewProvider>
       </main>
     </Site>
   );

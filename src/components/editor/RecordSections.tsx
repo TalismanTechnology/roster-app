@@ -147,17 +147,20 @@ function EntryFields({ entry, sport }: { entry?: RecordEntry; sport: string | nu
           <TextInput name="competition" defaultValue={entry?.competition ?? ""} maxLength={120} />
         </Field>
 
-        <Field label="Placement">
-          <TextInput name="placement" type="number" min={1} defaultValue={entry?.placement ?? ""} />
-        </Field>
-
-        <Field label="Field size" hint="Out of how many">
-          <TextInput name="field_size" type="number" min={1} defaultValue={entry?.field_size ?? ""} />
-        </Field>
-
         <Field label="Location">
           <TextInput name="location" defaultValue={entry?.location ?? ""} maxLength={120} />
         </Field>
+
+        {/* "3rd of 24" reads as one answer: a pair at every width. */}
+        <div className="grid grid-cols-2 gap-4 sm:col-span-2 sm:gap-6">
+          <Field label="Placement">
+            <TextInput name="placement" type="number" min={1} defaultValue={entry?.placement ?? ""} />
+          </Field>
+
+          <Field label="Field size" hint="Out of how many">
+            <TextInput name="field_size" type="number" min={1} defaultValue={entry?.field_size ?? ""} />
+          </Field>
+        </div>
       </div>
 
       <Field label="Detail">
@@ -204,7 +207,7 @@ export function RecordSection({
             const pending = pendingByEntry.get(entry.id) ?? null;
             return (
               <li key={entry.id} id={`entry-${entry.id}`} className="flex flex-wrap items-start gap-x-5 gap-y-4" style={{ padding: "var(--feature-pad)" }}>
-                <time dateTime={entry.achieved_on} className="w-16 shrink-0 pt-1 text-sm text-ink-muted" data-numeric>
+                <time dateTime={entry.achieved_on} className="shrink-0 pt-1 text-sm text-ink-muted max-sm:basis-full max-sm:pt-0 sm:w-16" data-numeric>
                   {recordDate(entry.achieved_on)}
                 </time>
 

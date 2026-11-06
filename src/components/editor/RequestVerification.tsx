@@ -135,7 +135,7 @@ export function RequestVerification({
         <div className="basis-full border-t border-rule pt-5">
           <form action={formAction} className="flex flex-wrap items-end gap-3">
             <input type="hidden" name="entry_id" value={entryId} />
-            <label className="block min-w-48 flex-1">
+            <label className="block w-full min-w-0 sm:w-auto sm:min-w-48 sm:flex-1">
               <span className="label mb-1.5 block font-bold text-ink-muted">Coach who saw it</span>
               <Select name="coach_id" required defaultValue={defaultCoach(coaches, disputed)}>
                 {coaches.map((c) => (
@@ -146,7 +146,7 @@ export function RequestVerification({
                 ))}
               </Select>
             </label>
-            <SubmitButton className="btn-outline min-h-9 px-4 text-sm" pendingLabel="Creating…">
+            <SubmitButton className="btn-outline min-h-9 px-4 text-sm max-sm:w-full" pendingLabel="Creating…">
               Create request link
             </SubmitButton>
             <ErrorLine error={state.error} />

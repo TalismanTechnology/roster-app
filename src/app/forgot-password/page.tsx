@@ -20,7 +20,7 @@ export default function ForgotPasswordPage() {
       below={
         <>
           Remembered it?{" "}
-          <Link href="/sign-in" className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+          <Link href="/sign-in" className="tap-inline text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
             Sign in
           </Link>
         </>

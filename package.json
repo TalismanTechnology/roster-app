@@ -18,7 +18,8 @@
     "seed": "tsx --conditions=react-server scripts/seed.ts",
     "moderate": "tsx --conditions=react-server scripts/moderate.ts",
     "e2e": "node scripts/smoke.mjs",
-    "audit": "node scripts/audit.mjs"
+    "audit": "node scripts/audit.mjs",
+    "mobile-audit": "node scripts/mobile-audit.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",

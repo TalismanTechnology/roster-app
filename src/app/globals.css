@@ -488,6 +488,22 @@ body {
   padding-bottom: max(var(--pb-min, 0.75rem), calc(var(--safe-bottom) + 0.5rem));
 }
 
+/* An inline link in running text, padded to a ~42px hit area on phones.
+   Vertical padding on an inline box grows its hit area, not the line. */
+@utility tap-inline {
+  @media (max-width: 639px) {
+    padding-block: 0.75rem;
+  }
+}
+
+/* A horizontal strip that scrolls by thumb with no scrollbar. */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 /* Imagery placeholder — layered charcoal light on the identity's grid. */
 @utility placeholder {
   background: radial-gradient(120% 90% at 25% 15%, #2a2d31 0%, #16181c 45%, #0a0b0c 100%);

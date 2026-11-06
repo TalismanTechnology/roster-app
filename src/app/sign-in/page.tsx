@@ -35,7 +35,7 @@ export default async function SignInPage({ searchParams }: PageProps<"/sign-in">
       below={
         <>
           New here?{" "}
-          <Link href={signInHref(next, "/sign-up")} className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+          <Link href={signInHref(next, "/sign-up")} className="tap-inline text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
             Create your resume
           </Link>
         </>
