@@ -58,13 +58,6 @@ import {
 
 type Client = SupabaseClient<Database>;
 
-/**
- * The most rows `search_athletes` is asked for when counting. The function
- * applies its own LIMIT, so the total is exact up to this and saturates
- * beyond it — fine for a pager, and it bounds the work an anonymous URL
- * can ask Postgres to do.
- */
-const SEARCH_COUNT_WINDOW = 1000;
 
 /**
  * A write's outcome, made loud. PostgREST reports an RLS refusal or a stale
@@ -712,19 +705,22 @@ export class SupabaseRepository implements Repository {
       min_gpa: params.minGpa ?? null,
       sort_by: params.sort ?? "verified_count",
     };
+    // Prefer: count=exact on the page request itself. `head: true` is a 400
+    // on PostgREST RPCs (empty body + HEAD), which made / and /search 500.
     const fetchPage = (page: number) =>
-      this.client.rpc("search_athletes", { ...args, page_size: pageSize, page_offset: (page - 1) * pageSize });
+      this.client.rpc(
+        "search_athletes",
+        { ...args, page_size: pageSize, page_offset: (page - 1) * pageSize },
+        { count: "exact" },
+      );
 
     const requested = Math.max(Math.trunc(params.page ?? 1) || 1, 1);
-    // The count and the requested page in parallel; a page past the end is
-    // refetched clamped, which only costs a second trip on a stale link.
-    const [counted, first] = await Promise.all([
-      this.client.rpc("search_athletes", { ...args, page_size: SEARCH_COUNT_WINDOW, page_offset: 0 }, { count: "exact", head: true }),
-      fetchPage(requested),
-    ]);
-    if (counted.error) throw new DataError("unavailable", "Search is unavailable right now.");
+    // A page past the end is refetched clamped, which only costs a second
+    // trip on a stale link.
+    const first = await fetchPage(requested);
+    if (first.error) throw new DataError("unavailable", "Search is unavailable right now.");
 
-    const total = counted.count ?? 0;
+    const total = first.count ?? 0;
     const page = clampPage(requested, total, pageSize);
     const { data, error } = page === requested ? first : await fetchPage(page);
     if (error) throw new DataError("unavailable", "Search is unavailable right now.");

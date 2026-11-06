@@ -22,7 +22,12 @@ const POINTS = [
 /** The search, shown with live results from the seeded roster. */
 export async function ForCoaches() {
   const repo = await getRepository();
-  const results = (await repo.searchAthletes({ sport: "football", gradYear: 2027, region: "TX", pageSize: 3 })).athletes;
+  let results: Awaited<ReturnType<typeof repo.searchAthletes>>["athletes"] = [];
+  try {
+    results = (await repo.searchAthletes({ sport: "football", gradYear: 2027, region: "TX", pageSize: 3 })).athletes;
+  } catch {
+    // Landing marketing chrome — never take the home page down with search.
+  }
   const query = FILTERS.map(([, q]) => q).join("&");
 
   return (
