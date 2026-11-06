@@ -1,21 +1,14 @@
-import { isSupabaseConfigured } from "@/lib/supabase/config";
+import "server-only";
+
+import { dataMode, type DataMode } from "@/lib/env";
 import { createClient } from "@/lib/supabase/server";
 
 import { LocalRepository } from "./local/repository";
 import type { Repository } from "./repository";
 import { SupabaseRepository } from "./supabase/repository";
 
-export type DataMode = "local" | "supabase";
-
-/**
- * Which adapter serves this process. `ROSTER_DATA` forces one; otherwise
- * Supabase when real credentials are present, the local file when not.
- */
-export function dataMode(): DataMode {
-  const forced = process.env.ROSTER_DATA;
-  if (forced === "local" || forced === "supabase") return forced;
-  return isSupabaseConfigured() ? "supabase" : "local";
-}
+export { dataMode };
+export type { DataMode };
 
 export function isLocalMode(): boolean {
   return dataMode() === "local";

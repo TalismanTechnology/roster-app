@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+    branches: [main, "feat/**"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Typecheck, lint, test, build
+    runs-on: ubuntu-latest
+    env:
+      # Build and test against the local JSON adapter: no Supabase project,
+      # no secrets. The values below are stubs, not credentials.
+      ROSTER_DATA: local
+      ROSTER_SESSION_SECRET: ci-only-session-secret-not-used-anywhere-real-0123456789
+      NEXT_PUBLIC_SITE_URL: http://localhost:3000
+      NEXT_TELEMETRY_DISABLED: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  schema:
+    name: Schema tests (Postgres)
+    runs-on: ubuntu-latest
+    # ubuntu-latest ships PostgreSQL under /usr/lib/postgresql/*/bin, which is
+    # all run.sh needs: it initdb's a throwaway cluster of its own, so no
+    # service container. Non-blocking until it has a green run on a runner;
+    # TODO: drop continue-on-error once it has.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm run test:schema
+
+  # TODO(wave 3): end-to-end smoke (`npm run e2e`) needs a running server and
+  # a Playwright Chromium; add it once the smoke run is isolated from .data/.

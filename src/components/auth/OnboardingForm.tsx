@@ -35,7 +35,9 @@ export function OnboardingForm() {
   const [, startCheck] = useTransition();
 
   // Debounced live availability. Local validation first so the common
-  // typos never hit the server.
+  // typos never hit the server. The synchronous writes are the effect's
+  // whole point: availability is state that follows `handle`.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const h = handle.trim().toLowerCase();
     if (h === "") {
@@ -55,6 +57,7 @@ export function OnboardingForm() {
     }, 350);
     return () => clearTimeout(t);
   }, [handle]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const canAdvance = step === 0 ? availability === "available" : step === 1 ? name.trim().length >= 2 : true;
 

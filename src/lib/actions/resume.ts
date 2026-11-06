@@ -5,10 +5,11 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import { getRepository } from "@/lib/data";
-import { getCurrentUser } from "@/lib/data/auth";
-import { DataError } from "@/lib/data/types";
 import type { AchievementKind, AthleteLevel, ProfileVisibility } from "@/lib/database.types";
+import { KIND_OPTIONS, LEVEL_OPTIONS } from "@/lib/format";
 import { isReservedHandle, HANDLE_PATTERN } from "@/lib/handles";
+
+import { failed, requireUser, str } from "./shared";
 
 /**
  * Every write behind the resume editor.
@@ -27,30 +28,8 @@ export type FormState = {
 
 const IDLE: FormState = { ok: true, error: null };
 
-async function requireUser() {
-  const user = await getCurrentUser();
-  if (!user) redirect("/sign-in");
-  return { repo: await getRepository(), user };
-}
-
 function firstIssue(error: z.ZodError): string {
   return error.issues[0].message;
-}
-
-/**
- * A field as a string, "" when absent. A form that omits an optional column
- * — or a direct POST that omits anything — must read as "empty", not as a
- * type error; the schemas' `optionalText` then turns "" into null.
- */
-function str(formData: FormData, name: string): string {
-  const value = formData.get(name);
-  return typeof value === "string" ? value : "";
-}
-
-/** Maps a thrown DataError to the form; anything else is a generic retry. */
-function failed(error: unknown, fallback: string): FormState {
-  if (error instanceof DataError) return { ok: false, error: error.message };
-  return { ok: false, error: fallback };
 }
 
 /** "" → null, so an emptied optional field clears the column instead of
@@ -73,10 +52,8 @@ const uuidField = z.string().min(1);
 // Onboarding — the one insert into profiles
 // ---------------------------------------------------------------------------
 
-const LEVELS: AthleteLevel[] = [
-  "high_school", "club", "juco", "ncaa_d3", "ncaa_d2", "ncaa_d1",
-  "naia", "semi_pro", "professional", "national_team", "olympic",
-];
+// The label maps in format.ts are the single source for both enums.
+const LEVELS = LEVEL_OPTIONS.map(([value]) => value);
 
 const onboardingSchema = z.object({
   handle: z
@@ -275,10 +252,7 @@ export async function updateVisibility(_prev: FormState, formData: FormData): Pr
 // The record
 // ---------------------------------------------------------------------------
 
-const KINDS: AchievementKind[] = [
-  "personal_record", "result", "award", "record",
-  "captaincy", "commitment", "selection", "milestone",
-];
+const KINDS = KIND_OPTIONS.map(([value]) => value);
 
 const achievementSchema = z.object({
   kind: z.enum(KINDS as [AchievementKind, ...AchievementKind[]]),

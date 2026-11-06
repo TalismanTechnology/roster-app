@@ -4,9 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
-import { getRepository } from "@/lib/data";
-import { getCurrentUser } from "@/lib/data/auth";
-import { DataError } from "@/lib/data/types";
+import { failed, requireUser as requireSession, str } from "./shared";
 
 /**
  * Recruiter lists. Owner-only at the repository; here we only require a
@@ -18,21 +16,7 @@ export type ListFormState = { ok: boolean; error: string | null };
 
 const IDLE: ListFormState = { ok: true, error: null };
 
-async function requireUser() {
-  const user = await getCurrentUser();
-  if (!user) redirect("/sign-in?next=/lists");
-  return { repo: await getRepository(), user };
-}
-
-function str(formData: FormData, name: string): string {
-  const value = formData.get(name);
-  return typeof value === "string" ? value : "";
-}
-
-function failed(error: unknown, fallback: string): ListFormState {
-  if (error instanceof DataError) return { ok: false, error: error.message };
-  return { ok: false, error: fallback };
-}
+const requireUser = () => requireSession("/sign-in?next=/lists");
 
 function refresh() {
   revalidatePath("/lists");

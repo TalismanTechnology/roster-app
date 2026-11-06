@@ -12,6 +12,7 @@ import { Site } from "@/components/shell/Site";
 import { Corner, CORNER } from "@/components/ui/marks";
 import { getRepository } from "@/lib/data";
 import { getCurrentUser } from "@/lib/data/auth";
+import type { VerificationRequest } from "@/lib/data/types";
 
 export const metadata: Metadata = {
   title: "Edit your resume",
@@ -65,7 +66,7 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
   const requested = typeof params.section === "string" && SECTION_IDS.has(params.section) ? (params.section as SectionId) : null;
   const active: SectionId = requested ?? firstUnfinished(checklist);
   const visibility = { public: "Public", unlisted: "Unlisted", private: "Private" }[profile.visibility];
-  const pendingCount = requests.filter((r) => r.status === "pending").length;
+  const pendingCount = requests.filter((r: VerificationRequest) => r.status === "pending").length;
 
   return (
     <Site>

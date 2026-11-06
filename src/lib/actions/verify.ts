@@ -5,7 +5,8 @@ import { z } from "zod";
 
 import { getRepository } from "@/lib/data";
 import { getCurrentUser } from "@/lib/data/auth";
-import { DataError } from "@/lib/data/types";
+
+import { failed, str } from "./shared";
 
 /**
  * A coach's answer to a verification request. No account required: the
@@ -30,11 +31,6 @@ const schema = z.object({
     .max(500, "Keep the note under 500 characters.")
     .transform((v) => (v === "" ? null : v)),
 });
-
-function str(formData: FormData, name: string): string {
-  const value = formData.get(name);
-  return typeof value === "string" ? value : "";
-}
 
 export async function respondVerification(_prev: VerifyFormState, formData: FormData): Promise<VerifyFormState> {
   const parsed = schema.safeParse({
@@ -61,8 +57,7 @@ export async function respondVerification(_prev: VerifyFormState, formData: Form
     revalidatePath("/resume");
     if (request) revalidatePath(`/${request.athlete.handle}`);
   } catch (error) {
-    if (error instanceof DataError) return { ok: false, error: error.message };
-    return { ok: false, error: "Could not record your answer. Try again." };
+    return failed(error, "Could not record your answer. Try again.");
   }
 
   return { ok: true, error: null, outcome };

@@ -1,19 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "__claude-auto-approve__",
-      "Bash(*)",
-      "Edit(*)",
-      "Write(*)",
-      "Read(*)",
-      "Glob(*)",
-      "Grep(*)",
-      "WebFetch(*)",
-      "WebSearch(*)",
-      "TodoWrite(*)",
-      "Task(*)",
-      "NotebookEdit(*)",
-      "mcp__*(*)"
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(npm run typecheck)",
+      "Bash(npm run lint)",
+      "Bash(npm test)",
+      "Bash(npm run build)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)"
     ]
   },
   "hooks": {

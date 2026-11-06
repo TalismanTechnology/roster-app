@@ -5,7 +5,8 @@ import { Img } from "@/components/ui/Img";
 import { Frame, Unverified, Verified } from "@/components/ui/marks";
 import { getRepository } from "@/lib/data";
 import type { RecordEntry } from "@/lib/database.types";
-import { levelLabel, sportLabel } from "@/lib/format";
+import { levelLabel } from "@/lib/format";
+import { sportName } from "@/lib/sports";
 
 import { Section } from "./Section";
 
@@ -98,7 +99,7 @@ export async function ResumeDemo() {
               </div>
               <p className="text-sm">Senior season highlights</p>
               <p className="label border-t border-rule pt-3 text-ink-muted">
-                {profile ? `GPA ${profile.gpa} · ${levelLabel(profile.level)} · ${sportLabel(profile.primary_sport)}` : "GPA 3.8 · High School · Football"}
+                {profile ? `GPA ${profile.gpa} · ${levelLabel(profile.level)} · ${sportName(profile.primary_sport)}` : "GPA 3.8 · High School · Football"}
               </p>
               {profile && (
                 <Link href={`/${profile.handle}`} className="label text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">

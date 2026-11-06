@@ -1,6 +1,10 @@
+import "server-only";
+
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+
+import { env, sessionSecret } from "@/lib/env";
 
 import { dataDir } from "./paths";
 
@@ -11,7 +15,8 @@ import { dataDir } from "./paths";
  * gated request with no I/O beyond reading the secret once, which is the
  * property that matters — a session check must never be the slow part of a
  * page. The secret comes from the environment or, failing that, a file
- * generated on first use so a fresh clone works with zero setup.
+ * generated on first use so a fresh clone works with zero setup. Production
+ * requires the environment variable — see `sessionSecret`.
  */
 
 export const SESSION_COOKIE = "roster_session";
@@ -22,8 +27,8 @@ let cachedSecret: string | null = null;
 function secret(): string {
   if (cachedSecret) return cachedSecret;
 
-  const fromEnv = process.env.ROSTER_SESSION_SECRET;
-  if (fromEnv && fromEnv.length >= 32) {
+  const fromEnv = sessionSecret();
+  if (fromEnv) {
     cachedSecret = fromEnv;
     return cachedSecret;
   }
@@ -66,7 +71,7 @@ export function sessionCookieOptions() {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: process.env.NODE_ENV === "production",
+    secure: env().NODE_ENV === "production",
     path: "/",
   };
 }

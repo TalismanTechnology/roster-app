@@ -117,7 +117,9 @@ function Outcome({
   const state = request.status === "verified" ? "verified" : "disputed";
   // The action's revalidation re-renders this page the moment a coach
   // answers, so "just answered" is rendered here from the timestamp rather
-  // than held in client state that would unmount.
+  // than held in client state that would unmount. A Server Component renders
+  // once per request, so reading the clock here is deliberate.
+  // eslint-disable-next-line react-hooks/purity
   const isFresh = Boolean(request.responded_at && Date.now() - new Date(request.responded_at).getTime() < 2 * 60_000);
 
   if (isFresh) {

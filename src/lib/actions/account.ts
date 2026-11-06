@@ -3,9 +3,9 @@
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
-import { getRepository } from "@/lib/data";
-import { getCurrentUser, signOutEverywhere } from "@/lib/data/auth";
-import { DataError } from "@/lib/data/types";
+import { signOutEverywhere } from "@/lib/data/auth";
+
+import { failed, requireUser as requireSession, str } from "./shared";
 
 /**
  * Account settings: the sign-in email, the password, and deletion. Each
@@ -17,21 +17,7 @@ export type AccountFormState = { ok: boolean; error: string | null };
 
 const IDLE: AccountFormState = { ok: true, error: null };
 
-function str(formData: FormData, name: string): string {
-  const value = formData.get(name);
-  return typeof value === "string" ? value : "";
-}
-
-function failed(error: unknown, fallback: string): AccountFormState {
-  if (error instanceof DataError) return { ok: false, error: error.message };
-  return { ok: false, error: fallback };
-}
-
-async function requireUser() {
-  const user = await getCurrentUser();
-  if (!user) redirect("/sign-in?next=/settings");
-  return { repo: await getRepository(), user };
-}
+const requireUser = () => requireSession("/sign-in?next=/settings");
 
 export async function updateEmail(_prev: AccountFormState, formData: FormData): Promise<AccountFormState> {
   const { repo, user } = await requireUser();

@@ -1,3 +1,5 @@
+import "server-only";
+
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { CoachContact, Database, FilmClip, Profile, RecordEntry } from "@/lib/database.types";

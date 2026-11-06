@@ -93,14 +93,12 @@ export function RecordList({ entries, isOwner }: { entries: RecordEntry[]; isOwn
   }
 
   const sorted = [...entries].sort((a, b) => b.achieved_on.localeCompare(a.achieved_on));
-  let lastYear = "";
 
   return (
     <ol className="border-t border-rule">
-      {sorted.map((e) => {
+      {sorted.map((e, i) => {
         const year = e.achieved_on.slice(0, 4);
-        const showYear = year !== lastYear;
-        lastYear = year;
+        const showYear = i === 0 || sorted[i - 1].achieved_on.slice(0, 4) !== year;
         const context = entryContext(e);
 
         return (

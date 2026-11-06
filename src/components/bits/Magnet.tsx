@@ -29,10 +29,7 @@ const Magnet: React.FC<MagnetProps> = ({
   const magnetRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (disabled) {
-      setPosition({ x: 0, y: 0 });
-      return;
-    }
+    if (disabled) return;
 
     const handleMouseMove = (e: MouseEvent) => {
       if (!magnetRef.current) return;
@@ -62,6 +59,8 @@ const Magnet: React.FC<MagnetProps> = ({
   }, [padding, disabled, magnetStrength]);
 
   const transitionStyle = isActive ? activeTransition : inactiveTransition;
+  // Disabled reads as centered without a state write in the effect.
+  const offset = disabled ? { x: 0, y: 0 } : position;
 
   return (
     <div
@@ -73,7 +72,7 @@ const Magnet: React.FC<MagnetProps> = ({
       <div
         className={innerClassName}
         style={{
-          transform: `translate3d(${position.x}px, ${position.y}px, 0)`,
+          transform: `translate3d(${offset.x}px, ${offset.y}px, 0)`,
           transition: transitionStyle,
           willChange: 'transform'
         }}

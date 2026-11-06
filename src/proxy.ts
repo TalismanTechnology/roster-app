@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { SESSION_COOKIE, verifySession } from "@/lib/data/local/session";
-import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { dataMode, sessionSecret, supabaseCredentials } from "@/lib/env";
 
 /**
  * Runs before every matched request. Named `proxy` rather than `middleware`:
@@ -22,27 +22,24 @@ import { isSupabaseConfigured } from "@/lib/supabase/config";
 /** Routes that require a session. Everything else is public. */
 const PROTECTED_PATHS = ["/resume", "/settings", "/onboarding", "/lists"];
 
-function localMode(): boolean {
-  const forced = process.env.ROSTER_DATA;
-  if (forced === "local") return true;
-  if (forced === "supabase") return false;
-  return !isSupabaseConfigured();
-}
-
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (localMode()) {
+  if (dataMode() === "local") {
+    // Throws in production without a real secret, on every request rather
+    // than only at the first sign-in, so a misconfigured deploy is obvious.
+    sessionSecret();
     const userId = verifySession(request.cookies.get(SESSION_COOKIE)?.value);
     if (!userId && isProtected(pathname)) return toSignIn(request, pathname);
     return NextResponse.next({ request });
   }
 
   let response = NextResponse.next({ request });
+  const { url, anonKey } = supabaseCredentials();
 
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    url,
+    anonKey,
     {
       cookies: {
         getAll() {

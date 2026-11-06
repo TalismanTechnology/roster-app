@@ -34,21 +34,10 @@ export function kindLabel(kind: AchievementKind): string {
 }
 
 /**
- * "track_field" → "Track Field", "cross country" → "Cross Country".
- *
- * Title-cases here rather than with a CSS `capitalize` class, because that
- * class capitalizes *every* word in the element — which turned an adjacent
- * "Class of 2027" into "Class Of 2027".
+ * Sport labels live in `@/lib/sports` with the sport list itself. This alias
+ * keeps older imports working without a second title-casing implementation.
  */
-export function sportLabel(sport: string | null): string | null {
-  if (!sport) return null;
-
-  return sport
-    .replace(/_/g, " ")
-    .split(" ")
-    .map((word) => (word.length > 0 ? word[0].toUpperCase() + word.slice(1) : word))
-    .join(" ");
-}
+export { sportName as sportLabel } from "@/lib/sports";
 
 /**
  * Formats a date as the record displays it: 05.04.24, matching the preview

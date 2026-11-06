@@ -1,5 +1,7 @@
 import type { MetadataRoute } from "next";
 
+import { env } from "@/lib/env";
+
 /**
  * The site is public and meant to be found; only the surfaces that belong
  * to a signed-in person are kept out. Unlisted and private resumes protect
@@ -18,5 +20,5 @@ export default function robots(): MetadataRoute.Robots {
 }
 
 export function siteUrl(): string {
-  return process.env.NEXT_PUBLIC_SITE_URL ?? "https://roster.us";
+  return env().NEXT_PUBLIC_SITE_URL ?? "https://roster.us";
 }

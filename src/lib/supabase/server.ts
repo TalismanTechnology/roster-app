@@ -1,7 +1,10 @@
+import "server-only";
+
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
 import type { Database } from "@/lib/database.types";
+import { supabaseCredentials } from "@/lib/env";
 
 /**
  * Supabase client for Server Components, Server Actions, and Route Handlers.
@@ -12,10 +15,11 @@ import type { Database } from "@/lib/database.types";
  */
 export async function createClient() {
   const cookieStore = await cookies();
+  const { url, anonKey } = supabaseCredentials();
 
   return createServerClient<Database>(
-    requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
-    requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+    url,
+    anonKey,
     {
       cookies: {
         getAll() {
@@ -35,32 +39,4 @@ export async function createClient() {
       },
     },
   );
-}
-
-/**
- * Returns the signed-in user, or null.
- *
- * Always reads through `getUser()` rather than `getSession()`. `getSession()`
- * returns whatever the cookie claims without verifying it against the auth
- * server, so it must never gate access to anything that matters.
- */
-export async function getCurrentUser() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  return user;
-}
-
-function requireEnv(name: string): string {
-  const value = process.env[name];
-
-  if (!value) {
-    throw new Error(
-      `Missing ${name}. Copy .env.example to .env.local and fill in your Supabase project values.`,
-    );
-  }
-
-  return value;
 }
