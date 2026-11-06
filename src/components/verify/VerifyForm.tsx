@@ -127,15 +127,32 @@ export function VerifyForm({
         </p>
       )}
 
-      <div className={`flex flex-wrap items-center gap-3 ${compact ? "" : "border-t border-rule pt-5"}`}>
-        <Decision outcome="verified" className="btn-primary" disabled={!attested}>
-          Yes, I verify this
-        </Decision>
-        <Decision outcome="disputed" className="btn-outline">
-          No, this isn&rsquo;t right
-        </Decision>
+      {/* The answer itself. On a phone (main form only) the row dissolves
+          and Verify / Dispute ride a bar pinned to the bottom of the screen
+          for as long as the form is in view — two big targets, side by
+          side, clear of the home indicator. Sticky needs the form as its
+          containing block, hence `contents` on the row below sm. */}
+      <div className={`flex flex-wrap items-center gap-3 ${compact ? "" : "border-t border-rule pt-5 max-sm:contents"}`}>
+        <div
+          className={
+            compact
+              ? "contents"
+              : "contents max-sm:sticky max-sm:bottom-0 max-sm:z-20 max-sm:-mx-(--pad-x) max-sm:grid max-sm:grid-cols-2 max-sm:gap-2 max-sm:border-t max-sm:border-rule max-sm:bg-paper/95 max-sm:px-(--pad-x) max-sm:pt-3 max-sm:pb-safe-min max-sm:backdrop-blur-md"
+          }
+        >
+          <Decision outcome="verified" className={`btn-primary ${compact ? "" : "max-sm:py-3.5"}`} disabled={!attested}>
+            <Short when={!compact} short="Yes, verify">
+              Yes, I verify this
+            </Short>
+          </Decision>
+          <Decision outcome="disputed" className={`btn-outline ${compact ? "" : "max-sm:py-3.5"}`}>
+            <Short when={!compact} short="No, dispute">
+              No, this isn&rsquo;t right
+            </Short>
+          </Decision>
+        </div>
         {!compact && (
-          <Decision outcome="unknown" className="btn-row ml-auto">
+          <Decision outcome="unknown" className="btn-row ml-auto max-sm:w-full">
             I don&rsquo;t coach or know this athlete
           </Decision>
         )}
@@ -166,5 +183,16 @@ function Decision({
     >
       {pending ? "Recording…" : children}
     </button>
+  );
+}
+
+/** A label that says less on a phone, where it shares the bar with its pair. */
+function Short({ when, short, children }: { when: boolean; short: string; children: React.ReactNode }) {
+  if (!when) return children;
+  return (
+    <>
+      <span className="sm:hidden">{short}</span>
+      <span className="max-sm:hidden">{children}</span>
+    </>
   );
 }

@@ -69,7 +69,7 @@ export function ListNoteForm({ listId, profileId, note, athleteName }: { listId:
         maxLength={300}
         placeholder="Add a note — visits, contact, what to watch"
         aria-label={`Note on ${athleteName}`}
-        className="min-w-0 flex-1 basis-56 border-0 border-b border-rule bg-transparent px-0 py-1.5 text-sm text-ink placeholder:text-ink-subtle focus:border-ink focus:outline-none"
+        className="min-w-0 flex-1 basis-56 border-0 border-b border-rule bg-transparent px-0 py-2.5 text-base text-ink sm:py-1.5 sm:text-sm placeholder:text-ink-subtle focus:border-ink focus:outline-none"
       />
       <SubmitButton className="label cursor-pointer text-ink-subtle underline decoration-transparent underline-offset-4 hover:text-ink hover:decoration-ink" pendingLabel="Saving…">
         Save note

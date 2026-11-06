@@ -37,7 +37,13 @@ function menuLinks(user: HeaderUser): [string, string][] {
   ];
 }
 
-const MENU_ROW = "flex min-h-12 items-center gap-4 py-3 text-ink-muted transition-colors hover:text-ink";
+const MENU_ROW =
+  "flex min-h-14 items-center gap-4 py-3 text-lg text-ink-muted transition-colors hover:text-ink active:text-ink aria-[current=page]:text-ink";
+
+/** The current route, or a page inside it (/lists/abc under Lists). */
+function isActive(pathname: string, href: string): boolean {
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
 
 /** The editorial row number — 01, 02 — decoration only. */
 function MenuIndex({ n }: { n: number }) {
@@ -85,7 +91,10 @@ export function SiteHeader({ user, variant = "app", pending = false }: Props) {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  // Escape closes the menu and hands focus back to the toggle.
+  // While the sheet is open: the page under it doesn't scroll, Escape
+  // closes it and hands focus back to the toggle, and widening past sm
+  // (rotation, a resized window) closes it — the sheet is display:none
+  // there, and its scroll lock must not outlive it.
   useEffect(() => {
     if (!isMenuOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -93,8 +102,17 @@ export function SiteHeader({ user, variant = "app", pending = false }: Props) {
       setMenuOpenedAt(null);
       menuButtonRef.current?.focus();
     };
+    const wide = window.matchMedia("(min-width: 640px)");
+    const onWide = () => wide.matches && setMenuOpenedAt(null);
+    const { overflow } = document.body.style;
+    document.body.style.overflow = "hidden";
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    wide.addEventListener("change", onWide);
+    return () => {
+      document.body.style.overflow = overflow;
+      document.removeEventListener("keydown", onKey);
+      wide.removeEventListener("change", onWide);
+    };
   }, [isMenuOpen]);
 
   const closeMenu = () => setMenuOpenedAt(null);
@@ -104,13 +122,19 @@ export function SiteHeader({ user, variant = "app", pending = false }: Props) {
   const shell = isLanding
     ? "fixed inset-x-0 top-0 z-40 pointer-events-none"
     : `sticky top-0 z-40 border-b transition-colors duration-300 ${isScrolled ? "bar-blur border-rule" : "border-transparent"}`;
+  // Open, the bar turns solid so it and the sheet read as one surface.
+  const opened = isMenuOpen ? "max-sm:bg-paper" : "";
+  // Below sm the pill is a full thumb target; from sm it is the desktop size.
+  const pill = `group inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-bold text-ink backdrop-blur-md transition-colors hover:border-ink hover:bg-ink hover:text-paper max-sm:min-h-11 sm:px-4 ${glass}`;
 
   return (
-    <header className={`print-hidden ${shell}`} style={{ paddingInline: "var(--pad-x)" }}>
+    // pt-safe: installed to the home screen, the bar starts under the status bar.
+    <header className={`print-hidden pt-safe ${shell} ${opened}`} style={{ paddingInline: "var(--pad-x)" }}>
       <div className="relative flex items-center justify-between" style={{ height: "var(--header-h)" }}>
+        {/* Padded out to a 44px target; the negative margin keeps the wordmark on the gutter. */}
         <Link
           href="/"
-          className="pointer-events-auto font-display tracking-tight transition-opacity hover:opacity-80"
+          className="pointer-events-auto -mx-2 inline-flex min-h-11 items-center px-2 font-display tracking-tight transition-opacity hover:opacity-80"
           style={{ fontSize: "clamp(1.35rem, 1.2vw + 0.9rem, 2.1rem)" }}
         >
           Roster
@@ -123,7 +147,7 @@ export function SiteHeader({ user, variant = "app", pending = false }: Props) {
 
           {pending ? (
             // Roughly the signed-out pill's footprint, so nothing shifts when the real controls land.
-            <span aria-hidden className={`invisible inline-flex whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-bold sm:px-4 ${glass}`}>
+            <span aria-hidden className={`invisible inline-flex items-center whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-bold max-sm:min-h-11 sm:px-4 ${glass}`}>
               Create<span className="max-sm:hidden"> your</span> resume
             </span>
           ) : user ? (
@@ -143,7 +167,7 @@ export function SiteHeader({ user, variant = "app", pending = false }: Props) {
               </form>
               <Link
                 href={primaryHref(user)}
-                className={`group inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-bold text-ink backdrop-blur-md transition-colors hover:border-ink hover:bg-ink hover:text-paper sm:px-4 ${glass}`}
+                className={pill}
               >
                 {primaryLabel(user)}
                 <ArrowUpRight className="!size-3.5 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 max-sm:hidden" />
@@ -156,7 +180,7 @@ export function SiteHeader({ user, variant = "app", pending = false }: Props) {
               </Link>
               <Link
                 href="/sign-up"
-                className={`group inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-bold text-ink backdrop-blur-md transition-colors hover:border-ink hover:bg-ink hover:text-paper sm:px-4 ${glass}`}
+                className={pill}
               >
                 {/* Below sm the pill shares the bar with the menu toggle; "your" goes so 320px fits. */}
                 Create<span className="max-sm:hidden"> your</span> resume
@@ -172,32 +196,46 @@ export function SiteHeader({ user, variant = "app", pending = false }: Props) {
             aria-expanded={isMenuOpen}
             aria-controls="site-menu"
             onClick={() => setMenuOpenedAt(isMenuOpen ? null : pathname)}
-            className={`label min-h-10 cursor-pointer whitespace-nowrap px-1.5 font-mono transition-colors hover:text-ink sm:hidden ${isMenuOpen ? "text-ink" : "text-ink-muted"}`}
+            className={`label -mr-1.5 inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center whitespace-nowrap px-1.5 font-mono transition-colors hover:text-ink sm:hidden ${isMenuOpen ? "text-ink" : "text-ink-muted"}`}
           >
-            <span aria-hidden>[</span> Menu <span aria-hidden>]</span>
+            {/* One inline box, so flex layout doesn't trim the spaces inside the brackets. */}
+            <span className="whitespace-pre">
+              <span aria-hidden>[</span> Menu <span aria-hidden>]</span>
+            </span>
           </button>
         </nav>
       </div>
 
-      {/* Phone menu: the links the bar drops below sm, as a hairline-ruled
-          list. `hidden` while closed and display:none from sm up, so the
-          desktop bar never has a second "Sign out" in the tree. */}
+      {/* Phone menu: a full-height sheet of paper under the bar, the links
+          the bar drops below sm as a hairline-ruled list. `hidden` while
+          closed and display:none from sm up, so the desktop bar never has a
+          second "Sign out" in the tree. Tapping the empty paper below the
+          list closes it, like a backdrop. */}
       <nav
         id="site-menu"
         aria-label="Menu"
         hidden={!isMenuOpen}
-        className="pointer-events-auto absolute inset-x-0 top-full border-b border-rule bg-paper sm:hidden"
+        onClick={(e) => e.target === e.currentTarget && closeMenu()}
+        className="pointer-events-auto absolute inset-x-0 top-full flex h-[calc(100dvh-var(--header-h)-var(--safe-top))] flex-col overflow-y-auto overscroll-contain border-t border-rule bg-paper pb-safe-min sm:hidden"
         style={{ paddingInline: "var(--pad-x)" }}
       >
-        <ul className="divide-y divide-rule border-t border-rule">
-          {links.map(([label, href], i) => (
-            <li key={href}>
-              <Link href={href} onClick={closeMenu} className={MENU_ROW}>
-                <MenuIndex n={i + 1} />
-                {label}
-              </Link>
-            </li>
-          ))}
+        <ul className="divide-y divide-rule border-b border-rule">
+          {links.map(([label, href], i) => {
+            const active = isActive(pathname, href);
+            return (
+              <li key={href}>
+                <Link href={href} onClick={closeMenu} aria-current={active ? "page" : undefined} className={MENU_ROW}>
+                  <MenuIndex n={i + 1} />
+                  <span className="flex-1">{label}</span>
+                  {active && (
+                    <span className="label font-mono text-ink-subtle" aria-hidden>
+                      [ Here ]
+                    </span>
+                  )}
+                </Link>
+              </li>
+            );
+          })}
           {user && (
             <li>
               <form action={signOut}>
@@ -209,6 +247,16 @@ export function SiteHeader({ user, variant = "app", pending = false }: Props) {
             </li>
           )}
         </ul>
+
+        {/* The bar's one filled action, again where the thumb rests. */}
+        {!pending && (
+          <div className="mt-auto pt-8">
+            <Link href={user ? primaryHref(user) : "/sign-up"} onClick={closeMenu} className="btn-primary w-full">
+              {user ? primaryLabel(user) : "Create your resume"}
+              <ArrowUpRight className="!size-3.5" />
+            </Link>
+          </div>
+        )}
       </nav>
     </header>
   );

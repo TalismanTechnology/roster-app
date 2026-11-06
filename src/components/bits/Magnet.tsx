@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useRef, type ReactNode, type HTMLAttributes } from 'react';
 import { useReducedMotion } from 'motion/react';
 
+import { useFinePointer } from './useFinePointer';
+
 interface MagnetProps extends HTMLAttributes<HTMLDivElement> {
   children: ReactNode;
   padding?: number;
@@ -28,9 +30,11 @@ const Magnet: React.FC<MagnetProps> = ({
   const [isActive, setIsActive] = useState<boolean>(false);
   const [position, setPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const magnetRef = useRef<HTMLDivElement>(null);
-  // Under reduced motion the magnet is simply off: no listener, no transform.
+  // Under reduced motion, and on touch screens, the magnet is simply off:
+  // no listener, no transform.
   const prefersReduced = useReducedMotion();
-  const isOff = disabled || prefersReduced === true;
+  const isFine = useFinePointer();
+  const isOff = disabled || prefersReduced === true || !isFine;
 
   useEffect(() => {
     if (isOff) return;
@@ -69,8 +73,7 @@ const Magnet: React.FC<MagnetProps> = ({
   return (
     <div
       ref={magnetRef}
-      className={wrapperClassName}
-      style={{ position: 'relative', display: 'inline-block' }}
+      className={`relative inline-block ${wrapperClassName}`}
       {...props}
     >
       <div

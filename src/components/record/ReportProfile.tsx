@@ -34,7 +34,7 @@ export function ReportProfile({ profileId, name }: { profileId: string; name: st
 
   return (
     <details className="print-hidden group border-t border-rule py-6" style={{ paddingInline: "var(--pad-x)" }}>
-      <summary className="label inline-flex cursor-pointer items-center gap-2 text-ink-subtle transition-colors hover:text-ink">
+      <summary className="label inline-flex min-h-11 cursor-pointer items-center gap-2 text-ink-subtle transition-colors hover:text-ink sm:min-h-0">
         Report this profile
       </summary>
 

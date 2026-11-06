@@ -35,11 +35,12 @@ export function Hero() {
           </h1>
           <Corner d={CORNER.bl} />
 
-          <div className="hero-cta mt-2 flex flex-wrap items-center gap-3">
-            <Magnet padding={40} magnetStrength={6}>
-              <Button href="/sign-up" arrow>Create your resume</Button>
+          {/* Phones: the primary action spans the thumb's reach, the secondary under it. */}
+          <div className="hero-cta mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
+            <Magnet padding={40} magnetStrength={6} wrapperClassName="max-sm:block">
+              <Button href="/sign-up" arrow className="max-sm:w-full">Create your resume</Button>
             </Magnet>
-            <Button href="/search" variant="ghost">Find athletes</Button>
+            <Button href="/search" variant="ghost" className="max-sm:w-full max-sm:justify-center">Find athletes</Button>
           </div>
         </div>
 

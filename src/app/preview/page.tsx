@@ -25,7 +25,7 @@ export default function PreviewPage() {
         style={{ paddingInline: "var(--pad-x)" }}
       >
         <span>Preview — sample data, no database. Every name here is fictional.</span>
-        <Link href="/sign-up" className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+        <Link href="/sign-up" className="inline-flex min-h-11 items-center text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink sm:min-h-0">
           Create yours
         </Link>
       </p>

@@ -54,15 +54,17 @@ export default async function VerifyPage({ params }: PageProps<"/verify/[token]"
       <p className="label flex items-center gap-2 text-ink-muted">
         <Corner d={CORNER.tl} /> Verification request
       </p>
-      <h1 className="font-display text-display-lg mt-4 leading-[0.95] tracking-tight">
+      {/* Phones: one size down, so the athlete, the coach, and the mark
+          itself all land on the first screen. */}
+      <h1 className="font-display mt-3 text-display leading-[0.95] tracking-tight text-balance sm:mt-4 sm:text-display-lg">
         {athlete.display_name} says this happened.
       </h1>
-      <p className="mt-4 max-w-xl text-ink-muted">
+      <p className="mt-3 max-w-xl text-ink-muted max-sm:text-sm max-sm:leading-snug sm:mt-4">
         They listed you as the coach who saw it. If it&rsquo;s right, say so and it carries your name on their resume. If it isn&rsquo;t, say that instead.
       </p>
 
       {/* #78: who the athlete thinks they're asking, before anything else. */}
-      <dl className="mt-6 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 border-y border-rule py-3 text-sm" aria-label="Who this was sent to">
+      <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 border-y border-rule py-3 text-sm sm:mt-6" aria-label="Who this was sent to">
         <dt className="label text-ink-subtle">[ Sent to ]</dt>
         <dd className="font-bold">
           {coach.name}
@@ -82,9 +84,9 @@ export default async function VerifyPage({ params }: PageProps<"/verify/[token]"
         </dd>
       </dl>
 
-      <EntryCard entry={entry} athlete={athlete} className="mt-8" />
+      <EntryCard entry={entry} athlete={athlete} className="mt-5 sm:mt-8" />
 
-      <div className="mt-10">
+      <div className="mt-8 sm:mt-10">
         <VerifyForm
           token={token}
           coachName={coach.name}
@@ -112,8 +114,11 @@ export default async function VerifyPage({ params }: PageProps<"/verify/[token]"
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <Site footer={false}>
-      <main className="grid min-h-[calc(100svh-var(--header-h))] lg:grid-cols-12">
-        <section className="flex flex-col justify-center lg:col-span-7" style={{ paddingInline: "var(--pad-x)", paddingBlock: "var(--section-py)" }}>
+      <main className="grid min-h-[calc(100dvh-var(--header-h))] lg:grid-cols-12">
+        <section
+          className="flex flex-col justify-center pt-[clamp(1.25rem,3vh,2rem)] pb-[var(--section-py)] sm:pt-[var(--section-py)] lg:col-span-7"
+          style={{ paddingInline: "var(--pad-x)" }}
+        >
           <div className="mx-auto w-full max-w-2xl">{children}</div>
         </section>
 
@@ -158,7 +163,7 @@ function EntryCard({
         {entry.detail && <p className="mt-3 max-w-prose text-sm leading-relaxed text-ink-muted">{entry.detail}</p>}
         {!compact && (
           <p className="label mt-5 flex flex-wrap items-center gap-x-2 border-t border-rule pt-4 text-ink-muted">
-            <Link href={`/${athlete.handle}`} className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+            <Link href={`/${athlete.handle}`} className="inline-flex min-h-11 items-center text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink sm:min-h-0">
               {athlete.display_name}
             </Link>
             · {[sportName(athlete.primary_sport), athlete.school, athlete.grad_year ? `Class of ${athlete.grad_year}` : null].filter(Boolean).join(" · ")}

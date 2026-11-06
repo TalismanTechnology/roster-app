@@ -110,12 +110,15 @@ export function RecordList({ entries, isOwner }: { entries: RecordEntry[]; isOwn
                 {year}
               </p>
             )}
-            <div className="grid grid-cols-[3.5rem_1fr_auto] items-start gap-x-4 py-4 @md:grid-cols-[4.5rem_1fr_auto]">
-              <time className="label pt-1 text-ink-muted" dateTime={e.achieved_on} title={fullDate(e.achieved_on)} data-numeric>
+            {/* Narrow: a two-line card — date and mark across the top, the
+                entry full-width under them — so the title never gets a
+                one-word column. From @md, the three-column ledger. */}
+            <div className="grid grid-cols-[1fr_auto] items-start gap-x-4 gap-y-1.5 py-4 @md:grid-cols-[4.5rem_1fr_auto] @md:gap-y-0">
+              <time className="label col-start-1 row-start-1 pt-1.5 text-ink-muted @md:pt-1" dateTime={e.achieved_on} title={fullDate(e.achieved_on)} data-numeric>
                 {recordDate(e.achieved_on).slice(0, 5)}
               </time>
 
-              <div className="min-w-0">
+              <div className="col-span-2 row-start-2 min-w-0 @md:col-span-1 @md:col-start-2 @md:row-start-1">
                 <p className="font-bold">{e.title}</p>
                 <p className="label mt-0.5 flex flex-wrap items-center gap-x-2 text-ink-muted">
                   <span>
@@ -128,7 +131,7 @@ export function RecordList({ entries, isOwner }: { entries: RecordEntry[]; isOwn
                 <Provenance entry={e} />
               </div>
 
-              <div className="flex max-w-[45%] items-center justify-end gap-2.5 pt-0.5 text-right">
+              <div className="col-start-2 row-start-1 flex items-center justify-end gap-2.5 pt-0.5 text-right @md:col-start-3 @md:max-w-[45%]">
                 <span className="font-display text-xl tracking-tight" data-numeric>
                   <EntryValue entry={e} />
                 </span>
@@ -266,7 +269,7 @@ export function FilmSection({ clips }: { clips: FilmClip[] }) {
                   href={clip.url}
                   target="_blank"
                   rel="noopener noreferrer nofollow"
-                  className="group flex cursor-pointer items-center gap-4 py-3 transition-colors hover:bg-wash"
+                  className="group flex min-h-14 cursor-pointer items-center gap-4 py-3 transition-colors hover:bg-wash active:bg-wash"
                 >
                   <span
                     className="relative aspect-video w-24 shrink-0 overflow-hidden border border-rule bg-paper-raised"
@@ -378,7 +381,7 @@ export function ReferencesSection({
       </ol>
       {contactHidden && (
         <p className="print-hidden label mt-3 text-ink-muted">
-          <Link href={signInHref(`/${profile.handle}`)} className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+          <Link href={signInHref(`/${profile.handle}`)} className="inline-flex min-h-11 items-center text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink sm:min-h-0">
             Sign in
           </Link>{" "}
           as a recruiter or coach to email or call references.

@@ -61,7 +61,7 @@ export function AuthForm({
       {!isSignUp && (
         <Link
           href="/forgot-password"
-          className="label -mt-3 w-fit text-ink-muted underline decoration-transparent underline-offset-4 transition-colors hover:text-ink hover:decoration-ink"
+          className="label -mt-3 inline-flex min-h-11 w-fit items-center text-ink-muted underline sm:min-h-0 decoration-transparent underline-offset-4 transition-colors hover:text-ink hover:decoration-ink"
         >
           Forgot password?
         </Link>

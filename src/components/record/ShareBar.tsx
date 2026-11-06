@@ -50,8 +50,8 @@ export function ShareBar({ handle, title, print = true }: { handle: string; titl
   }
 
   return (
-    <div className="print-hidden flex flex-wrap gap-2">
-      <button type="button" onClick={send} className="btn-outline min-h-9 px-4 text-sm" aria-live="polite">
+    <div className="print-hidden flex flex-wrap gap-2 max-sm:flex-1">
+      <button type="button" onClick={send} className="btn-outline min-h-9 px-4 text-sm max-sm:flex-1" aria-live="polite">
         {isCopied ? "Copied" : canShare ? "Share link" : "Copy link"}
       </button>
       {print && (

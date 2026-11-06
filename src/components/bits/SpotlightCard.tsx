@@ -2,6 +2,8 @@
 
 import React, { useRef, useState } from 'react';
 
+import { useFinePointer } from './useFinePointer';
+
 interface Position {
   x: number;
   y: number;
@@ -21,6 +23,8 @@ const SpotlightCard: React.FC<SpotlightCardProps> = ({
   const [isFocused, setIsFocused] = useState<boolean>(false);
   const [position, setPosition] = useState<Position>({ x: 0, y: 0 });
   const [opacity, setOpacity] = useState<number>(0);
+  // Pointer-following only: on touch a tap would leave the spotlight lit.
+  const isFine = useFinePointer();
 
   const handleMouseMove: React.MouseEventHandler<HTMLDivElement> = e => {
     if (!divRef.current || isFocused) return;
@@ -50,11 +54,11 @@ const SpotlightCard: React.FC<SpotlightCardProps> = ({
   return (
     <div
       ref={divRef}
-      onMouseMove={handleMouseMove}
+      onMouseMove={isFine ? handleMouseMove : undefined}
       onFocus={handleFocus}
       onBlur={handleBlur}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      onMouseEnter={isFine ? handleMouseEnter : undefined}
+      onMouseLeave={isFine ? handleMouseLeave : undefined}
       className={`relative overflow-hidden ${className}`}
     >
       <div

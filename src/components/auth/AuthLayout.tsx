@@ -26,7 +26,7 @@ export function AuthLayout({
 }) {
   return (
     <Site footer={false}>
-      <main className="grid min-h-[calc(100svh-var(--header-h))] lg:grid-cols-12">
+      <main className="grid min-h-[calc(100dvh-var(--header-h))] lg:grid-cols-12">
         <section
           className="flex flex-col justify-center lg:col-span-6"
           style={{ paddingInline: "var(--pad-x)", paddingBlock: "var(--section-py)" }}
@@ -43,7 +43,8 @@ export function AuthLayout({
               <div className="p-6 sm:p-8">{children}</div>
             </Frame>
 
-            {below && <div className="mt-8 text-sm text-ink-muted">{below}</div>}
+            {/* Its links ("Sign in", "Create one") are whole thumb targets on a phone. */}
+            {below && <div className="mt-8 text-sm text-ink-muted max-sm:[&_a]:inline-flex max-sm:[&_a]:min-h-11 max-sm:[&_a]:items-center">{below}</div>}
           </div>
         </section>
 

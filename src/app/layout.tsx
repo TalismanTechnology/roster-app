@@ -35,7 +35,14 @@ export const metadata: Metadata = {
   // a forgotten override leaves a page findable, not an athlete invisible.
 };
 
+// viewport-fit=cover lets the black paper run under the notch and the home
+// indicator; everything pinned to an edge pads itself with the safe-area
+// insets (globals.css). Theme colour is --paper, so the browser chrome and
+// the page are one surface.
 export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
   themeColor: "#000000",
   colorScheme: "dark",
 };
@@ -43,7 +50,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className="h-full antialiased" data-scroll-behavior="smooth">
-      <body className="flex min-h-full flex-col">{children}</body>
+      <body className="flex min-h-dvh flex-col">{children}</body>
     </html>
   );
 }

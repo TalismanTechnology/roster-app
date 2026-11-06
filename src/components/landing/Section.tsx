@@ -37,7 +37,7 @@ export function Section({ id, label, title, aside, children, className = "", flu
             <Corner d={CORNER.tl} />
             {label}
           </p>
-          <h2 id={`${id}-title`} className="font-display text-display-lg mt-4 max-w-3xl leading-[1.02] tracking-tight">
+          <h2 id={`${id}-title`} className="font-display text-display-lg mt-4 max-w-3xl leading-[1.02] tracking-tight text-balance">
             {title}
           </h2>
         </div>

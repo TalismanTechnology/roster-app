@@ -77,22 +77,23 @@ export function IdentityBand({
             {label}
           </p>
 
-          <div className="mt-4 flex items-end gap-5">
+          {/* Narrow: avatar over the name, never squeezed beside it. */}
+          <div className="mt-4 flex flex-col items-start gap-4 @md:flex-row @md:items-end @md:gap-5">
             {profile.avatar_url && <Avatar url={profile.avatar_url} name={profile.display_name} className="size-20 @xl:size-28" sizes="112px" />}
-            <div className="min-w-0">
+            <div className="min-w-0 max-w-full">
               <h1 className="font-display text-display-lg flex flex-wrap items-center gap-x-3 leading-[0.95] tracking-tight">
                 {profile.display_name}
                 {profile.identity_verified_at && <Verified className="text-[0.5em]" label="Identity verified" />}
               </h1>
 
-              <p className="mt-2 text-ink-muted">
+              <p className="mt-2 break-all text-ink-muted">
                 {siteHost()}/{profile.handle}
               </p>
             </div>
           </div>
 
-          {roster.length > 0 && <p className="mt-5 text-lg font-bold">{roster.join(" · ")}</p>}
-          {context.length > 0 && <p className="mt-1 text-ink-muted">{context.join(" · ")}</p>}
+          {roster.length > 0 && <Dotted items={roster} className="mt-5 text-lg font-bold" />}
+          {context.length > 0 && <Dotted items={context} className="mt-1 text-ink-muted" />}
           {profile.bio && <p className="mt-5 max-w-2xl whitespace-pre-line leading-relaxed">{profile.bio}</p>}
 
           {links.length > 0 && (
@@ -101,7 +102,7 @@ export function IdentityBand({
                 <li key={link.kind}>
                   {/* rel=me ties the account to this page; nofollow because
                       the athlete, not Roster, vouches for the destination. */}
-                  <a href={link.href} rel="me nofollow noopener noreferrer" target="_blank" className="chip group transition-colors hover:border-ink hover:text-ink">
+                  <a href={link.href} rel="me nofollow noopener noreferrer" target="_blank" className="chip group min-h-10 px-4 transition-colors hover:border-ink hover:text-ink sm:min-h-8 sm:px-3">
                     {link.label}
                     <ArrowUpRight className="!size-3 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
                   </a>
@@ -119,7 +120,7 @@ export function IdentityBand({
                   {profile.visibility === "public" ? "Public" : profile.visibility === "unlisted" ? "Unlisted" : "Private"}
                 </span>
               </span>
-              <Link href="/resume" className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+              <Link href="/resume" className="inline-flex min-h-11 items-center text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink sm:min-h-0">
                 Edit
               </Link>
             </p>
@@ -141,17 +142,17 @@ export function IdentityBand({
 
             <div className="print-hidden flex flex-wrap items-center gap-2 border-t border-rule pt-4">
               {gate.state === "revealed" && gate.email && (
-                <a href={`mailto:${gate.email}`} className="btn-primary min-h-9 px-4 text-sm">
+                <a href={`mailto:${gate.email}`} className="btn-primary min-h-9 px-4 text-sm max-sm:w-full">
                   Contact
                 </a>
               )}
               {gate.state === "revealed" && gate.phone && (
-                <a href={`tel:${gate.phone}`} className="btn-outline min-h-9 px-4 text-sm">
+                <a href={`tel:${gate.phone}`} className="btn-outline min-h-9 px-4 text-sm max-sm:flex-1">
                   Call
                 </a>
               )}
               {gate.state === "gated" && (
-                <Link href={signInHref(`/${profile.handle}`)} className="btn-primary min-h-9 px-4 text-sm" data-contact-gate>
+                <Link href={signInHref(`/${profile.handle}`)} className="btn-primary min-h-9 px-4 text-sm max-sm:w-full" data-contact-gate>
                   Request contact
                 </Link>
               )}
@@ -169,4 +170,10 @@ export function IdentityBand({
       </div>
     </section>
   );
+}
+
+/** A " · " line whose dots stay with the item before them, so a wrap never
+ *  starts a line on a separator. */
+function Dotted({ items, className }: { items: (string | null)[]; className: string }) {
+  return <p className={className}>{items.join("\u00a0· ")}</p>;
 }

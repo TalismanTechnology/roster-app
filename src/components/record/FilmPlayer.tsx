@@ -73,8 +73,9 @@ export function FilmPlayer({ clip }: { clip: FilmClip }) {
 
         <span aria-hidden className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
 
-        <span className="absolute bottom-0 left-0 max-w-[80%] p-5 text-left">
-          <span className="font-display text-xl leading-tight text-white">{clip.title}</span>
+        {/* Narrow, the play mark would sit on the title; the caption below carries it. */}
+        <span className="absolute bottom-0 left-0 hidden max-w-[80%] p-5 text-left @md:block">
+          <span className="font-display line-clamp-2 text-xl leading-tight text-white">{clip.title}</span>
         </span>
 
         <PlayMark />
@@ -91,9 +92,9 @@ function PlayMark() {
   return (
     <span
       aria-hidden
-      className="absolute top-1/2 left-1/2 flex size-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-paper/85 text-ink transition-transform duration-(--duration-fast) group-hover:scale-105"
+      className="absolute top-1/2 left-1/2 flex size-14 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-paper/85 text-ink transition-transform duration-(--duration-fast) group-hover:scale-105 group-active:scale-95 @md:size-16"
     >
-      <svg viewBox="0 0 24 24" className="ml-0.5 size-7 fill-current">
+      <svg viewBox="0 0 24 24" className="ml-0.5 size-6 fill-current @md:size-7">
         <path d="M8 5v14l11-7z" />
       </svg>
     </span>
@@ -106,7 +107,7 @@ function OutboundCard({ clip }: { clip: FilmClip }) {
       href={clip.url}
       target="_blank"
       rel="noopener noreferrer nofollow"
-      className="group flex aspect-video cursor-pointer flex-col justify-between border border-rule bg-paper-raised/60 p-6 transition-colors hover:border-ink-subtle"
+      className="group flex aspect-video cursor-pointer flex-col justify-between border border-rule bg-paper-raised/60 p-4 transition-colors hover:border-ink-subtle @md:p-6"
     >
       <span className="label text-ink-muted">Watch on {providerLabel(clip.provider) ?? "the source"} ↗</span>
       <span className="font-display text-display-sm leading-tight">{clip.title}</span>

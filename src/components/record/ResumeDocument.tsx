@@ -58,12 +58,13 @@ export function ResumeDocument({
         <nav
           aria-label="Resume sections"
           className="print-hidden bar-blur sticky z-30 border-b border-rule"
-          style={{ top: "var(--header-h)", paddingInline: "var(--pad-x)" }}
+          style={{ top: "calc(var(--header-h) + var(--safe-top))", paddingInline: "var(--pad-x)" }}
         >
-          <ul className="-mx-3 flex gap-1 overflow-x-auto py-1">
+          {/* A thumb-swipeable strip on phones: snaps per tab, no scrollbar. */}
+          <ul className="-mx-3 flex snap-x gap-1 overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {sections.map((s) => (
-              <li key={s.id}>
-                <a href={`#${s.id}`} className="block whitespace-nowrap rounded-full px-3 py-2 text-sm font-medium text-ink-muted transition-colors hover:text-ink">
+              <li key={s.id} className="snap-start">
+                <a href={`#${s.id}`} className="flex min-h-11 items-center whitespace-nowrap rounded-full px-3 text-sm font-medium text-ink-muted transition-colors hover:text-ink active:text-ink">
                   {s.label}
                 </a>
               </li>
@@ -115,7 +116,7 @@ function Block({ id, label, count, children }: { id: string; label: string; coun
     <section
       id={id}
       aria-labelledby={`${id}-title`}
-      className="scroll-mt-[calc(var(--header-h)+3rem)] border-b border-rule last:border-0 print:border-0"
+      className="scroll-mt-[calc(var(--header-h)+var(--safe-top)+3.5rem)] border-b border-rule last:border-0 print:border-0"
       style={{ paddingBlock: "clamp(2rem, 5vh, 3.5rem)" }}
     >
       <div className="mb-6 flex items-center gap-3">

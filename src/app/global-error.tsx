@@ -33,12 +33,12 @@ export default function GlobalError({ error, retry }: { error: Error & { digest?
 
   return (
     <html lang="en" style={{ colorScheme: "dark", background: "#000" }}>
-      <body style={{ margin: 0, minHeight: "100svh", background: "#000", color: INK, fontFamily: SANS, WebkitFontSmoothing: "antialiased" }}>
+      <body style={{ margin: 0, minHeight: "100dvh", background: "#000", color: INK, fontFamily: SANS, WebkitFontSmoothing: "antialiased" }}>
         <title>Something broke · Roster</title>
         <main
           style={{
             display: "flex",
-            minHeight: "100svh",
+            minHeight: "100dvh",
             flexDirection: "column",
             justifyContent: "center",
             paddingInline: "clamp(1.25rem, 4.5vw, 5rem)",

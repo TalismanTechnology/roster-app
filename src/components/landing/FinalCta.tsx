@@ -24,13 +24,13 @@ export function FinalCta({ signedIn = false }: { signedIn?: boolean }) {
           </h2>
           <Corner d={CORNER.bl} className="mt-4" />
         </div>
-        <div className="flex flex-wrap gap-3">
-          <Magnet padding={40} magnetStrength={6}>
-            <Button href={signedIn ? "/resume" : "/sign-up"} variant="primary" arrow>
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+          <Magnet padding={40} magnetStrength={6} wrapperClassName="max-sm:block">
+            <Button href={signedIn ? "/resume" : "/sign-up"} variant="primary" arrow className="max-sm:w-full">
               {signedIn ? "Open your resume" : "Create your resume"}
             </Button>
           </Magnet>
-          <Button href="/search">Find athletes</Button>
+          <Button href="/search" className="max-sm:w-full">Find athletes</Button>
         </div>
       </div>
     </Reveal>

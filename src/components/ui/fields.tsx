@@ -109,6 +109,45 @@ export function FieldGroup({ label, hint, children }: { label: string; hint?: st
 
 const invalidClasses = "aria-invalid:border-disputed aria-invalid:focus:border-disputed";
 
+type InputHints = Pick<
+  InputHTMLAttributes<HTMLInputElement>,
+  "inputMode" | "autoCapitalize" | "autoCorrect" | "spellCheck" | "enterKeyHint"
+>;
+
+const LITERAL: InputHints = { autoCapitalize: "none", autoCorrect: "off", spellCheck: false };
+
+/** Proper nouns: a person, a school, a program, a place. */
+const WORDS = new Set(["name", "display_name", "school", "org_name", "location", "competition"]);
+
+/**
+ * The phone keyboard each field wants, from its type and name: an @ key for
+ * email, a number pad for scores, no autocorrect on a handle or a URL, words
+ * capitalised in a name. Whatever the call site passes wins.
+ */
+function inputHints({ type = "text", name = "", step }: InputHTMLAttributes<HTMLInputElement>): InputHints {
+  switch (type) {
+    case "email":
+      return { ...LITERAL, inputMode: "email" };
+    case "url":
+      return { ...LITERAL, inputMode: "url" };
+    case "tel":
+      return { inputMode: "tel", autoCorrect: "off" };
+    case "password":
+      return LITERAL;
+    case "search":
+      return { enterKeyHint: "search" };
+    case "number": {
+      // A fractional step (GPA, 0.01) needs the decimal point; counts don't.
+      return { inputMode: step !== undefined && String(step) !== "1" ? "decimal" : "numeric" };
+    }
+  }
+  if (type !== "text") return {};
+  // Handles and marks ("10.42", "6-08.25") are literal strings, not prose.
+  if (/(^|_)handle$|instagram|^value_display$|^ncaa_id$/.test(name)) return LITERAL;
+  if (WORDS.has(name)) return { autoCapitalize: "words" };
+  return {};
+}
+
 export function TextInput({
   externalError = false,
   ...props
@@ -119,7 +158,12 @@ export function TextInput({
   const error = useFieldError(props.name);
   return (
     <>
-      <input {...props} {...errorAria(error, props["aria-describedby"])} className={`${fieldClasses} ${invalidClasses}`} />
+      <input
+        {...inputHints(props)}
+        {...props}
+        {...errorAria(error, props["aria-describedby"])}
+        className={`${fieldClasses} ${invalidClasses}`}
+      />
       {!externalError && <ErrorText error={error} />}
     </>
   );

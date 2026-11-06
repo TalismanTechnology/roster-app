@@ -93,8 +93,8 @@ export async function ResumeDemo() {
 
             <ul className="divide-y divide-rule">
               {entries.map((e) => (
-                <li key={e.id} className="flex items-baseline justify-between gap-6 py-2.5">
-                  <span className="text-sm">{e.title}</span>
+                <li key={e.id} className="flex items-baseline justify-between gap-4 py-2.5 sm:gap-6">
+                  <span className="min-w-0 text-sm leading-snug">{e.title}</span>
                   <span className={`font-display flex max-w-[55%] items-center justify-end gap-2 text-right ${e.verification === "verified" ? "" : "text-ink-muted"}`} data-numeric>
                     {valueOf(e)}
                     {e.verification === "verified" ? <Verified /> : <Unverified />}
@@ -118,7 +118,7 @@ export async function ResumeDemo() {
                 {[profile.gpa !== null ? `GPA ${profile.gpa}` : null, levelLabel(profile.level), sportName(profile.primary_sport)].filter(Boolean).join(" · ")}
               </p>
               {isLive && (
-                <Link href={`/${profile.handle}`} className="label text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+                <Link href={`/${profile.handle}`} className="label inline-flex min-h-11 items-center self-start text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink sm:min-h-0">
                   Open the live resume →
                 </Link>
               )}

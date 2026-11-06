@@ -90,9 +90,13 @@ export function ImageRevealBackground() {
       patternRef.current?.setAttribute('y', offset.y.toFixed(2));
     };
 
-    // Reduced motion: a still frame, the spotlight resting at the centre.
-    // No cursor tracking, no loop; a resize just redraws the still.
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    // Reduced motion, or no cursor to follow (a tablet at lg width): a still
+    // frame, the spotlight resting at the centre. No tracking, no loop; a
+    // resize just redraws the still.
+    const isStill =
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches ||
+      !window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    if (isStill) {
       const still = () => {
         syncSize();
         mouseRef.current = { x: canvas.width / 2, y: canvas.height / 2 };

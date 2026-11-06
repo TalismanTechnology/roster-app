@@ -3,6 +3,8 @@
 import { useRef, type ReactNode } from 'react';
 import { motion, useMotionValue, useSpring, type SpringOptions } from "motion/react";
 
+import { useFinePointer } from "./useFinePointer";
+
 const SPRING: SpringOptions = { damping: 30, stiffness: 100, mass: 2 };
 
 type Props = {
@@ -22,6 +24,9 @@ export function Tilt({ children, className = '', amplitude = 8, scaleOnHover = 1
   const rotateX = useSpring(useMotionValue(0), SPRING);
   const rotateY = useSpring(useMotionValue(0), SPRING);
   const scale = useSpring(1, SPRING);
+  // Touch screens get the still card: a tap's emulated mouseenter would
+  // otherwise leave it scaled and tilted until the next tap elsewhere.
+  const isFine = useFinePointer();
 
   const reset = () => {
     rotateX.set(0);
@@ -43,9 +48,9 @@ export function Tilt({ children, className = '', amplitude = 8, scaleOnHover = 1
     <div
       ref={ref}
       className={`[perspective:900px] ${className}`}
-      onMouseMove={onMove}
-      onMouseEnter={() => scale.set(scaleOnHover)}
-      onMouseLeave={reset}
+      onMouseMove={isFine ? onMove : undefined}
+      onMouseEnter={isFine ? () => scale.set(scaleOnHover) : undefined}
+      onMouseLeave={isFine ? reset : undefined}
     >
       <motion.div className="size-full [transform-style:preserve-3d] will-change-transform" style={{ rotateX, rotateY, scale }}>
         {children}
