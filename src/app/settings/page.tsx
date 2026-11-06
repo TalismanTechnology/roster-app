@@ -7,8 +7,7 @@ import { EditorSection, Panel, VisibilitySection } from "@/components/editor/Pro
 import { Site } from "@/components/shell/Site";
 import { Corner, CORNER } from "@/components/ui/marks";
 import { signOut } from "@/lib/actions/auth";
-import { getRepository } from "@/lib/data";
-import { getCurrentUser } from "@/lib/data/auth";
+import { getCurrentProfile, getCurrentUser } from "@/lib/data/auth";
 import { siteHost } from "@/lib/site";
 
 export const metadata: Metadata = {
@@ -24,8 +23,7 @@ export default async function SettingsPage() {
   const user = await getCurrentUser();
   if (!user) redirect("/sign-in?next=/settings");
 
-  const repo = await getRepository();
-  const profile = await repo.getProfileById(user.id);
+  const profile = await getCurrentProfile();
   const isAthlete = profile?.account_kind === "athlete";
 
   return (

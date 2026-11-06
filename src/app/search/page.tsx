@@ -6,7 +6,7 @@ import { Site } from "@/components/shell/Site";
 import { Checkbox, Field, Select, TextInput } from "@/components/ui/fields";
 import { Corner, CORNER, Frame, Verified } from "@/components/ui/marks";
 import { getRepository } from "@/lib/data";
-import { getCurrentUser } from "@/lib/data/auth";
+import { getCurrentProfile, getCurrentUser } from "@/lib/data/auth";
 import { MAX_QUERY_LENGTH, normalizeSearchQuery, pageCount } from "@/lib/data/search-query";
 import type { RecruiterList } from "@/lib/data/types";
 import type { AthleteLevel, Profile } from "@/lib/database.types";
@@ -67,7 +67,7 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
   const pages = pageCount(total, pageSize);
 
   // Only a recruiter (or coach/staff) saves to lists; athletes never see the control.
-  const viewer = user ? await repo.getProfileById(user.id) : null;
+  const viewer = user ? await getCurrentProfile() : null;
   const canSave = Boolean(viewer && viewer.account_kind !== "athlete");
   const lists = canSave && user ? await repo.listLists(user.id) : [];
   // One read for the whole page, not one per row.

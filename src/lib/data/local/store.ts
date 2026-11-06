@@ -35,6 +35,8 @@ export type LocalUser = {
   email: string;
   password_hash: string;
   created_at: string;
+  /** Bumped on password change; session cookies carry it. Absent reads as 0. */
+  session_version?: number;
 };
 
 /** `achievements` plus the two columns the `record_entries` view joins in. */

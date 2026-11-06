@@ -102,16 +102,19 @@ export function Globe({ className = "" }: { className?: string }) {
 export function Verified({
   className = "",
   label = "Verified by coach",
+  decorative = false,
 }: {
   className?: string;
   label?: string;
+  /** Hide the mark from assistive tech when the caller speaks the status as text. */
+  decorative?: boolean;
 }) {
+  const a11y = decorative ? ({ "aria-hidden": true } as const) : ({ role: "img", "aria-label": label } as const);
   return (
     <svg
       viewBox="0 0 16 16"
       className={`inline-block size-[1em] shrink-0 ${className}`}
-      role="img"
-      aria-label={label}
+      {...a11y}
     >
       <circle cx="8" cy="8" r="8" fill="currentColor" />
       <path

@@ -1,20 +1,36 @@
 /**
- * End-to-end smoke of the product loop against a dev server on :3000.
+ * End-to-end smoke of the product loop, isolated.
+ *
+ * By default this spawns its own `next start` (build first: `npm run build`)
+ * on a free port against a throwaway ROSTER_DATA_DIR, so it never touches the
+ * developer's `.data/` and never depends on a server someone left running.
+ * The temp directory and the server are torn down on exit, pass or fail.
+ * Pass `--base=` to point it at a server you started yourself instead.
  *
  * Runs in local data mode against the seeded roster. Each step asserts the
  * thing a user would notice; a failure prints the step and the page URL.
  *
- * Usage:  node scripts/smoke.mjs [--base=http://localhost:3000]
+ * Usage:  node scripts/smoke.mjs [--base=http://127.0.0.1:3000] [--shots=dir]
  */
 
 import { chromium } from "playwright-core";
 
-const base = process.argv.find((a) => a.startsWith("--base="))?.split("=")[1] ?? "http://localhost:3000";
+import { serverFromArgs } from "./lib/server.mjs";
+
 const stamp = Date.now().toString(36);
+const { base, dataDir } = await serverFromArgs({ label: "roster-smoke" });
+process.stdout.write(`smoke against ${base}${dataDir ? ` (data: ${dataDir})` : ""}\n\n`);
 
 const browser = await chromium.launch({ channel: "chromium" });
 const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 const page = await context.newPage();
+
+// A policy violation is a broken feature the user may not notice: an
+// iframe that never loads, a script that never ran. Collected for every page.
+const cspViolations = [];
+page.on("console", (m) => {
+  if (/Content Security Policy/i.test(m.text())) cspViolations.push(`${page.url()}: ${m.text().slice(0, 200)}`);
+});
 
 let failures = 0;
 async function step(name, fn) {
@@ -41,6 +57,19 @@ const expectText = async (text, timeout = 10_000) => {
     throw new Error(`expected to see "${text}"`);
   }
 };
+
+await step("security headers: CSP everywhere, no referrer from a verify link", async () => {
+  const home = await fetch(`${base}/`);
+  const csp = home.headers.get("content-security-policy") ?? "";
+  for (const directive of ["default-src 'self'", "frame-ancestors 'none'", "object-src 'none'", "youtube-nocookie.com"]) {
+    if (!csp.includes(directive)) throw new Error(`CSP missing ${directive}: ${csp}`);
+  }
+  const verify = await fetch(`${base}/verify/not-a-real-token`);
+  const policy = verify.headers.get("referrer-policy");
+  if (policy !== "no-referrer") throw new Error(`verify Referrer-Policy is ${policy}`);
+  // `next start` here is not the production deploy: no preload promise.
+  if (/preload/.test(home.headers.get("strict-transport-security") ?? "")) throw new Error("HSTS preload outside production deploy");
+});
 
 await step("search lists seeded public athletes", async () => {
   await page.goto(`${base}/search`, { waitUntil: "networkidle" });
@@ -91,6 +120,15 @@ await step("sign in as a seeded athlete lands in the editor", async () => {
   await expectText("Jordan Reyes");
 });
 
+await step("a hostile next= never leaves the site", async () => {
+  // Signed in, /sign-in bounces straight to `next` — the sharpest edge.
+  for (const next of ["/%5Cevil.com", "//evil.com", "/%09/evil.com", "https://evil.com"]) {
+    await page.goto(`${base}/sign-in?next=${next}`, { waitUntil: "networkidle" });
+    const landed = new URL(page.url());
+    if (landed.origin !== new URL(base).origin) throw new Error(`next=${next} redirected to ${landed.origin}`);
+  }
+});
+
 await step("adding an entry persists and shows on the public resume", async () => {
   const title = `Smoke entry ${stamp}`;
   await page.goto(`${base}/resume`, { waitUntil: "networkidle" });
@@ -119,14 +157,16 @@ await step("editor shows the live preview and creates a verification link", asyn
   await expectText("Live preview");
   await expectText("views this week");
   await shot("editor");
-  // Open the first "Request verification" disclosure and create a link.
-  const summary = page.locator("summary", { hasText: "Request verification" }).first();
+  // Request verification on the smoke entry itself, so the later steps can
+  // edit it without disturbing the seeded record.
+  const row = page.locator("li").filter({ hasText: `Smoke entry ${stamp}` }).first();
+  const summary = row.locator("summary", { hasText: "Request verification" }).first();
   await summary.click();
   const panel = summary.locator("xpath=ancestor::details[1]");
   await panel.getByRole("button", { name: /create request link/i }).click();
   // After the action the row re-renders as "submitted" and shows the link
   // from server data, outside the disclosure.
-  const code = page.locator("code", { hasText: "/verify/" }).first();
+  const code = page.locator("li").filter({ hasText: `Smoke entry ${stamp}` }).locator("code", { hasText: "/verify/" }).first();
   await code.waitFor({ timeout: 20_000 });
   // The link is absolute (NEXT_PUBLIC_SITE_URL); visit its path on this server.
   const text = (await code.textContent())?.trim() ?? "";
@@ -166,7 +206,52 @@ await step("a coach verifies by link with no account; the mark and name appear",
   }
   // The public resume now carries the coach's name on the entry.
   await page.goto(`${base}/jordanreyes`, { waitUntil: "networkidle" });
-  await expectText("Verified by Tom Bradley");
+  const row = page.locator("li").filter({ hasText: `Smoke entry ${stamp}` }).first();
+  await row.getByText("Verified by Tom Bradley").waitFor({ timeout: 10_000 });
+});
+
+/*
+ * Signed out, a verify link cannot tell the athlete from the coach: the link
+ * is a bearer token, and by design whoever holds it answers as the coach the
+ * athlete named. What keeps that honest is everything around it, asserted
+ * here so a regression fails loudly: the response is attributed to the named
+ * contact (never a name the respondent types), the link is single-use, and
+ * — next step — any later edit to the entry throws the badge away.
+ */
+await step("signed out, a verify link answers only as the named coach, once", async () => {
+  await context.clearCookies();
+  await page.goto(`${base}${globalThis.__verifyPath}`, { waitUntil: "networkidle" });
+  await expectText("Each link works once.");
+  if (await page.locator('input[name="verifier_name"], input[name="name"]').count()) {
+    throw new Error("respondent can type the verifier's name");
+  }
+});
+
+await step("editing a verified entry clears its badge", async () => {
+  await page.goto(`${base}/sign-in`, { waitUntil: "networkidle" });
+  await page.getByLabel("Email").fill("jordanreyes@roster.local");
+  await page.getByLabel("Password").fill("roster-demo");
+  await page.getByRole("button", { name: /sign in/i }).click();
+  await page.waitForURL(/\/resume$/, { timeout: 15_000 });
+
+  const row = page.locator("li").filter({ hasText: `Smoke entry ${stamp}` }).first();
+  await row.locator("summary", { hasText: "Edit" }).click();
+  const form = row.locator("form").filter({ has: page.locator('input[name="value_display"]') }).first();
+  await form.locator('input[name="value_display"]').fill("10.01");
+  await form.getByRole("button", { name: /save entry/i }).click();
+  const notice = form.locator('[role="status"], [role="alert"]').first();
+  await notice.waitFor({ state: "visible", timeout: 20_000 });
+  const verdict = (await notice.textContent())?.trim() ?? "";
+  if (!/^Saved/.test(verdict)) throw new Error(`form said: ${verdict}`);
+
+  await page.goto(`${base}/jordanreyes`, { waitUntil: "networkidle" });
+  const publicRow = page.locator("li").filter({ hasText: `Smoke entry ${stamp}` }).first();
+  await publicRow.getByText("Self-reported").first().waitFor({ timeout: 10_000 });
+  if (await publicRow.getByText("Verified by").count()) throw new Error("badge survived an edit to the measured value");
+
+  await page.goto(`${base}/resume`, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: /sign out/i }).first().click();
+  await page.waitForURL(/\/$/, { timeout: 15_000 });
 });
 
 await step("a recruiter manages lists: create, save from search, open, remove", async () => {
@@ -233,6 +318,8 @@ await step("sign up → three-step onboarding → editor", async () => {
   // 02 — identity
   await page.getByLabel("Your name").fill("Smoke Tester");
   await page.getByLabel("Class of").fill("2028");
+  // No sport is assumed; Continue waits for a choice.
+  await page.getByLabel("Sport").selectOption("football");
   await shot("onboarding-02");
   await page.getByRole("button", { name: /continue/i }).click();
 
@@ -257,6 +344,47 @@ await step("reserved handle is refused before submit", async () => {
   await page.getByText("Some words are reserved.").waitFor({ timeout: 10_000 });
   const isDisabled = await page.getByRole("button", { name: /continue/i }).isDisabled();
   if (!isDisabled) throw new Error("Continue should be disabled for a reserved handle");
+});
+
+await step("changing the password signs out every other session", async () => {
+  // Two devices signed in as the account created above.
+  const email = `smoke-${stamp}@roster.local`;
+  const other = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const mine = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  try {
+    for (const ctx of [other, mine]) {
+      const p = await ctx.newPage();
+      await p.goto(`${base}/sign-in`, { waitUntil: "networkidle" });
+      await p.getByLabel("Email").fill(email);
+      await p.getByLabel("Password").fill("password123");
+      await p.getByRole("button", { name: /sign in/i }).click();
+      await p.waitForURL(/\/(resume|onboarding)$/, { timeout: 15_000 });
+      await p.close();
+    }
+    const p = await mine.newPage();
+    await p.goto(`${base}/settings`, { waitUntil: "networkidle" });
+    await p.locator('input[name="current"]').fill("password123");
+    await p.locator('input[name="next"]').fill("password456");
+    await p.locator('input[name="confirm"]').fill("password456");
+    await p.getByRole("button", { name: /update password/i }).click();
+    await p.waitForLoadState("networkidle");
+    await p.waitForTimeout(500);
+
+    // This device keeps its session…
+    await p.goto(`${base}/settings`, { waitUntil: "networkidle" });
+    if (p.url().includes("/sign-in")) throw new Error("the device that changed the password was signed out");
+    // …the other one does not, though its cookie still carries a valid signature.
+    const q = await other.newPage();
+    await q.goto(`${base}/settings`, { waitUntil: "networkidle" });
+    if (!q.url().includes("/sign-in")) throw new Error("other session survived the password change");
+  } finally {
+    await other.close();
+    await mine.close();
+  }
+});
+
+await step("no Content-Security-Policy violations on any page visited", async () => {
+  if (cspViolations.length) throw new Error(`${cspViolations.length} violation(s): ${cspViolations[0]}`);
 });
 
 await browser.close();

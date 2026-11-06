@@ -32,13 +32,21 @@ const CHIP: Record<
 };
 
 export function VerificationMark({ state, className = "" }: { state: VerificationState; className?: string }) {
-  // An unverified entry gets no mark at all. Absence is the signal — adding
+  // An unverified entry gets no visible mark. Absence is the signal — adding
   // "Unverified" to most of a young athlete's record would make the page read
-  // as a list of doubts.
-  if (state === "unverified") return null;
+  // as a list of doubts. A screen reader can't hear an absence, though, so
+  // the status is still spoken, in the record's own neutral word.
+  if (state === "unverified") return <span className="sr-only-text">Self-reported</span>;
 
+  // Spoken as text rather than an SVG label: a labelled inline SVG is skipped
+  // by some screen reader and browser pairings.
   if (state === "verified") {
-    return <Verified className={`text-[1.125em] ${className}`} />;
+    return (
+      <span className={`inline-flex shrink-0 ${className}`}>
+        <Verified className="text-[1.125em]" decorative />
+        <span className="sr-only-text">Verified by coach</span>
+      </span>
+    );
   }
 
   const chip = CHIP[state];
@@ -49,6 +57,8 @@ export function VerificationMark({ state, className = "" }: { state: Verificatio
       title={chip.description}
     >
       {chip.label}
+      {/* `title` is hover-only and rarely announced; say the meaning outright. */}
+      <span className="sr-only-text">. {chip.description}</span>
     </span>
   );
 }

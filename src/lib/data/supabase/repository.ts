@@ -87,6 +87,8 @@ export class SupabaseRepository implements Repository {
   async updatePassword(_userId: string, _current: string, next: string): Promise<void> {
     const { error } = await this.client.auth.updateUser({ password: next });
     if (error) throw new DataError("invalid", error.message);
+    // Revoke every other device's refresh token; this one stays signed in.
+    await this.client.auth.signOut({ scope: "others" });
   }
 
   async deleteAccount(): Promise<void> {

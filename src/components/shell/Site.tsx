@@ -1,15 +1,14 @@
 import type { ReactNode } from "react";
 
-import { getRepository } from "@/lib/data";
-import { getCurrentUser } from "@/lib/data/auth";
+import { getCurrentProfile, getCurrentUser } from "@/lib/data/auth";
 
 import { SiteFooter } from "./SiteFooter";
 import { SiteHeader, type HeaderUser } from "./SiteHeader";
 
 /**
  * Header + content + footer, with the signed-in state resolved once here so
- * pages don't each re-derive it. Server Component: the only client piece is
- * the header's scroll glass.
+ * pages don't each re-derive it. Server Component: the only client pieces
+ * are the header's scroll glass and its phone menu.
  */
 export async function Site({
   children,
@@ -35,8 +34,7 @@ export async function currentHeaderUser(): Promise<HeaderUser> {
   const user = await getCurrentUser();
   if (!user) return null;
 
-  const repo = await getRepository();
-  const profile = await repo.getProfileById(user.id);
+  const profile = await getCurrentProfile();
 
   return {
     email: user.email,

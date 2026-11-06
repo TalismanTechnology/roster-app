@@ -100,7 +100,15 @@ export class LocalRepository implements Repository {
         throw new DataError("forbidden", "Your current password did not match.");
       }
       user.password_hash = hashPassword(next);
+      // Every cookie issued before this moment stops working.
+      user.session_version = (user.session_version ?? 0) + 1;
     });
+  }
+
+  /** Local-mode only: the version a session cookie must carry, or null for no such user. */
+  async sessionVersion(userId: string): Promise<number | null> {
+    const user = readDb().users.find((u) => u.id === userId);
+    return user ? (user.session_version ?? 0) : null;
   }
 
   async deleteAccount(userId: string): Promise<void> {

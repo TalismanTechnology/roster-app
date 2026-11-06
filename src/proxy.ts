@@ -29,8 +29,10 @@ export async function proxy(request: NextRequest) {
     // Throws in production without a real secret, on every request rather
     // than only at the first sign-in, so a misconfigured deploy is obvious.
     sessionSecret();
-    const userId = verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-    if (!userId && isProtected(pathname)) return toSignIn(request, pathname);
+    // Signature and age only; a cookie retired by a password change passes
+    // here and is refused by getCurrentUser, which the gated pages call.
+    const session = verifySession(request.cookies.get(SESSION_COOKIE)?.value);
+    if (!session && isProtected(pathname)) return toSignIn(request, pathname);
     return NextResponse.next({ request });
   }
 

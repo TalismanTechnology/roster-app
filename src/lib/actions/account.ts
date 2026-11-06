@@ -3,7 +3,8 @@
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
-import { signOutEverywhere } from "@/lib/data/auth";
+import { reissueSession, signOutEverywhere } from "@/lib/data/auth";
+import { revalidateProfile } from "@/lib/revalidate";
 
 import { failed, formValues, requireUser as requireSession, str, type FormValues } from "./shared";
 
@@ -55,6 +56,9 @@ export async function updatePassword(_prev: AccountFormState, formData: FormData
   } catch (error) {
     return failed(error, "Could not update your password.");
   }
+  // The change retired every session cookie, this one included; hand this
+  // device a fresh one so only the others are signed out.
+  await reissueSession(user.id);
   return IDLE;
 }
 
@@ -74,6 +78,8 @@ export async function deleteAccount(_prev: AccountFormState, formData: FormData)
   } catch (error) {
     return failed(error, "Could not delete the account.", formValues(formData));
   }
+  // The public resume and its search row go with the account.
+  revalidateProfile(profile?.handle);
 
   await signOutEverywhere();
   redirect("/");

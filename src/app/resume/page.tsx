@@ -3,16 +3,18 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { buildChecklist, Checklist, firstUnfinished, type SectionId } from "@/components/editor/Checklist";
+import { DirtyGuard } from "@/components/editor/DirtyGuard";
 import { AcademicsSection, ContactSection, IdentitySection, VisibilitySection } from "@/components/editor/ProfileSections";
 import { CoachSection, FilmSection, RecordSection } from "@/components/editor/RecordSections";
 import { RequestsSection } from "@/components/editor/RequestsSection";
+import { ScaledPreview } from "@/components/editor/ScaledPreview";
 import { ResumeDocument } from "@/components/record/ResumeDocument";
 import { ShareBar } from "@/components/record/ShareBar";
 import { Site } from "@/components/shell/Site";
 import { Corner, CORNER } from "@/components/ui/marks";
 import { getRepository } from "@/lib/data";
 import { homePathFor } from "@/lib/accounts";
-import { getCurrentUser } from "@/lib/data/auth";
+import { getCurrentProfile, getCurrentUser } from "@/lib/data/auth";
 import type { VerificationRequest } from "@/lib/data/types";
 import { signInHref } from "@/lib/safe-next";
 import { siteHost } from "@/lib/site";
@@ -40,14 +42,15 @@ const SECTION_IDS = new Set<string>(SECTIONS.map((s) => s.id));
  * URL so Back works and a link can point at "add your film" — chosen by a
  * checklist of what a recruiter would notice missing. A live preview of the
  * public resume sits beside it on wide screens, rendered by the same
- * component a recruiter gets and refreshed after every save.
+ * component a recruiter gets and refreshed after every save. Leaving a
+ * section with unsaved edits asks first (DirtyGuard).
  */
 export default async function ResumeEditorPage({ searchParams }: PageProps<"/resume">) {
   const user = await getCurrentUser();
   if (!user) redirect(signInHref("/resume"));
 
   const repo = await getRepository();
-  const profile = await repo.getProfileById(user.id);
+  const profile = await getCurrentProfile();
 
   // Signed in but no profile yet: onboarding was abandoned partway.
   if (!profile) redirect("/onboarding");
@@ -75,6 +78,7 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
   return (
     <Site>
       <main className="flex flex-col gap-6 pb-16" style={{ paddingInline: "var(--pad-x)", paddingTop: "1.5rem" }}>
+        <DirtyGuard />
         {/* Share bar: the link, the numbers, and the door to the public page. */}
         <section aria-label="Your resume" className="panel">
           <div className="flex flex-wrap items-center gap-x-8 gap-y-4" style={{ padding: "var(--feature-pad)" }}>
@@ -105,7 +109,7 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
             </dl>
 
             <div className="flex flex-wrap items-center gap-2">
-              <ShareBar handle={profile.handle} print={false} />
+              <ShareBar handle={profile.handle} title={`${profile.display_name} · Roster`} print={false} />
               <Link href={`/${profile.handle}`} className="btn-primary min-h-10 px-4 text-sm">
                 View as a recruiter
               </Link>
@@ -121,7 +125,8 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
             <ol className="-mx-2 flex gap-1 overflow-x-auto px-2 pb-1 lg:sticky lg:top-[calc(var(--header-h)+1rem)] lg:mx-0 lg:flex-col lg:gap-1 lg:px-0">
               {SECTIONS.map((s) => {
                 const isActive = s.id === active;
-                const item = checklist.find((c) => c.id === s.id);
+                // The section's own item; the extras (photo, a verified entry) show on the checklist.
+                const isUnfinished = checklist.some((c) => c.key === s.id && !c.isDone);
                 return (
                   <li key={s.id}>
                     <Link
@@ -137,7 +142,7 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
                           {pendingCount}
                         </span>
                       )}
-                      {item && !item.isDone && s.id !== "requests" && (
+                      {isUnfinished && s.id !== "requests" && (
                         <span className={`size-2 rounded-full ${isActive ? "bg-paper/60" : "bg-pending"}`} aria-label="Not done" role="img" />
                       )}
                     </Link>
@@ -169,9 +174,9 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
                 <span>As a recruiter sees it · updates on save</span>
               </p>
               <div className="max-h-[calc(100svh-var(--header-h)-4.5rem)] overflow-y-auto border border-rule bg-paper">
-                <div style={{ zoom: 0.55 }}>
+                <ScaledPreview scale={0.55}>
                   <ResumeDocument profile={profile} entries={entries} film={film} coaches={publicCoaches} />
-                </div>
+                </ScaledPreview>
               </div>
             </div>
           </aside>

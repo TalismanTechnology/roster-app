@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 
 import { homePathFor } from "@/lib/accounts";
-import { achievementSchema, httpUrl, idSchema } from "@/lib/actions/schemas";
+import { achievementSchema, coachSchema, httpUrl, idSchema } from "@/lib/actions/schemas";
 import { latestToday } from "@/lib/dates";
 import { dataMode } from "@/lib/env";
 import { isReservedHandle, isValidHandle, RESERVED_HANDLES } from "@/lib/handles";
@@ -197,6 +197,27 @@ describe("achievement schema", () => {
   });
 });
 
+describe("coach schema", () => {
+  const base = { name: "Tom Bradley", role: "", org_name: "", email: "", phone: "" };
+
+  it("needs a way to reach the coach", () => {
+    const result = coachSchema.safeParse(base);
+    assert.equal(result.success, false);
+    assert.match(result.error!.issues[0].message, /email or a phone/);
+    assert.equal(coachSchema.safeParse({ ...base, phone: "555-0100" }).success, true);
+  });
+
+  it("turns blanks into null and trims", () => {
+    const parsed = coachSchema.parse({ ...base, name: "  Tom Bradley ", email: "tom@school.edu" });
+    assert.deepEqual(parsed, { name: "Tom Bradley", role: null, org_name: null, email: "tom@school.edu", phone: null });
+  });
+
+  it("refuses a malformed email and a one-letter name", () => {
+    assert.equal(coachSchema.safeParse({ ...base, email: "not-an-email" }).success, false);
+    assert.equal(coachSchema.safeParse({ ...base, name: "T", phone: "555-0100" }).success, false);
+  });
+});
+
 describe("latestToday", () => {
   it("is the UTC+14 calendar date", () => {
     assert.equal(latestToday(new Date("2026-11-05T09:59:00Z")), "2026-11-05");
@@ -306,9 +327,34 @@ describe("safe next", () => {
   });
 
   it("refuses anything that could leave the site", () => {
-    for (const bad of ["//evil.com", "https://evil.com", "/\\evil.com", "evil", "", null, 42]) {
-      assert.equal(safeNext(bad, "/resume"), "/resume", String(bad));
+    for (const bad of [
+      "//evil.com",
+      "https://evil.com",
+      "/\\evil.com",
+      "\\\\evil.com",
+      "/\t/evil.com",
+      "/.//evil.com",
+      "/a/../..//evil.com",
+      " //evil.com",
+      "javascript:alert(1)",
+      "evil",
+      "",
+      null,
+      42,
+    ]) {
+      assert.equal(safeNext(bad, "/resume"), "/resume", JSON.stringify(bad));
     }
+  });
+
+  it("keeps the query and hash, and normalizes dot segments", () => {
+    assert.equal(safeNext("/search?sport=soccer#top", "/resume"), "/search?sport=soccer#top");
+    assert.equal(safeNext("/lists/./abc/../def", "/resume"), "/lists/def");
+    assert.equal(safeNext("/%2F%2Fevil.com", "/resume"), "/%2F%2Fevil.com");
+  });
+
+  it("resolves against a real origin and requires it to survive", () => {
+    assert.equal(safeNext("/onboarding", "/x", "https://roster.us"), "/onboarding");
+    assert.equal(safeNext("/\\evil.com", "/x", "https://roster.us"), "/x");
   });
 
   it("signInHref carries next only when it is safe", () => {
@@ -363,5 +409,57 @@ describe("US states", () => {
     assert.equal(toStateCode(" tx "), "TX");
     assert.equal(toStateCode("Texas"), null);
     assert.equal(toStateCode(""), null);
+  });
+});
+
+describe("social handle normalization", () => {
+  // Imported here so this block stands alone at the end of the file.
+  const load = () => import("@/lib/links");
+  const loadSchemas = () => import("@/lib/actions/schemas");
+
+  it("keeps a bare handle and strips a leading @", async () => {
+    const { normalizeSocialHandle } = await load();
+    assert.equal(normalizeSocialHandle("ava.runs", "instagram"), "ava.runs");
+    assert.equal(normalizeSocialHandle("  @ava_runs ", "x"), "ava_runs");
+    assert.equal(normalizeSocialHandle("", "x"), null);
+    assert.equal(normalizeSocialHandle(null, "instagram"), null);
+  });
+
+  it("turns profile URLs into the handle, with or without a scheme", async () => {
+    const { normalizeSocialHandle } = await load();
+    assert.equal(normalizeSocialHandle("https://www.instagram.com/ava.runs/", "instagram"), "ava.runs");
+    assert.equal(normalizeSocialHandle("instagram.com/ava.runs?igsh=abc", "instagram"), "ava.runs");
+    assert.equal(normalizeSocialHandle("https://m.instagram.com/ava", "instagram"), "ava");
+    assert.equal(normalizeSocialHandle("https://x.com/ava_runs?s=20", "x"), "ava_runs");
+    assert.equal(normalizeSocialHandle("twitter.com/ava_runs", "x"), "ava_runs");
+    assert.equal(normalizeSocialHandle("https://mobile.twitter.com/@ava_runs", "x"), "ava_runs");
+  });
+
+  it("refuses other sites, site pages, schemes, and junk", async () => {
+    const { normalizeSocialHandle } = await load();
+    assert.equal(normalizeSocialHandle("https://x.com/ava", "instagram"), null);
+    assert.equal(normalizeSocialHandle("https://instagram.com.evil.com/ava", "instagram"), null);
+    assert.equal(normalizeSocialHandle("https://www.instagram.com/p/C0abc/", "instagram"), null);
+    assert.equal(normalizeSocialHandle("https://x.com/home", "x"), null);
+    assert.equal(normalizeSocialHandle("javascript:alert(1)", "x"), null);
+    assert.equal(normalizeSocialHandle("two words", "instagram"), null);
+    assert.equal(normalizeSocialHandle("a_handle_far_too_long", "x"), null);
+  });
+
+  it("the contact schema field stores the handle and refuses junk", async () => {
+    const { socialHandleField, fieldErrorsOf } = await loadSchemas();
+    const field = socialHandleField("instagram", "Enter an Instagram handle or profile link.");
+    assert.equal(field.parse("https://instagram.com/ava"), "ava");
+    assert.equal(field.parse("   "), null);
+    const bad = field.safeParse("https://evil.com/ava");
+    assert.equal(bad.success, false);
+    if (!bad.success) assert.deepEqual(fieldErrorsOf(bad.error), {});
+  });
+
+  it("onboarding requires a sport from the list", async () => {
+    const { requiredSport } = await loadSchemas();
+    assert.equal(requiredSport.safeParse("").success, false);
+    assert.equal(requiredSport.safeParse("quidditch").success, false);
+    assert.equal(requiredSport.parse("track_field"), "track_field");
   });
 });

@@ -1,11 +1,13 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
+import { useActionState, useEffect, useId, useRef } from "react";
 
 import type { FormState } from "@/lib/actions/resume";
-import { FormNotice } from "@/components/ui/fields";
+import { FieldErrors, FormNotice } from "@/components/ui/fields";
 import { restoreFormValues } from "@/components/ui/restore-form";
 import { SubmitButton } from "@/components/ui/SubmitButton";
+
+import { setFormDirty } from "./DirtyGuard";
 
 const IDLE: FormState = { ok: false, error: null };
 
@@ -19,6 +21,9 @@ const IDLE: FormState = { ok: false, error: null };
  * put back, so one bad value never costs the athlete everything else they
  * typed. On success the reset stands: an "add" form clears for the next one,
  * and an edit form shows the saved values the server re-rendered.
+ *
+ * Any edit marks the form unsaved for the DirtyGuard until a save succeeds;
+ * a failed save leaves it unsaved, because it is.
  */
 export function EditorForm({
   action,
@@ -34,18 +39,23 @@ export function EditorForm({
 }) {
   const [state, formAction] = useActionState(action, IDLE);
   const formRef = useRef<HTMLFormElement>(null);
+  const id = useId();
 
   useEffect(() => {
     if (state.error && state.values && formRef.current) restoreFormValues(formRef.current, state.values);
-  }, [state]);
+    if (state.ok) setFormDirty(id, false);
+  }, [state, id]);
+
+  // Leaving the section unmounts the form; it has nothing left to guard.
+  useEffect(() => () => setFormDirty(id, false), [id]);
 
   return (
-    <form ref={formRef} action={formAction} className="flex flex-col gap-6">
-      {children}
+    <form ref={formRef} action={formAction} onChange={() => setFormDirty(id, true)} className="flex flex-col gap-6">
+      <FieldErrors errors={state.fieldErrors}>{children}</FieldErrors>
 
       <div className={`flex flex-wrap items-center gap-4 ${compact ? "" : "border-t border-rule pt-5"}`}>
         <SubmitButton className={compact ? "btn-row" : "btn-primary"}>{submitLabel}</SubmitButton>
-        <FormNotice ok={state.ok} error={state.error} />
+        <FormNotice ok={state.ok} error={state.error} savedAt={state.savedAt} />
       </div>
     </form>
   );

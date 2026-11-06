@@ -1,11 +1,12 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { getRepository } from "@/lib/data";
 import { getCurrentUser } from "@/lib/data/auth";
+import { revalidateProfile } from "@/lib/revalidate";
 
+import { fieldErrorsOf } from "./schemas";
 import { failed, formValues, str, type FormValues } from "./shared";
 
 /**
@@ -20,6 +21,8 @@ export type VerifyFormState = {
   outcome?: "verified" | "disputed";
   /** The coach's name, role, and note, put back after a failure. */
   values?: FormValues;
+  /** On a validation failure, each field's messages. */
+  fieldErrors?: Record<string, string[]>;
 };
 
 const schema = z.object({
@@ -47,7 +50,14 @@ export async function respondVerification(_prev: VerifyFormState, formData: Form
     note: str(formData, "note"),
   });
 
-  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message, values: formValues(formData) };
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0].message,
+      values: formValues(formData),
+      fieldErrors: fieldErrorsOf(parsed.error),
+    };
+  }
 
   const [repo, user] = await Promise.all([getRepository(), getCurrentUser()]);
   const { token, outcome, name, role, note } = parsed.data;
@@ -55,12 +65,12 @@ export async function respondVerification(_prev: VerifyFormState, formData: Form
   try {
     const { handle } = await repo.respondToVerification(token, outcome, note, { name, role }, user?.id ?? null);
 
-    // The athlete's surfaces update now: the editor and the public resume
-    // whose badge just changed. The coach's page re-renders too, as
+    // The athlete's surfaces update now: the editor, the public resume
+    // whose badge just changed, and the verified count in search. The
+    // coach's page re-renders too, as
     // "answered" — VerifyForm keeps this action's result across that
     // refresh, so the thank-you comes from what happened, not a clock.
-    revalidatePath("/resume");
-    revalidatePath(`/${handle}`);
+    revalidateProfile(handle);
   } catch (error) {
     return failed(error, "Could not record your answer. Try again.", formValues(formData));
   }

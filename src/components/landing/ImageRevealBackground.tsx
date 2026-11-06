@@ -55,8 +55,8 @@ export function ImageRevealBackground() {
       mouseRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
     };
 
-    let frame = 0;
-    const tick = () => {
+    // One frame of the effect: ease toward the cursor, redraw the mask, drift the grid.
+    const draw = () => {
       const mouse = mouseRef.current;
       const smooth = smoothRef.current;
       smooth.x += (mouse.x - smooth.x) * EASE_CURSOR;
@@ -88,16 +88,46 @@ export function ImageRevealBackground() {
       offset.y += (cy * PARALLAX_RANGE - offset.y) * EASE_PARALLAX;
       patternRef.current?.setAttribute('x', offset.x.toFixed(2));
       patternRef.current?.setAttribute('y', offset.y.toFixed(2));
+    };
 
+    // Reduced motion: a still frame, the spotlight resting at the centre.
+    // No cursor tracking, no loop; a resize just redraws the still.
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      const still = () => {
+        syncSize();
+        mouseRef.current = { x: canvas.width / 2, y: canvas.height / 2 };
+        smoothRef.current = { ...mouseRef.current };
+        draw();
+      };
+      still();
+      window.addEventListener('resize', still);
+      return () => window.removeEventListener('resize', still);
+    }
+
+    let frame = 0;
+    const tick = () => {
+      draw();
       frame = requestAnimationFrame(tick);
     };
+    const start = () => {
+      if (!frame) frame = requestAnimationFrame(tick);
+    };
+    const stop = () => {
+      cancelAnimationFrame(frame);
+      frame = 0;
+    };
+
+    // Run only while the hero is on screen. Below lg the container is
+    // display:none, which never intersects, so phones never start the loop.
+    const io = new IntersectionObserver(([entry]) => (entry.isIntersecting ? start() : stop()));
+    io.observe(container);
 
     window.addEventListener('resize', syncSize);
     window.addEventListener('mousemove', onMove);
-    frame = requestAnimationFrame(tick);
 
     return () => {
-      cancelAnimationFrame(frame);
+      stop();
+      io.disconnect();
       window.removeEventListener('resize', syncSize);
       window.removeEventListener('mousemove', onMove);
     };

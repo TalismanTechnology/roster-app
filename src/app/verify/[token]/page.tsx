@@ -16,6 +16,8 @@ import { sportName } from "@/lib/sports";
 export const metadata: Metadata = {
   title: "Verify an entry",
   robots: { index: false, follow: false },
+  // Belt to next.config's header: the token is the credential.
+  referrer: "no-referrer",
 };
 
 /**

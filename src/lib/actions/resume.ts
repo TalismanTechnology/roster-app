@@ -1,16 +1,26 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
-import { getRepository } from "@/lib/data";
+import { getRepository, type Repository } from "@/lib/data";
 import type { AthleteLevel, ProfileVisibility } from "@/lib/database.types";
 import { LEVEL_OPTIONS } from "@/lib/format";
 import { isReservedHandle, HANDLE_PATTERN } from "@/lib/handles";
 import { toStateCode } from "@/lib/regions";
+import { revalidateProfile } from "@/lib/revalidate";
 
-import { achievementSchema, httpUrl, idSchema, optionalNumber, optionalText } from "./schemas";
+import {
+  achievementSchema,
+  coachSchema,
+  fieldErrorsOf,
+  httpUrl,
+  idSchema,
+  optionalNumber,
+  optionalText,
+  requiredSport,
+  socialHandleField,
+} from "./schemas";
 import { failed, formValues, requireUser, str, type FormValues } from "./shared";
 
 /**
@@ -28,13 +38,29 @@ export type FormState = {
   error: string | null;
   /** On failure, what was submitted — the form puts it back. */
   values?: FormValues;
+  /** On a validation failure, each field's messages — shown beside the input. */
+  fieldErrors?: Record<string, string[]>;
+  /** On success, when the server saved it (epoch ms) — "Saved · 2m ago". */
+  savedAt?: number;
 };
 
-const IDLE: FormState = { ok: true, error: null };
+function saved(): FormState {
+  return { ok: true, error: null, savedAt: Date.now() };
+}
 
 /** A validation failure, carrying the submitted fields back to the form. */
 function invalid(error: z.ZodError, formData: FormData): FormState {
-  return { ok: false, error: error.issues[0].message, values: formValues(formData) };
+  return { ok: false, error: error.issues[0].message, values: formValues(formData), fieldErrors: fieldErrorsOf(error) };
+}
+
+/**
+ * Refreshes the editor, the public resume, and search after a write that
+ * didn't hand back the profile row. A failed lookup still refreshes the
+ * editor; the public page catches up on its next render.
+ */
+async function refreshOwner(repo: Repository, userId: string): Promise<void> {
+  const profile = await repo.getProfileById(userId).catch(() => null);
+  revalidateProfile(profile?.handle);
 }
 
 // ---------------------------------------------------------------------------
@@ -53,7 +79,9 @@ const onboardingSchema = z.object({
     .refine((handle) => !isReservedHandle(handle), "That handle is reserved."),
   display_name: z.string().trim().min(2, "Enter your name.").max(80),
   level: z.enum(LEVELS as [AthleteLevel, ...AthleteLevel[]]),
-  primary_sport: optionalText,
+  // No default sport: an athlete who skipped the choice would otherwise be
+  // listed under football in search.
+  primary_sport: requiredSport,
   grad_year: optionalNumber(z.number().int().min(1950).max(2100)),
   visibility: z.enum(["private", "unlisted", "public"] satisfies ProfileVisibility[]).default("public"),
 });
@@ -78,6 +106,7 @@ export async function completeOnboarding(_prev: FormState, formData: FormData): 
     return failed(error, "Could not create your resume. Try again.", formValues(formData));
   }
 
+  revalidateProfile(parsed.data.handle);
   redirect("/resume");
 }
 
@@ -145,14 +174,15 @@ export async function updateIdentity(_prev: FormState, formData: FormData): Prom
 
   if (!parsed.success) return invalid(parsed.error, formData);
 
+  let handle: string;
   try {
-    await repo.updateProfile(user.id, parsed.data);
+    ({ handle } = await repo.updateProfile(user.id, parsed.data));
   } catch (error) {
     return failed(error, "Could not save. Try again.", formValues(formData));
   }
 
-  revalidatePath("/resume");
-  return IDLE;
+  revalidateProfile(handle);
+  return saved();
 }
 
 const academicsSchema = z.object({
@@ -174,21 +204,22 @@ export async function updateAcademics(_prev: FormState, formData: FormData): Pro
 
   if (!parsed.success) return invalid(parsed.error, formData);
 
+  let handle: string;
   try {
-    await repo.updateProfile(user.id, parsed.data);
+    ({ handle } = await repo.updateProfile(user.id, parsed.data));
   } catch (error) {
     return failed(error, "Could not save. Try again.", formValues(formData));
   }
 
-  revalidatePath("/resume");
-  return IDLE;
+  revalidateProfile(handle);
+  return saved();
 }
 
 const contactSchema = z.object({
   contact_email: optionalText.pipe(z.string().email("Enter a valid email.").nullable()),
   phone: optionalText.pipe(z.string().max(25).nullable()),
-  instagram: optionalText.pipe(z.string().max(60).nullable()),
-  x_handle: optionalText.pipe(z.string().max(60).nullable()),
+  instagram: socialHandleField("instagram", "Enter an Instagram handle or profile link."),
+  x_handle: socialHandleField("x", "Enter an X handle or profile link."),
   hudl_url: optionalText.pipe(httpUrl.nullable()),
   results_url: optionalText.pipe(httpUrl.nullable()),
 });
@@ -207,14 +238,15 @@ export async function updateContact(_prev: FormState, formData: FormData): Promi
 
   if (!parsed.success) return invalid(parsed.error, formData);
 
+  let handle: string;
   try {
-    await repo.updateProfile(user.id, parsed.data);
+    ({ handle } = await repo.updateProfile(user.id, parsed.data));
   } catch (error) {
     return failed(error, "Could not save. Try again.", formValues(formData));
   }
 
-  revalidatePath("/resume");
-  return IDLE;
+  revalidateProfile(handle);
+  return saved();
 }
 
 const visibilitySchema = z.object({
@@ -232,14 +264,15 @@ export async function updateVisibility(_prev: FormState, formData: FormData): Pr
 
   if (!parsed.success) return invalid(parsed.error, formData);
 
+  let handle: string;
   try {
-    await repo.updateProfile(user.id, parsed.data);
+    ({ handle } = await repo.updateProfile(user.id, parsed.data));
   } catch (error) {
     return failed(error, "Could not save. Try again.", formValues(formData));
   }
 
-  revalidatePath("/resume");
-  return IDLE;
+  revalidateProfile(handle);
+  return saved();
 }
 
 // ---------------------------------------------------------------------------
@@ -273,8 +306,8 @@ export async function addAchievement(_prev: FormState, formData: FormData): Prom
     return failed(error, "Could not add the entry. Try again.", formValues(formData));
   }
 
-  revalidatePath("/resume");
-  return IDLE;
+  await refreshOwner(repo, user.id);
+  return saved();
 }
 
 export async function updateAchievement(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -292,8 +325,8 @@ export async function updateAchievement(_prev: FormState, formData: FormData): P
     return failed(error, "Could not save the entry. Try again.", formValues(formData));
   }
 
-  revalidatePath("/resume");
-  return IDLE;
+  await refreshOwner(repo, user.id);
+  return saved();
 }
 
 export async function deleteAchievement(formData: FormData): Promise<void> {
@@ -307,7 +340,7 @@ export async function deleteAchievement(formData: FormData): Promise<void> {
     // A stale form pointing at a deleted row: nothing to do.
   }
 
-  revalidatePath("/resume");
+  await refreshOwner(repo, user.id);
 }
 
 export async function togglePinned(formData: FormData): Promise<void> {
@@ -325,7 +358,7 @@ export async function togglePinned(formData: FormData): Promise<void> {
     // page or a direct POST lands here) or a row deleted meanwhile. A row
     // button has nowhere to show an error; the refreshed page shows the truth.
   }
-  revalidatePath("/resume");
+  await refreshOwner(repo, user.id);
 }
 
 // ---------------------------------------------------------------------------
@@ -344,7 +377,7 @@ export async function requestVerification(_prev: RequestState, formData: FormDat
 
   try {
     const request = await repo.requestVerification(user.id, entryId.data, coachId.data);
-    revalidatePath("/resume");
+    await refreshOwner(repo, user.id);
     return { ok: true, error: null, token: request.token };
   } catch (error) {
     return failed(error, "Could not create the request. Try again.");
@@ -378,8 +411,8 @@ export async function addFilm(_prev: FormState, formData: FormData): Promise<For
     return failed(error, "Could not add the clip. Try again.", formValues(formData));
   }
 
-  revalidatePath("/resume");
-  return IDLE;
+  await refreshOwner(repo, user.id);
+  return saved();
 }
 
 export async function deleteFilm(formData: FormData): Promise<void> {
@@ -393,7 +426,7 @@ export async function deleteFilm(formData: FormData): Promise<void> {
     // Stale form; nothing to do.
   }
 
-  revalidatePath("/resume");
+  await refreshOwner(repo, user.id);
 }
 
 export async function featureFilm(formData: FormData): Promise<void> {
@@ -407,24 +440,12 @@ export async function featureFilm(formData: FormData): Promise<void> {
     // Stale form; nothing to do.
   }
 
-  revalidatePath("/resume");
+  await refreshOwner(repo, user.id);
 }
 
 // ---------------------------------------------------------------------------
 // Coach contacts
 // ---------------------------------------------------------------------------
-
-const coachSchema = z
-  .object({
-    name: z.string().trim().min(2, "Enter the coach's name.").max(80),
-    role: optionalText.pipe(z.string().max(80).nullable()),
-    org_name: optionalText.pipe(z.string().max(120).nullable()),
-    email: optionalText.pipe(z.string().email("Enter a valid email.").nullable()),
-    phone: optionalText.pipe(z.string().max(25).nullable()),
-  })
-  .refine((coach) => coach.email !== null || coach.phone !== null, {
-    message: "A reference needs an email or a phone number.",
-  });
 
 export async function addCoach(_prev: FormState, formData: FormData): Promise<FormState> {
   const { repo, user } = await requireUser();
@@ -445,8 +466,8 @@ export async function addCoach(_prev: FormState, formData: FormData): Promise<Fo
     return failed(error, "Could not add the reference. Try again.", formValues(formData));
   }
 
-  revalidatePath("/resume");
-  return IDLE;
+  await refreshOwner(repo, user.id);
+  return saved();
 }
 
 export async function deleteCoach(formData: FormData): Promise<void> {
@@ -460,5 +481,5 @@ export async function deleteCoach(formData: FormData): Promise<void> {
     // Stale form; nothing to do.
   }
 
-  revalidatePath("/resume");
+  await refreshOwner(repo, user.id);
 }

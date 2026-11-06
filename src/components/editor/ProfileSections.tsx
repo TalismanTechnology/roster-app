@@ -79,7 +79,8 @@ export function IdentitySection({ profile }: { profile: Profile }) {
             </Field>
 
             <Field label="Sport">
-              <Select name="primary_sport" defaultValue={profile.primary_sport ?? "football"}>
+              <Select name="primary_sport" defaultValue={profile.primary_sport ?? ""}>
+                <option value="">Pick a sport</option>
                 {SPORTS.map(([value, label]) => (
                   <option key={value} value={value}>
                     {label}
@@ -183,11 +184,11 @@ export function ContactSection({ profile }: { profile: Profile }) {
               <TextInput name="phone" type="tel" defaultValue={profile.phone ?? ""} />
             </Field>
 
-            <Field label="Instagram">
+            <Field label="Instagram" hint="@handle or profile link — saved as the handle.">
               <TextInput name="instagram" defaultValue={profile.instagram ?? ""} />
             </Field>
 
-            <Field label="X">
+            <Field label="X" hint="@handle or profile link — saved as the handle.">
               <TextInput name="x_handle" defaultValue={profile.x_handle ?? ""} />
             </Field>
 

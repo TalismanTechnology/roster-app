@@ -13,7 +13,13 @@ import { failed, formValues, requireUser as requireSession, str } from "./shared
  * list pages, so each action revalidates both.
  */
 
-export type ListFormState = { ok: boolean; error: string | null; values?: Record<string, string> };
+export type ListFormState = {
+  ok: boolean;
+  error: string | null;
+  values?: Record<string, string>;
+  /** On a validation failure, each field's messages. */
+  fieldErrors?: Record<string, string[]>;
+};
 
 const IDLE: ListFormState = { ok: true, error: null };
 
@@ -28,7 +34,7 @@ const nameSchema = z.string().trim().min(2, "Give the list a name.").max(60);
 const noteSchema = z
   .string()
   .trim()
-  .max(300)
+  .max(300, "Keep the note under 300 characters.")
   .transform((v) => (v === "" ? null : v));
 
 export async function createList(_prev: ListFormState, formData: FormData): Promise<ListFormState> {
@@ -36,8 +42,13 @@ export async function createList(_prev: ListFormState, formData: FormData): Prom
   const name = nameSchema.safeParse(str(formData, "name"));
   const note = noteSchema.safeParse(str(formData, "note"));
   const values = formValues(formData);
-  if (!name.success) return { ok: false, error: name.error.issues[0].message, values };
-  if (!note.success) return { ok: false, error: note.error.issues[0].message, values };
+  if (!name.success || !note.success) {
+    const fieldErrors: Record<string, string[]> = {};
+    if (!name.success) fieldErrors.name = name.error.issues.map((i) => i.message);
+    if (!note.success) fieldErrors.note = note.error.issues.map((i) => i.message);
+    const error = Object.values(fieldErrors)[0][0];
+    return { ok: false, error, values, fieldErrors };
+  }
 
   try {
     await repo.createList(user.id, name.data, note.data);

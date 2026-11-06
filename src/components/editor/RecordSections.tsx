@@ -22,31 +22,23 @@ import { KIND_OPTIONS, kindLabel, recordDate } from "@/lib/format";
 import { providerLabel } from "@/lib/film";
 import { verifyUrl } from "@/lib/site";
 
+import { ConfirmDelete } from "./ConfirmDelete";
 import { CopyButton } from "./CopyButton";
 import { RequestVerification } from "./RequestVerification";
 
 /**
  * The record half of the editor: entries, film, references. Every row action
  * is a real button — a 40px bordered target, never a bare text link — and
- * posts straight to a Server Action, so the rows need no client JavaScript.
- * Editing and verification requests fold out of a row with <details>.
+ * posts straight to a Server Action, so the rows need no client JavaScript
+ * beyond Delete, which asks twice (ConfirmDelete). Editing and verification
+ * requests fold out of a row with <details>.
  */
 
-function RowAction({
-  action,
-  id,
-  label,
-  destructive = false,
-}: {
-  action: (formData: FormData) => Promise<void>;
-  id: string;
-  label: string;
-  destructive?: boolean;
-}) {
+function RowAction({ action, id, label }: { action: (formData: FormData) => Promise<void>; id: string; label: string }) {
   return (
     <form action={action}>
       <input type="hidden" name="id" value={id} />
-      <button type="submit" className={`btn-row ${destructive ? "btn-row-danger" : ""}`}>
+      <button type="submit" className="btn-row">
         {label}
       </button>
     </form>
@@ -214,15 +206,15 @@ export function RecordSection({
                       <RequestVerification entryId={entry.id} coaches={coaches} />
                     </Disclosure>
                   )}
-                  <RowAction action={deleteAchievement} id={entry.id} label="Delete" destructive />
+                  <ConfirmDelete action={deleteAchievement} id={entry.id} what="entry" />
                 </div>
 
                 {entry.verification === "submitted" && pending && (
-                  <div className="flex basis-full flex-wrap items-center gap-3 border-t border-rule pt-4" role="status">
+                  <div className="flex min-w-0 basis-full flex-wrap items-center gap-3 border-t border-rule pt-4" role="status">
                     <span className="text-sm text-ink-muted">
                       Sent to {coachById.get(pending.coach_contact_id)?.name ?? "your coach"} — send them this link:
                     </span>
-                    <code className="max-w-full truncate border border-rule bg-paper-sunken px-2 py-1.5 text-sm text-ink-muted">
+                    <code className="min-w-0 max-w-full truncate border border-rule bg-paper-sunken px-2 py-1.5 text-sm text-ink-muted">
                       {verifyUrl(pending.token)}
                     </code>
                     <CopyButton value={verifyUrl(pending.token)} label="Copy link" className="btn-row" />
@@ -273,7 +265,7 @@ export function FilmSection({ clips }: { clips: FilmClip[] }) {
 
               <div className="flex flex-wrap items-center gap-2">
                 {!clip.is_featured && <RowAction action={featureFilm} id={clip.id} label="Feature" />}
-                <RowAction action={deleteFilm} id={clip.id} label="Delete" destructive />
+                <ConfirmDelete action={deleteFilm} id={clip.id} what="clip" />
               </div>
             </li>
           ))}
@@ -326,7 +318,7 @@ export function CoachSection({ coaches }: { coaches: CoachContact[] }) {
                 </p>
               </div>
 
-              <RowAction action={deleteCoach} id={coach.id} label="Delete" destructive />
+              <ConfirmDelete action={deleteCoach} id={coach.id} what="reference" />
             </li>
           ))}
         </ol>

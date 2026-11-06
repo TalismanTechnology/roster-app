@@ -8,6 +8,8 @@ import { getRepository } from "@/lib/data";
 import { getCurrentUser, signInWithPassword, signOutEverywhere, signUpWithPassword } from "@/lib/data/auth";
 import { safeNext } from "@/lib/safe-next";
 
+import { fieldErrorsOf } from "./schemas";
+
 /** Where a fresh session lands: athletes in the editor, everyone else at their lists. */
 async function homeFor(): Promise<string> {
   const user = await getCurrentUser();
@@ -30,6 +32,8 @@ export type AuthFormState = {
   email?: string;
   /** Sign-up sets this when the project requires email confirmation. */
   confirmEmail?: boolean;
+  /** On a validation failure, each field's messages. */
+  fieldErrors?: Record<string, string[]>;
 };
 
 const credentialsSchema = z.object({
@@ -45,7 +49,7 @@ export async function signIn(_prev: AuthFormState, formData: FormData): Promise<
 
   const email = typeof formData.get("email") === "string" ? String(formData.get("email")) : "";
   if (!parsed.success) {
-    return { error: parsed.error.issues[0].message, email };
+    return { error: parsed.error.issues[0].message, email, fieldErrors: fieldErrorsOf(parsed.error) };
   }
 
   const result = await signInWithPassword(parsed.data.email, parsed.data.password);
@@ -62,7 +66,7 @@ export async function signUp(_prev: AuthFormState, formData: FormData): Promise<
 
   const email = typeof formData.get("email") === "string" ? String(formData.get("email")) : "";
   if (!parsed.success) {
-    return { error: parsed.error.issues[0].message, email };
+    return { error: parsed.error.issues[0].message, email, fieldErrors: fieldErrorsOf(parsed.error) };
   }
 
   const result = await signUpWithPassword(parsed.data.email, parsed.data.password);

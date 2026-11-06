@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 
 import { homePathFor } from "@/lib/accounts";
 import { signOut } from "@/lib/actions/auth";
@@ -17,6 +18,28 @@ function primaryHref(user: NonNullable<HeaderUser>): string {
 function primaryLabel(user: NonNullable<HeaderUser>): string {
   if (!user.handle) return "Finish setup";
   return homePathFor(user.accountKind) === "/lists" ? "Your lists" : "Your resume";
+}
+
+/** The bar's below-sm links, in the same order and under the same rules as
+ *  the desktop row: Lists only once there is a profile to own one. */
+function menuLinks(user: HeaderUser): [string, string][] {
+  if (!user) return [["Find athletes", "/search"], ["Sign in", "/sign-in"]];
+  return [
+    ["Find athletes", "/search"],
+    ...(user.handle ? ([["Lists", "/lists"]] as [string, string][]) : []),
+    ["Settings", "/settings"],
+  ];
+}
+
+const MENU_ROW = "flex min-h-12 items-center gap-4 py-3 text-ink-muted transition-colors hover:text-ink";
+
+/** The editorial row number — 01, 02 — decoration only. */
+function MenuIndex({ n }: { n: number }) {
+  return (
+    <span className="label font-mono text-ink-subtle" data-numeric aria-hidden>
+      {String(n).padStart(2, "0")}
+    </span>
+  );
 }
 
 export type HeaderUser = {
@@ -35,10 +58,17 @@ type Props = {
 /**
  * The site header. Fixed and transparent on the landing so the hero runs
  * underneath; a sticky glass bar everywhere else. Signed out it sells the
- * product; signed in it is the way back to your own resume.
+ * product; signed in it is the way back to your own resume. Below sm the
+ * secondary links fold into a "[ Menu ]" disclosure under the bar.
  */
 export function SiteHeader({ user, variant = "app" }: Props) {
   const [isScrolled, setIsScrolled] = useState(false);
+  // The phone menu remembers the path it was opened on, so any navigation
+  // closes it without an effect writing state on every route change.
+  const pathname = usePathname();
+  const [menuOpenedAt, setMenuOpenedAt] = useState<string | null>(null);
+  const isMenuOpen = menuOpenedAt !== null && menuOpenedAt === pathname;
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const onScroll = () => setIsScrolled(window.scrollY > 24);
@@ -47,6 +77,20 @@ export function SiteHeader({ user, variant = "app" }: Props) {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
+  // Escape closes the menu and hands focus back to the toggle.
+  useEffect(() => {
+    if (!isMenuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setMenuOpenedAt(null);
+      menuButtonRef.current?.focus();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [isMenuOpen]);
+
+  const closeMenu = () => setMenuOpenedAt(null);
+  const links = menuLinks(user);
   const isLanding = variant === "landing";
   const glass = isScrolled ? "bg-paper/70 border-white/10" : "bg-paper/40 border-white/5";
   const shell = isLanding
@@ -86,10 +130,10 @@ export function SiteHeader({ user, variant = "app" }: Props) {
               </form>
               <Link
                 href={primaryHref(user)}
-                className={`group inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-4 py-1.5 text-sm font-bold text-ink backdrop-blur-md transition-colors hover:border-ink hover:bg-ink hover:text-paper ${glass}`}
+                className={`group inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-bold text-ink backdrop-blur-md transition-colors hover:border-ink hover:bg-ink hover:text-paper sm:px-4 ${glass}`}
               >
                 {primaryLabel(user)}
-                <ArrowUpRight className="!size-3.5 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                <ArrowUpRight className="!size-3.5 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 max-sm:hidden" />
               </Link>
             </>
           ) : (
@@ -99,15 +143,59 @@ export function SiteHeader({ user, variant = "app" }: Props) {
               </Link>
               <Link
                 href="/sign-up"
-                className={`group inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-4 py-1.5 text-sm font-bold text-ink backdrop-blur-md transition-colors hover:border-ink hover:bg-ink hover:text-paper ${glass}`}
+                className={`group inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-bold text-ink backdrop-blur-md transition-colors hover:border-ink hover:bg-ink hover:text-paper sm:px-4 ${glass}`}
               >
-                Create your resume
-                <ArrowUpRight className="!size-3.5 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                {/* Below sm the pill shares the bar with the menu toggle; "your" goes so 320px fits. */}
+                Create<span className="max-sm:hidden"> your</span> resume
+                <ArrowUpRight className="!size-3.5 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 max-sm:hidden" />
               </Link>
             </>
           )}
+
+          <button
+            ref={menuButtonRef}
+            type="button"
+            aria-expanded={isMenuOpen}
+            aria-controls="site-menu"
+            onClick={() => setMenuOpenedAt(isMenuOpen ? null : pathname)}
+            className={`label min-h-10 cursor-pointer whitespace-nowrap px-1.5 font-mono transition-colors hover:text-ink sm:hidden ${isMenuOpen ? "text-ink" : "text-ink-muted"}`}
+          >
+            <span aria-hidden>[</span> Menu <span aria-hidden>]</span>
+          </button>
         </nav>
       </div>
+
+      {/* Phone menu: the links the bar drops below sm, as a hairline-ruled
+          list. `hidden` while closed and display:none from sm up, so the
+          desktop bar never has a second "Sign out" in the tree. */}
+      <nav
+        id="site-menu"
+        aria-label="Menu"
+        hidden={!isMenuOpen}
+        className="pointer-events-auto absolute inset-x-0 top-full border-b border-rule bg-paper sm:hidden"
+        style={{ paddingInline: "var(--pad-x)" }}
+      >
+        <ul className="divide-y divide-rule border-t border-rule">
+          {links.map(([label, href], i) => (
+            <li key={href}>
+              <Link href={href} onClick={closeMenu} className={MENU_ROW}>
+                <MenuIndex n={i + 1} />
+                {label}
+              </Link>
+            </li>
+          ))}
+          {user && (
+            <li>
+              <form action={signOut}>
+                <button type="submit" className={`${MENU_ROW} w-full cursor-pointer text-left`}>
+                  <MenuIndex n={links.length + 1} />
+                  Sign out
+                </button>
+              </form>
+            </li>
+          )}
+        </ul>
+      </nav>
     </header>
   );
 }
