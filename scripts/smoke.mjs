@@ -13,6 +13,9 @@
  * Usage:  node scripts/smoke.mjs [--base=http://127.0.0.1:3000] [--shots=dir]
  */
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import { chromium } from "playwright-core";
 
 import { serverFromArgs } from "./lib/server.mjs";
@@ -69,6 +72,12 @@ await step("security headers: CSP everywhere, no referrer from a verify link", a
   if (policy !== "no-referrer") throw new Error(`verify Referrer-Policy is ${policy}`);
   // `next start` here is not the production deploy: no preload promise.
   if (/preload/.test(home.headers.get("strict-transport-security") ?? "")) throw new Error("HSTS preload outside production deploy");
+});
+
+await step("an unknown verify link explains itself instead of a bare 404", async () => {
+  await page.goto(`${base}/verify/not-a-real-token`, { waitUntil: "networkidle" });
+  await expectText("This link doesn’t work.");
+  await expectText("Nothing was recorded.");
 });
 
 await step("search lists seeded public athletes", async () => {
@@ -129,6 +138,50 @@ await step("a hostile next= never leaves the site", async () => {
   }
 });
 
+/** The editor's add-entry form, filled and saved. */
+async function addEntry(title, value) {
+  await page.goto(`${base}/resume`, { waitUntil: "networkidle" });
+  const form = page
+    .locator("form")
+    .filter({ has: page.locator('input[name="achieved_on"]') })
+    .filter({ hasNot: page.locator('input[name="id"]') })
+    .first();
+  await form.locator('input[name="title"]').fill(title);
+  await form.locator('input[name="achieved_on"]').fill("2026-06-01");
+  await form.locator('input[name="value_display"]').fill(value);
+  await form.locator('button[type="submit"]').click();
+  const notice = form.locator('[role="status"], [role="alert"]').first();
+  await notice.waitFor({ state: "visible", timeout: 20_000 });
+  const verdict = (await notice.textContent())?.trim() ?? "";
+  if (!/^Saved/.test(verdict)) throw new Error(`form said: ${verdict}`);
+}
+
+/** Opens the row's request form (labelled `summaryText`), creates a link, returns its path. */
+async function requestLink(title, summaryText = "Request verification") {
+  const row = page.locator("li").filter({ hasText: title }).first();
+  const summary = row.locator("summary", { hasText: summaryText }).first();
+  await summary.click();
+  const panel = summary.locator("xpath=ancestor::details[1]");
+  await panel.getByRole("button", { name: /create request link/i }).click();
+  // The one moment the link exists: the action's result, on the row.
+  const code = page.locator("li").filter({ hasText: title }).locator("code", { hasText: "/verify/" }).first();
+  await code.waitFor({ timeout: 20_000 });
+  const text = (await code.textContent())?.trim() ?? "";
+  const linkPath = text ? new URL(text, base).pathname : "";
+  if (!linkPath.startsWith("/verify/")) throw new Error(`no link: ${text}`);
+  return linkPath;
+}
+
+/** Messages the server wrote instead of sending (no RESEND_API_KEY in tests). */
+function outbox() {
+  if (!dataDir) return null;
+  try {
+    return JSON.parse(readFileSync(path.join(dataDir, "email-outbox.json"), "utf8"));
+  } catch {
+    return [];
+  }
+}
+
 await step("adding an entry persists and shows on the public resume", async () => {
   const title = `Smoke entry ${stamp}`;
   await page.goto(`${base}/resume`, { waitUntil: "networkidle" });
@@ -159,21 +212,27 @@ await step("editor shows the live preview and creates a verification link", asyn
   await shot("editor");
   // Request verification on the smoke entry itself, so the later steps can
   // edit it without disturbing the seeded record.
-  const row = page.locator("li").filter({ hasText: `Smoke entry ${stamp}` }).first();
-  const summary = row.locator("summary", { hasText: "Request verification" }).first();
-  await summary.click();
-  const panel = summary.locator("xpath=ancestor::details[1]");
-  await panel.getByRole("button", { name: /create request link/i }).click();
-  // After the action the row re-renders as "submitted" and shows the link
-  // from server data, outside the disclosure.
-  const code = page.locator("li").filter({ hasText: `Smoke entry ${stamp}` }).locator("code", { hasText: "/verify/" }).first();
-  await code.waitFor({ timeout: 20_000 });
-  // The link is absolute (NEXT_PUBLIC_SITE_URL); visit its path on this server.
-  const text = (await code.textContent())?.trim() ?? "";
-  const path = text ? new URL(text, base).pathname : "";
-  if (!path.startsWith("/verify/")) throw new Error(`no link: ${text}`);
-  globalThis.__verifyPath = path;
+  globalThis.__verifyPath = await requestLink(`Smoke entry ${stamp}`);
   await shot("editor-request");
+});
+
+await step("the coach is emailed the link; the link is never shown again", async () => {
+  const messages = outbox();
+  if (messages) {
+    const sent = messages.find((m) => m.tag === "verification_request" && m.text.includes(globalThis.__verifyPath));
+    if (!sent) throw new Error(`no outbox email carries ${globalThis.__verifyPath}`);
+    if (sent.to !== "tbradley@example.org") throw new Error(`emailed ${sent.to}`);
+  }
+  // Only the hash is stored: a fresh visit says "waiting", never the link.
+  await page.goto(`${base}/resume`, { waitUntil: "networkidle" });
+  const row = page.locator("li").filter({ hasText: `Smoke entry ${stamp}` }).first();
+  await row.getByText("Waiting on").waitFor({ timeout: 10_000 });
+  if (await row.locator("code", { hasText: "/verify/" }).count()) throw new Error("stored link replayed after reload");
+});
+
+await step("a second entry to the same coach joins the coach's batch", async () => {
+  await addEntry(`Batch entry ${stamp}`, "22.22");
+  globalThis.__batchPath = await requestLink(`Batch entry ${stamp}`);
 });
 
 await step("the athlete cannot verify their own entry", async () => {
@@ -193,11 +252,31 @@ await step("a coach verifies by link with no account; the mark and name appear",
   await context.clearCookies();
   await page.goto(`${base}${globalThis.__verifyPath}`, { waitUntil: "networkidle" });
   await expectText("says this happened");
+  await expectText("Also waiting on you");
   await shot("verify");
-  await page.getByLabel("Note", { exact: false }).fill("Timed it myself at the spring combine.");
-  await page.getByRole("button", { name: /yes, i verify/i }).click();
+  const main = page.locator('form:has(input[name="token"]):not(:has(input[name="request_id"]))');
+  // #78: no verifying without the attestation.
+  if (!(await main.getByRole("button", { name: /yes, i verify/i }).isDisabled())) {
+    throw new Error("Verify enabled before the attestation was ticked");
+  }
+  await main.getByLabel("Note", { exact: false }).fill("Timed it myself at the spring combine.");
+  await main.getByLabel(/I coached or saw/).check();
+  await main.getByRole("button", { name: /yes, i verify/i }).click();
   await page.getByText("Verified. Thank you.").waitFor({ timeout: 20_000 });
   await shot("verify-done");
+
+  // #81: the other entry, answered from the same page with the same link.
+  const batch = page.locator('section[aria-labelledby="batch-heading"]');
+  await batch.getByText(`Batch entry ${stamp}`).first().waitFor({ timeout: 10_000 });
+  await batch.getByRole("button", { name: /this isn.t right/i }).click();
+  await batch.getByText("Recorded as disputed.").waitFor({ timeout: 20_000 });
+
+  // #80: the athlete hears both answers.
+  const messages = outbox();
+  if (messages) {
+    const answered = messages.filter((m) => m.tag === "verification_answered" && m.to === "jordanreyes@example.com");
+    if (answered.length < 2) throw new Error(`expected 2 answer emails to the athlete, saw ${answered.length}`);
+  }
   // Single use: a revisit shows the answered state, never the form.
   await page.goto(`${base}${globalThis.__verifyPath}`, { waitUntil: "networkidle" });
   await expectText("Each link works once.");
@@ -252,6 +331,30 @@ await step("editing a verified entry clears its badge", async () => {
   await page.goto(`${base}/resume`, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: /sign out/i }).first().click();
   await page.waitForURL(/\/$/, { timeout: 15_000 });
+});
+
+await step("a disputed entry offers fix & request again; revoke closes the new link", async () => {
+  await page.goto(`${base}/sign-in`, { waitUntil: "networkidle" });
+  await page.getByLabel("Email").fill("jordanreyes@roster.local");
+  await page.getByLabel("Password").fill("roster-demo");
+  await page.getByRole("button", { name: /sign in/i }).click();
+  await page.waitForURL(/\/resume$/, { timeout: 15_000 });
+
+  const title = `Batch entry ${stamp}`;
+  const row = page.locator("li").filter({ hasText: title }).first();
+  await row.getByText("says this isn’t right").waitFor({ timeout: 10_000 });
+  const again = await requestLink(title, "Request again");
+
+  await page.goto(`${base}/resume`, { waitUntil: "networkidle" });
+  const fresh = page.locator("li").filter({ hasText: title }).first();
+  await fresh.getByRole("button", { name: /^revoke$/i }).click();
+  await fresh.locator("summary", { hasText: "Request verification" }).waitFor({ timeout: 15_000 });
+
+  await page.getByRole("button", { name: /sign out/i }).first().click();
+  await page.waitForURL(/\/$/, { timeout: 15_000 });
+  await context.clearCookies();
+  await page.goto(`${base}${again}`, { waitUntil: "networkidle" });
+  await expectText("This link has expired.");
 });
 
 await step("a recruiter manages lists: create, save from search, open, remove", async () => {

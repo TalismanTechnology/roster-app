@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { getRepository, type Repository } from "@/lib/data";
 import type { AthleteLevel, ProfileVisibility } from "@/lib/database.types";
+import { emailCoachRequest } from "@/lib/email/verification";
 import { LEVEL_OPTIONS } from "@/lib/format";
 import { isReservedHandle, HANDLE_PATTERN } from "@/lib/handles";
 import { toStateCode } from "@/lib/regions";
@@ -365,7 +366,13 @@ export async function togglePinned(formData: FormData): Promise<void> {
 // Verification requests
 // ---------------------------------------------------------------------------
 
-export type RequestState = FormState & { token?: string };
+export type RequestState = FormState & {
+  /** The raw token, returned this once — nothing stored can rebuild the link. */
+  token?: string;
+  requestId?: string;
+  /** The coach's address when the link was emailed to them, else null. */
+  emailedTo?: string | null;
+};
 
 export async function requestVerification(_prev: RequestState, formData: FormData): Promise<RequestState> {
   const { repo, user } = await requireUser();
@@ -375,13 +382,46 @@ export async function requestVerification(_prev: RequestState, formData: FormDat
     return { ok: false, error: "Pick the entry and the coach who saw it." };
   }
 
+  let request;
   try {
-    const request = await repo.requestVerification(user.id, entryId.data, coachId.data);
-    await refreshOwner(repo, user.id);
-    return { ok: true, error: null, token: request.token };
+    request = await repo.requestVerification(user.id, entryId.data, coachId.data);
   } catch (error) {
     return failed(error, "Could not create the request. Try again.");
   }
+
+  // #75: the coach gets the link by email too. A failed send still leaves
+  // the athlete holding a working link to forward themselves.
+  const [profile, coaches, entries] = await Promise.all([
+    repo.getProfileById(user.id),
+    repo.listCoaches(user.id, user.id),
+    repo.listEntries(user.id),
+  ]);
+  const coach = coaches.find((c) => c.id === coachId.data);
+  const emailed = await emailCoachRequest({
+    coachEmail: coach?.email ?? null,
+    coachName: coach?.name ?? "Coach",
+    athleteName: profile?.display_name ?? "An athlete",
+    entryTitle: entries.find((e) => e.id === entryId.data)?.title ?? "an entry",
+    token: request.token,
+    expiresAt: request.expires_at,
+  });
+
+  revalidateProfile(profile?.handle);
+  return { ok: true, error: null, token: request.token, requestId: request.id, emailedTo: emailed ? (coach?.email ?? null) : null };
+}
+
+/** #41: the athlete closes a link that is still out — sent to the wrong coach, say. */
+export async function revokeVerification(formData: FormData): Promise<void> {
+  const { repo, user } = await requireUser();
+  const id = idSchema.safeParse(str(formData, "id"));
+  if (!id.success) return;
+
+  try {
+    await repo.revokeVerificationRequest(user.id, id.data);
+  } catch {
+    // Answered or revoked meanwhile; the refreshed page shows which.
+  }
+  await refreshOwner(repo, user.id);
 }
 
 // ---------------------------------------------------------------------------

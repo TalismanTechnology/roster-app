@@ -10,6 +10,8 @@ import type {
   RecruiterListDetail,
   SearchParams,
   SearchResult,
+  CreatedVerificationRequest,
+  VerificationAnswerOptions,
   VerificationRequest,
   VerificationRequestDetail,
   VerificationResponse,
@@ -77,12 +79,25 @@ export interface Repository {
   deleteCoach(profileId: string, coachId: string): Promise<void>;
 
   // --- verification -------------------------------------------------------
+  /**
+   * Opens a link for one entry and one of the athlete's references, and
+   * supersedes any link still out for that entry. The raw token comes back
+   * here and nowhere else — only its hash is stored. Throws `rate_limited`
+   * past `DAILY_REQUEST_CAP` requests in a UTC day.
+   */
   requestVerification(
     profileId: string,
     achievementId: string,
     coachContactId: string,
-  ): Promise<VerificationRequest>;
+  ): Promise<CreatedVerificationRequest>;
+  /** By raw token, whatever its status — the page explains used and expired. Null when unknown. */
   getVerificationRequest(token: string): Promise<VerificationRequestDetail | null>;
+  /**
+   * The athlete's other live requests to the same coach, for answering in
+   * one sitting. Empty when the link itself is revoked, superseded, or past
+   * its date.
+   */
+  getCoachBatchRequests(token: string): Promise<VerificationRequestDetail[]>;
   /** `responderUserId` is the signed-in user, if any; the athlete may not respond. */
   respondToVerification(
     token: string,
@@ -90,8 +105,11 @@ export interface Repository {
     note: string | null,
     verifier: { name: string; role: string | null },
     responderUserId: string | null,
+    options?: VerificationAnswerOptions,
   ): Promise<VerificationResponse>;
   listVerificationRequests(profileId: string): Promise<VerificationRequest[]>;
+  /** Closes a pending link (#41). `conflict` once it has been answered or closed. */
+  revokeVerificationRequest(profileId: string, requestId: string): Promise<void>;
 
   // --- signals ------------------------------------------------------------
   recordView(profileId: string, viewerId: string | null): Promise<void>;

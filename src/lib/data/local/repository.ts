@@ -1,6 +1,6 @@
 import "server-only";
 
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import type { CoachContact, FilmClip, Profile, RecordEntry } from "@/lib/database.types";
 import { HANDLE_PATTERN, isReservedHandle } from "@/lib/handles";
@@ -17,13 +17,20 @@ import {
   type RecruiterListDetail,
   type SearchParams,
   type SearchResult,
+  type CreatedVerificationRequest,
+  type VerificationAnswerOptions,
   type VerificationRequest,
   type VerificationRequestDetail,
   type VerificationResponse,
 } from "../types";
 import {
+  canActForSibling,
   canPinAnother,
   canRespondToRequest,
+  DAILY_REQUEST_CAP,
+  isLiveRequest,
+  isOverDailyCap,
+  REQUEST_TTL_DAYS,
   canSeeCoachContact,
   canViewProfile,
   isSubstantiveEntryChange,
@@ -32,10 +39,18 @@ import {
 } from "../rules";
 import { parseFilmUrl } from "./film";
 import { hashPassword, verifyPassword, verifyPasswordConstantTime } from "./password";
+import { generateToken, hashToken } from "../tokens";
 import { searchProfiles } from "./search";
-import { mutate, readDb, type AchievementRow, type Db, type RecruiterListRow } from "./store";
+import {
+  mutate,
+  readDb,
+  type AchievementRow,
+  type Db,
+  type RecruiterListRow,
+  type VerificationRequestRow,
+} from "./store";
 
-const REQUEST_TTL_MS = 30 * 86_400_000;
+const REQUEST_TTL_MS = REQUEST_TTL_DAYS * 86_400_000;
 
 const now = () => new Date().toISOString();
 const today = () => now().slice(0, 10);
@@ -384,17 +399,27 @@ export class LocalRepository implements Repository {
     profileId: string,
     achievementId: string,
     coachContactId: string,
-  ): Promise<VerificationRequest> {
+  ): Promise<CreatedVerificationRequest> {
     return mutate((db) => {
       const entry = requireOwned(db.achievements, achievementId, profileId, "entry");
       requireOwned(db.coach_contacts, coachContactId, profileId, "reference");
 
+      // create_verification_request()'s daily cap. Checked under the store
+      // lock, so two tabs cannot both slip under it.
+      if (isOverDailyCap(db.verification_requests, profileId)) {
+        throw new DataError(
+          "rate_limited",
+          `You can send ${DAILY_REQUEST_CAP} verification requests a day. Try again tomorrow.`,
+        );
+      }
+
       // One live request per entry; re-requesting supersedes the old link.
       expirePendingRequests(db, achievementId);
 
-      const request: VerificationRequest = {
+      const token = generateToken();
+      const row: VerificationRequestRow = {
         id: randomUUID(),
-        token: randomBytes(24).toString("base64url"),
+        token_hash: hashToken(token),
         achievement_id: achievementId,
         profile_id: profileId,
         coach_contact_id: coachContactId,
@@ -402,26 +427,33 @@ export class LocalRepository implements Repository {
         note: null,
         verifier_name: null,
         verifier_role: null,
+        flagged_unknown_athlete: false,
         created_at: now(),
         responded_at: null,
         expires_at: new Date(Date.now() + REQUEST_TTL_MS).toISOString(),
       };
-      db.verification_requests.push(request);
+      db.verification_requests.push(row);
       entry.verification = "submitted";
+      entry.verified_at = null;
       entry.updated_at = now();
-      return request;
+      return { ...publicRequest(row), token };
     });
   }
 
   async getVerificationRequest(token: string): Promise<VerificationRequestDetail | null> {
     const db = readDb();
-    const request = db.verification_requests.find((r) => r.token === token);
-    if (!request) return null;
-    const row = db.achievements.find((a) => a.id === request.achievement_id);
-    const athlete = db.profiles.find((p) => p.id === request.profile_id);
-    const coach = db.coach_contacts.find((c) => c.id === request.coach_contact_id);
-    if (!row || !athlete || !coach) return null;
-    return { ...request, entry: toEntry(db, row), athlete, coach };
+    const request = findByToken(db, token);
+    return request ? toDetail(db, request) : null;
+  }
+
+  async getCoachBatchRequests(token: string): Promise<VerificationRequestDetail[]> {
+    const db = readDb();
+    const authority = findByToken(db, token);
+    if (!authority) return [];
+    return db.verification_requests
+      .filter((r) => isLiveRequest(r) && isSibling(db, authority, r))
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .flatMap((r) => toDetail(db, r) ?? []);
   }
 
   async respondToVerification(
@@ -430,31 +462,41 @@ export class LocalRepository implements Repository {
     note: string | null,
     verifier: { name: string; role: string | null },
     responderUserId: string | null,
+    options: VerificationAnswerOptions = {},
   ): Promise<VerificationResponse> {
     return mutate((db) => {
-      const request = db.verification_requests.find((r) => r.token === token);
-      if (!request) throw new DataError("not_found", "That verification link is not valid.");
+      const authority = findByToken(db, token);
+      if (!authority) throw new DataError("not_found", "That verification link is not valid.");
+
+      let request = authority;
+      if (options.requestId && options.requestId !== authority.id) {
+        const sibling = db.verification_requests.find((r) => r.id === options.requestId);
+        if (!sibling || !isSibling(db, authority, sibling)) {
+          // The link itself being dead reads as expired, like the RPC says.
+          if (authority.status === "expired" || new Date(authority.expires_at) <= new Date()) {
+            throw new DataError("forbidden", RESPONSE_COPY.expired);
+          }
+          throw new DataError("not_found", "That verification request was not found.");
+        }
+        request = sibling;
+      }
 
       const allowed = canRespondToRequest(request, responderUserId);
-      if (!allowed.ok) {
-        const copy = {
-          used: "This link has already been used.",
-          expired: "This link has expired. Ask the athlete to send a new one.",
-          self: "You can't verify your own record.",
-        };
-        throw new DataError("forbidden", copy[allowed.reason]);
-      }
+      if (!allowed.ok) throw new DataError("forbidden", RESPONSE_COPY[allowed.reason]);
 
       const entry = db.achievements.find((a) => a.id === request.achievement_id);
       if (!entry) throw new DataError("not_found", "That entry no longer exists.");
 
+      // A flag is a dispute, whatever button sent it — as in respond_verification().
+      const flagged = options.flagUnknownAthlete === true;
+      const decided = flagged ? "disputed" : outcome;
       const at = now();
       db.verifications.push({
         id: randomUUID(),
         achievement_id: entry.id,
         verifier_id: responderUserId,
         verifier_kind: "coach",
-        outcome,
+        outcome: decided,
         method: "coach_attestation",
         note,
         verifier_name: verifier.name,
@@ -463,26 +505,57 @@ export class LocalRepository implements Repository {
       });
 
       // apply_verification()
-      entry.verification = outcome;
-      entry.verified_at = outcome === "verified" ? at : null;
+      entry.verification = decided;
+      entry.verified_at = decided === "verified" ? at : null;
       entry.updated_at = at;
 
-      request.status = outcome;
+      request.status = decided;
       request.note = note;
       request.verifier_name = verifier.name;
       request.verifier_role = verifier.role;
+      request.flagged_unknown_athlete = flagged;
       request.responded_at = at;
 
       syncCounts(db, entry.profile_id);
       const athlete = requireProfile(db, entry.profile_id);
-      return { handle: athlete.handle, outcome };
+      // Local mode can reach the account email too; Supabase only has the
+      // published contact_email (see respond_verification()).
+      const accountEmail = db.users.find((u) => u.id === athlete.id)?.email ?? null;
+      return {
+        requestId: request.id,
+        handle: athlete.handle,
+        outcome: decided,
+        flaggedUnknownAthlete: flagged,
+        athleteName: athlete.display_name,
+        athleteEmail: athlete.contact_email ?? accountEmail,
+        entryTitle: entry.title,
+      };
     });
   }
 
   async listVerificationRequests(profileId: string): Promise<VerificationRequest[]> {
     return readDb()
       .verification_requests.filter((r) => r.profile_id === profileId)
-      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .map(publicRequest);
+  }
+
+  async revokeVerificationRequest(profileId: string, requestId: string): Promise<void> {
+    await mutate((db) => {
+      const request = requireOwned(db.verification_requests, requestId, profileId, "request");
+      if (request.status !== "pending") {
+        throw new DataError("conflict", "That request has already been answered or closed.");
+      }
+      request.status = "expired";
+      // sync_entry_on_request(): the last open link takes the entry back.
+      const entry = db.achievements.find((a) => a.id === request.achievement_id);
+      const stillOpen = db.verification_requests.some((r) => r.achievement_id === request.achievement_id && r.status === "pending");
+      if (entry && entry.verification === "submitted" && !stillOpen) {
+        entry.verification = "unverified";
+        entry.verified_at = null;
+        entry.updated_at = now();
+      }
+    });
   }
 
   // --- signals ------------------------------------------------------------
@@ -717,6 +790,53 @@ export function syncCounts(db: Db, profileId: string): void {
 /** Only the `NewEntry` columns — a direct POST must not smuggle in `verification`. */
 function pickEntryFields(patch: Partial<NewEntry>): Partial<NewEntry> {
   return Object.fromEntries(SUBSTANTIVE_ENTRY_FIELDS.filter((f) => patch[f] !== undefined).map((f) => [f, patch[f]]));
+}
+
+const RESPONSE_COPY = {
+  used: "This link has already been used.",
+  expired: "This link has expired. Ask the athlete to send a new one.",
+  self: "You can't verify your own record.",
+} as const;
+
+function findByToken(db: Db, token: string): VerificationRequestRow | undefined {
+  const hash = hashToken(token);
+  return db.verification_requests.find((r) => r.token_hash === hash);
+}
+
+/** The row without its hash — what leaves the adapter. */
+function publicRequest(row: VerificationRequestRow): VerificationRequest {
+  const { token_hash: _hash, ...request } = row;
+  void _hash;
+  return request;
+}
+
+/** verification_request_payload(): the entry, and narrow slices of athlete and coach. */
+function toDetail(db: Db, request: VerificationRequestRow): VerificationRequestDetail | null {
+  const row = db.achievements.find((a) => a.id === request.achievement_id);
+  const athlete = db.profiles.find((p) => p.id === request.profile_id);
+  const coach = db.coach_contacts.find((c) => c.id === request.coach_contact_id);
+  if (!row || !athlete || !coach) return null;
+  return {
+    ...publicRequest(request),
+    entry: toEntry(db, row),
+    athlete: {
+      id: athlete.id,
+      handle: athlete.handle,
+      display_name: athlete.display_name,
+      primary_sport: athlete.primary_sport,
+      school: athlete.school,
+      grad_year: athlete.grad_year,
+    },
+    coach: { id: coach.id, name: coach.name, role: coach.role, org_name: coach.org_name },
+  };
+}
+
+function isSibling(db: Db, authority: VerificationRequestRow, other: VerificationRequestRow): boolean {
+  const email = (id: string) => db.coach_contacts.find((c) => c.id === id)?.email ?? null;
+  return canActForSibling(authority, other, {
+    authority: email(authority.coach_contact_id),
+    sibling: email(other.coach_contact_id),
+  });
 }
 
 /** Supersedes every link still waiting on an answer for this entry. */

@@ -220,7 +220,8 @@ describe("responding to a request", () => {
     const entry = await repo.addEntry(profile.id, ENTRY);
     const request = await repo.requestVerification(profile.id, entry.id, coach.id);
     const result = await repo.respondToVerification(request.token, "verified", null, { name: "Coach", role: null }, null);
-    assert.deepEqual(result, { handle: profile.handle, outcome: "verified" });
+    assert.equal(result.handle, profile.handle);
+    assert.equal(result.outcome, "verified");
   });
 
   it("a superseded link reports expired, not already answered", async () => {

@@ -15,6 +15,7 @@ import { Corner, CORNER } from "@/components/ui/marks";
 import { getRepository } from "@/lib/data";
 import { homePathFor } from "@/lib/accounts";
 import { getCurrentProfile, getCurrentUser } from "@/lib/data/auth";
+import { isLiveRequest } from "@/lib/data/rules";
 import type { VerificationRequest } from "@/lib/data/types";
 import { signInHref } from "@/lib/safe-next";
 import { siteHost } from "@/lib/site";
@@ -73,7 +74,7 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
   const requested = typeof params.section === "string" && SECTION_IDS.has(params.section) ? (params.section as SectionId) : null;
   const active: SectionId = requested ?? firstUnfinished(checklist);
   const visibility = { public: "Public", unlisted: "Unlisted", private: "Private" }[profile.visibility];
-  const pendingCount = requests.filter((r: VerificationRequest) => r.status === "pending").length;
+  const pendingCount = requests.filter((r: VerificationRequest) => isLiveRequest(r)).length;
 
   return (
     <Site>

@@ -44,6 +44,8 @@ export async function startIsolatedServer({ label = "roster" } = {}) {
       ROSTER_DATA_DIR: dataDir,
       ROSTER_SESSION_SECRET: secret && secret.length >= 32 ? secret : randomBytes(32).toString("hex"),
       NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL ?? base,
+      // Never real mail from a test run: blank means "outbox file in dataDir".
+      RESEND_API_KEY: "",
     },
     // Own process group: `next start` forks, and the whole group must go.
     detached: true,

@@ -13,6 +13,7 @@ import type {
   ProfileView,
 } from "@/lib/database.types";
 
+import { hashToken } from "../tokens";
 import type { VerificationRequest } from "../types";
 import { dataDir } from "./paths";
 import { buildSeed } from "./seed";
@@ -69,6 +70,9 @@ export type VerificationRow = {
   created_at: string;
 };
 
+/** `verification_requests` (0017): the request plus its token's sha256, never the token. */
+export type VerificationRequestRow = VerificationRequest & { token_hash: string };
+
 export type RecruiterListRow = {
   id: string;
   owner_id: string;
@@ -94,7 +98,7 @@ export type Db = {
   achievements: AchievementRow[];
   evidence: EvidenceRow[];
   verifications: VerificationRow[];
-  verification_requests: VerificationRequest[];
+  verification_requests: VerificationRequestRow[];
   film_clips: FilmClip[];
   coach_contacts: CoachContact[];
   profile_views: ProfileView[];
@@ -145,7 +149,23 @@ function ensureExists(): void {
  */
 export function readDb(): Db {
   ensureExists();
-  return JSON.parse(fs.readFileSync(dbFile(), "utf8")) as Db;
+  return upgrade(JSON.parse(fs.readFileSync(dbFile(), "utf8")) as Db);
+}
+
+/**
+ * Brings rows written by older builds up to the current shape. Requests used
+ * to store the raw token; it is hashed and dropped here, so the next write
+ * leaves no working link on disk.
+ */
+function upgrade(db: Db): Db {
+  for (const row of db.verification_requests as (VerificationRequestRow & { token?: string })[]) {
+    if (row.token !== undefined) {
+      row.token_hash ??= hashToken(row.token);
+      delete row.token;
+    }
+    row.flagged_unknown_athlete ??= false;
+  }
+  return db;
 }
 
 export function writeDb(db: Db): void {

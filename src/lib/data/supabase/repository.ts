@@ -6,7 +6,14 @@ import type { CoachContact, Database, FilmClip, Profile, RecordEntry } from "@/l
 import { HANDLE_PATTERN, isReservedHandle } from "@/lib/handles";
 
 import type { Repository } from "../repository";
-import { isSubstantiveEntryChange, MAX_PINNED, SUBSTANTIVE_ENTRY_FIELDS } from "../rules";
+import {
+  DAILY_REQUEST_CAP,
+  isSubstantiveEntryChange,
+  MAX_PINNED,
+  REQUEST_TTL_DAYS,
+  SUBSTANTIVE_ENTRY_FIELDS,
+} from "../rules";
+import { generateToken, hashToken } from "../tokens";
 import { clampPage, clampPageSize, escapeLike, normalizeSearchQuery } from "../search-query";
 import {
   DataError,
@@ -19,6 +26,8 @@ import {
   type RecruiterListDetail,
   type SearchParams,
   type SearchResult,
+  type CreatedVerificationRequest,
+  type VerificationAnswerOptions,
   type VerificationRequest,
   type VerificationRequestDetail,
   type VerificationResponse,
@@ -47,6 +56,38 @@ function requireAffected(
   if (result.count === 0) throw new DataError("not_found", `That ${noun} was not found.`);
 }
 
+/** Every readable column of verification_requests — `select *` is refused (0017). */
+const REQUEST_COLUMNS =
+  "id,achievement_id,profile_id,coach_contact_id,status,note,verifier_name,verifier_role,flagged_unknown_athlete,created_at,responded_at,expires_at";
+
+/**
+ * A refusal from the 0017 functions, mapped to the copy the local adapter
+ * uses for the same case. The SQLSTATEs are documented in the migration.
+ */
+function requestError(error: { code?: string; message: string }, fallback: string): DataError {
+  switch (error.code) {
+    case "RS403":
+      return /verify itself/.test(error.message)
+        ? new DataError("forbidden", "You can't verify your own record.")
+        : new DataError("forbidden", "Sign in to do that.");
+    case "RS404":
+      return new DataError("not_found", "That verification link is not valid.");
+    case "RS409":
+      return new DataError("forbidden", "This link has already been used.");
+    case "RS410":
+      return new DataError("forbidden", "This link has expired. Ask the athlete to send a new one.");
+    case "RS429":
+      return new DataError(
+        "rate_limited",
+        `You can send ${DAILY_REQUEST_CAP} verification requests a day. Try again tomorrow.`,
+      );
+    case "22023":
+      return new DataError("invalid", "Check your name, role, and note.");
+    default:
+      return new DataError("unavailable", fallback);
+  }
+}
+
 /**
  * The Supabase adapter. Authorization is RLS: every query runs as the
  * signed-in user, so this class passes the viewer's context implicitly and
@@ -55,7 +96,7 @@ function requireAffected(
  *
  * Status: compiles against the hand-written types; NOT exercised against a
  * live project during the local-mode build. The by-link verification flow
- * has no table in the schema yet, so those methods report `unavailable`.
+ * runs on the 0017 functions; supabase/tests covers them against Postgres.
  */
 export class SupabaseRepository implements Repository {
   constructor(private readonly client: Client) {}
@@ -174,8 +215,8 @@ export class SupabaseRepository implements Repository {
       SUBSTANTIVE_ENTRY_FIELDS.filter((f) => patch[f] !== undefined).map((f) => [f, patch[f]]),
     ) as Partial<NewEntry>;
     // Same rule as the local adapter: a coach vouched for the old values.
-    // There is no verification_requests table here yet, so there is no
-    // pending link to expire — the reset is the whole of it.
+    // Any link still out is expired by achievements_expire_requests (0017)
+    // when the reset lands.
     const reset = isSubstantiveEntryChange(current, patch) ? { verification: "unverified" as const, verified_at: null } : {};
 
     const result = await this.client
@@ -291,22 +332,99 @@ export class SupabaseRepository implements Repository {
     );
   }
 
-  // --- verification (needs a verification_requests table; see types.ts) ---
+  // --- verification (0017; the raw token never reaches a table) ----------
 
-  async requestVerification(): Promise<VerificationRequest> {
-    throw new DataError("unavailable", "Verification by link is not wired to Supabase yet.");
+  async requestVerification(
+    _profileId: string,
+    achievementId: string,
+    coachContactId: string,
+  ): Promise<CreatedVerificationRequest> {
+    // Minted here, hashed before it leaves the process. The function owns
+    // ownership, the cap, superseding, and marking the entry submitted.
+    const token = generateToken();
+    const { data, error } = await this.client.rpc("create_verification_request", {
+      p_achievement: achievementId,
+      p_coach_contact: coachContactId,
+      p_token_hash: hashToken(token),
+      p_expires_at: new Date(Date.now() + REQUEST_TTL_DAYS * 86_400_000).toISOString(),
+    });
+    if (error || !data) {
+      if (error?.code === "RS404") throw new DataError("not_found", "That entry or reference was not found.");
+      throw requestError(error ?? { message: "" }, "Could not create the request. Try again.");
+    }
+    return { ...(data as unknown as VerificationRequest), token };
   }
 
-  async getVerificationRequest(): Promise<VerificationRequestDetail | null> {
-    return null;
+  async getVerificationRequest(token: string): Promise<VerificationRequestDetail | null> {
+    const { data, error } = await this.client.rpc("get_verification_request", { p_token: token });
+    if (error) throw requestError(error, "Could not open this link. Try again.");
+    return (data as unknown as VerificationRequestDetail | null) ?? null;
   }
 
-  async respondToVerification(): Promise<VerificationResponse> {
-    throw new DataError("unavailable", "Verification by link is not wired to Supabase yet.");
+  async getCoachBatchRequests(token: string): Promise<VerificationRequestDetail[]> {
+    const { data, error } = await this.client.rpc("get_coach_batch_requests", { p_token: token });
+    // The batch is a convenience on a page that already rendered; a failure
+    // hides it rather than taking the page down.
+    if (error) return [];
+    return (data as unknown as VerificationRequestDetail[] | null) ?? [];
   }
 
-  async listVerificationRequests(): Promise<VerificationRequest[]> {
-    return [];
+  async respondToVerification(
+    token: string,
+    outcome: "verified" | "disputed",
+    note: string | null,
+    verifier: { name: string; role: string | null },
+    _responderUserId: string | null,
+    options: VerificationAnswerOptions = {},
+  ): Promise<VerificationResponse> {
+    // The responder is whoever the client's JWT says; the function refuses
+    // the athlete's own session itself, so the id passed in is not trusted.
+    const { data, error } = await this.client.rpc("respond_verification", {
+      p_token: token,
+      p_outcome: outcome,
+      p_note: note,
+      p_verifier_name: verifier.name,
+      p_verifier_role: verifier.role,
+      p_flag_unknown: options.flagUnknownAthlete === true,
+      p_request_id: options.requestId ?? null,
+    });
+    if (error || !data) throw requestError(error ?? { message: "" }, "Could not record your answer. Try again.");
+    const row = data as {
+      request_id: string;
+      handle: string;
+      display_name: string;
+      contact_email: string | null;
+      entry_title: string;
+      outcome: "verified" | "disputed";
+      flagged_unknown_athlete: boolean;
+    };
+    return {
+      requestId: row.request_id,
+      handle: row.handle,
+      outcome: row.outcome,
+      flaggedUnknownAthlete: row.flagged_unknown_athlete,
+      athleteName: row.display_name,
+      athleteEmail: row.contact_email,
+      entryTitle: row.entry_title,
+    };
+  }
+
+  async listVerificationRequests(profileId: string): Promise<VerificationRequest[]> {
+    const { data } = await this.client
+      .from("verification_requests")
+      .select(REQUEST_COLUMNS)
+      .eq("profile_id", profileId)
+      .order("created_at", { ascending: false })
+      .returns<VerificationRequest[]>();
+    return data ?? [];
+  }
+
+  async revokeVerificationRequest(_profileId: string, requestId: string): Promise<void> {
+    const { error } = await this.client.rpc("revoke_verification_request", { p_request_id: requestId });
+    if (!error) return;
+    if (error.code === "RS409") throw new DataError("conflict", "That request has already been answered or closed.");
+    if (error.code === "RS404") throw new DataError("not_found", "That request was not found.");
+    throw requestError(error, "Could not revoke the request. Try again.");
   }
 
   // --- signals ------------------------------------------------------------

@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { getRepository } from "@/lib/data";
 import { getCurrentUser } from "@/lib/data/auth";
+import { emailAthleteAnswer } from "@/lib/email/verification";
 import { revalidateProfile } from "@/lib/revalidate";
 
 import { fieldErrorsOf } from "./schemas";
@@ -13,12 +14,22 @@ import { failed, formValues, str, type FormValues } from "./shared";
  * A coach's answer to a verification request. No account required: the
  * token in the link is the authority, and the repository refuses the
  * athlete's own session, a used link, and an expired one.
+ *
+ * Three answers: verify (only with the attestation ticked, #78), dispute,
+ * or "I don't coach or know this athlete" (#83) — a dispute carrying a flag,
+ * so the athlete learns the link reached the wrong person rather than that
+ * their claim is wrong. `request_id` answers one of the coach's other
+ * pending entries from the same athlete with this link (#81).
  */
 
 export type VerifyFormState = {
   ok: boolean;
   error: string | null;
   outcome?: "verified" | "disputed";
+  /** The answer was "I don't know this athlete". */
+  flagged?: boolean;
+  /** Which request was answered — the link's own, or a sibling's. */
+  requestId?: string;
   /** The coach's name, role, and note, put back after a failure. */
   values?: FormValues;
   /** On a validation failure, each field's messages. */
@@ -26,8 +37,13 @@ export type VerifyFormState = {
 };
 
 const schema = z.object({
-  token: z.string().min(10),
-  outcome: z.enum(["verified", "disputed"]),
+  token: z.string().min(10).max(200),
+  outcome: z.enum(["verified", "disputed", "unknown"]),
+  attest: z.boolean(),
+  request_id: z
+    .string()
+    .transform((v) => (v === "" ? undefined : v))
+    .pipe(z.uuid().optional()),
   name: z.string().trim().min(2, "Enter your name.").max(80),
   role: z
     .string()
@@ -45,6 +61,8 @@ export async function respondVerification(_prev: VerifyFormState, formData: Form
   const parsed = schema.safeParse({
     token: str(formData, "token"),
     outcome: str(formData, "outcome"),
+    attest: str(formData, "attest") === "on",
+    request_id: str(formData, "request_id"),
     name: str(formData, "name"),
     role: str(formData, "role"),
     note: str(formData, "note"),
@@ -59,11 +77,32 @@ export async function respondVerification(_prev: VerifyFormState, formData: Form
     };
   }
 
-  const [repo, user] = await Promise.all([getRepository(), getCurrentUser()]);
-  const { token, outcome, name, role, note } = parsed.data;
+  const { token, outcome, attest, request_id: requestId, name, role, note } = parsed.data;
+  // A verification is a statement of fact with a name on it; it has to be
+  // made deliberately. Disputes and "don't know" need no attestation.
+  if (outcome === "verified" && !attest) {
+    return {
+      ok: false,
+      error: "Confirm you coached or saw this athlete before verifying.",
+      values: formValues(formData),
+      fieldErrors: { attest: ["Tick this to verify."] },
+    };
+  }
 
+  const [repo, user] = await Promise.all([getRepository(), getCurrentUser()]);
+  const flagUnknownAthlete = outcome === "unknown";
+
+  let result;
   try {
-    const { handle } = await repo.respondToVerification(token, outcome, note, { name, role }, user?.id ?? null);
+    result = await repo.respondToVerification(
+      token,
+      flagUnknownAthlete ? "disputed" : outcome,
+      note,
+      { name, role },
+      user?.id ?? null,
+      { flagUnknownAthlete, requestId },
+    );
+    const { handle } = result;
 
     // The athlete's surfaces update now: the editor, the public resume
     // whose badge just changed, and the verified count in search. The
@@ -75,5 +114,16 @@ export async function respondVerification(_prev: VerifyFormState, formData: Form
     return failed(error, "Could not record your answer. Try again.", formValues(formData));
   }
 
-  return { ok: true, error: null, outcome };
+  // #80: tell the athlete. Never fails the answer — see email/verification.ts.
+  await emailAthleteAnswer({
+    athleteEmail: result.athleteEmail,
+    athleteName: result.athleteName,
+    coachName: name,
+    entryTitle: result.entryTitle,
+    outcome: result.outcome,
+    flaggedUnknownAthlete: result.flaggedUnknownAthlete,
+    note,
+  });
+
+  return { ok: true, error: null, outcome: result.outcome, flagged: result.flaggedUnknownAthlete, requestId: result.requestId };
 }

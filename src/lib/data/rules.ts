@@ -88,6 +88,57 @@ export function canRespondToRequest(
   return { ok: true };
 }
 
+/** How long a link works. The editor copy says "expires in 30 days". */
+export const REQUEST_TTL_DAYS = 30;
+
+/**
+ * New requests one athlete may open per UTC day — `daily_cap` in
+ * create_verification_request() (0017). Every request emails a coach, so
+ * this is the ceiling on how much mail one account can make Roster send.
+ */
+export const DAILY_REQUEST_CAP = 10;
+
+/** Start of the UTC day containing `now`, as an ISO string. */
+export function utcDayStart(now = new Date()): string {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
+}
+
+/** Whether the athlete has used up today's requests. */
+export function isOverDailyCap(
+  requests: Pick<VerificationRequest, "profile_id" | "created_at">[],
+  profileId: string,
+  now = new Date(),
+): boolean {
+  const since = utcDayStart(now);
+  return requests.filter((r) => r.profile_id === profileId && r.created_at >= since).length >= DAILY_REQUEST_CAP;
+}
+
+/** Still waiting on an answer and still answerable. */
+export function isLiveRequest(request: Pick<VerificationRequest, "status" | "expires_at">, now = new Date()): boolean {
+  return request.status === "pending" && new Date(request.expires_at) > now;
+}
+
+/**
+ * Whether a link may be used to answer one of the athlete's OTHER requests
+ * (the coach's batch, #81): the link must not be revoked, superseded, or past
+ * its date — answering it already is fine — and the sibling must come from
+ * the same athlete to the same coach. Matching across athletes by email is
+ * deliberately not allowed: emails are typed by athletes and unverified, so
+ * it would let anyone's link reach anyone's pending entries.
+ */
+export function canActForSibling(
+  authority: Pick<VerificationRequest, "id" | "status" | "expires_at" | "profile_id" | "coach_contact_id">,
+  sibling: Pick<VerificationRequest, "id" | "profile_id" | "coach_contact_id">,
+  coachEmails: { authority: string | null; sibling: string | null },
+  now = new Date(),
+): boolean {
+  if (authority.status === "expired" || new Date(authority.expires_at) <= now) return false;
+  if (sibling.id === authority.id || sibling.profile_id !== authority.profile_id) return false;
+  if (sibling.coach_contact_id === authority.coach_contact_id) return true;
+  const a = coachEmails.authority?.trim().toLowerCase();
+  return Boolean(a) && a === coachEmails.sibling?.trim().toLowerCase();
+}
+
 // ---------------------------------------------------------------------------
 // The record
 // ---------------------------------------------------------------------------

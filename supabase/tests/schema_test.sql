@@ -51,6 +51,12 @@ values ('00000000-0000-0000-0000-0000000000e1',
 -- Supabase. A blanket grant here would undo 0015's revoke on the posts tables.
 grant execute on all functions in schema auth to authenticated, anon;
 
+-- The app's hashToken(): sha256 hex. The migration's own helper is not
+-- executable by API roles, so tests carry a copy.
+create or replace function tok_hash(t text) returns text language sql immutable as $$
+  select encode(sha256(convert_to(t, 'UTF8')), 'hex');
+$$;
+
 -- Helpers: become a given user, or nobody.
 create or replace function become(u uuid) returns void language plpgsql as $$
 begin
@@ -79,6 +85,11 @@ declare
   txt       text;
   priv      text;
   col_sql   text;
+  ach3      uuid;
+  ref_tom   uuid;
+  j         jsonb;
+  req_a     uuid;
+  req_b     uuid;
 begin
   set local role authenticated;
 
@@ -553,5 +564,206 @@ begin
   select verified_count into n from profiles where id = ava;
   assert n = 1, '36b: verified_count should follow re-verification, got ' || n;
 
-  raise notice 'ALL 36 CHECKS PASSED';
+  -- 37. verification by link (0017) --------------------------------------
+  -- The athlete opens a request with a hash; the coach answers with the raw
+  -- token. The hash alone is never a credential.
+  set local role authenticated;
+  perform become(ava);
+  insert into achievements (profile_id, kind, title, achieved_on)
+  values (ava, 'personal_record', '200m PB', '2026-06-10')
+  returning id into ach3;
+  insert into coach_contacts (profile_id, name, role, email)
+  values (ava, 'Tom Bradley', 'Head Coach', 'tbradley@example.org')
+  returning id into ref_tom;
+
+  j := create_verification_request(ach3, ref_tom, tok_hash('tok-alpha-0000000001'), null);
+  req_a := (j->>'id')::uuid;
+  assert j->>'status' = 'pending', '37a: a new request is pending';
+  assert not (j ? 'token_hash'), '37a: the created row must not echo the hash';
+  set local role postgres;
+  select verification::text into txt from achievements where id = ach3;
+  assert txt = 'submitted', '37b: opening a request marks the entry submitted, got ' || txt;
+  select count(*) into n from verification_requests where id = req_a and expires_at <= now() + interval '30 days';
+  assert n = 1, '37b: expiry is clamped to 30 days';
+
+  -- The athlete reads their own rows, never the hash; others read nothing.
+  set local role authenticated;
+  perform become(ava);
+  select count(*) into n from verification_requests where id = req_a;
+  assert n = 1, '37c: the athlete lists their own requests';
+  begin
+    select token_hash into txt from verification_requests where id = req_a;
+    assert false, '37c: token_hash must not be selectable';
+  exception when insufficient_privilege then
+    null;  -- expected
+  end;
+  perform become(stranger);
+  select count(*) into n from verification_requests where id = req_a;
+  assert n = 0, '37d: another member must not see the request';
+  begin
+    perform create_verification_request(ach3, ref_tom, tok_hash('tok-stranger-00000001'), null);
+    assert false, '37d: a stranger must not open a request on someone else''s entry';
+  exception when sqlstate 'RS404' then
+    null;  -- expected
+  end;
+
+  set local role anon;
+  perform become_anon();
+  begin
+    select count(*) into n from verification_requests;
+    assert false, '37e: anon must not read verification_requests';
+  exception when insufficient_privilege then
+    null;  -- expected
+  end;
+  begin
+    perform create_verification_request(ach3, ref_tom, tok_hash('tok-anon-000000000001'), null);
+    assert false, '37e: anon must not open requests';
+  exception when insufficient_privilege then
+    null;  -- expected
+  end;
+
+  -- Anyone holding the raw token can read the request…
+  j := get_verification_request('tok-alpha-0000000001');
+  assert j is not null and j->'entry'->>'title' = '200m PB', '37f: the raw token opens the request';
+  assert j->'coach'->>'name' = 'Tom Bradley', '37f: the payload names the coach';
+  assert not (j->'coach' ? 'email') and not (j->'athlete' ? 'contact_email'),
+    '37f: the payload must not carry contact details';
+  -- …but not the hash, and not a guess.
+  assert get_verification_request(tok_hash('tok-alpha-0000000001')) is null,
+    '37f: the stored hash must not work as a token';
+  assert get_verification_request('nope') is null, '37f: an unknown token returns nothing';
+
+  -- 38. the athlete cannot answer their own request, even via the RPC ----
+  set local role authenticated;
+  perform become(ava);
+  begin
+    perform respond_verification('tok-alpha-0000000001', 'verified', null, 'Ava Reyes', null);
+    assert false, '38: an athlete must not verify their own entry through the link';
+  exception when sqlstate 'RS403' then
+    null;  -- expected
+  end;
+
+  -- 39. batch: other entries waiting on the same coach --------------------
+  j := create_verification_request(ach2, ref_tom, tok_hash('tok-bravo-0000000001'), null);
+  req_b := (j->>'id')::uuid;
+  set local role anon;
+  perform become_anon();
+  select count(*) into n from get_coach_batch_requests('tok-alpha-0000000001') b where (b->>'id')::uuid = req_b;
+  assert n = 1, '39a: the sibling request is listed for the same coach';
+  select count(*) into n from get_coach_batch_requests('tok-alpha-0000000001') b where (b->>'id')::uuid = req_a;
+  assert n = 0, '39a: the link''s own request is not its own sibling';
+
+  -- Answer the sibling with the first link as the authority.
+  j := respond_verification('tok-alpha-0000000001', 'verified', 'Saw both.', 'Tom Bradley', 'Head Coach', false, req_b);
+  assert j->>'handle' = 'ava', '39b: the answer returns the athlete handle';
+  set local role postgres;
+  select verification::text into txt from achievements where id = ach2;
+  assert txt = 'verified', '39b: answering a sibling verifies that entry, got ' || txt;
+
+  -- 40. the coach answers; the link is single use -------------------------
+  set local role anon;
+  perform become_anon();
+  j := respond_verification('tok-alpha-0000000001', 'verified', null, 'Tom Bradley', 'Head Coach');
+  assert j->>'outcome' = 'verified', '40a: the answer is recorded';
+  set local role postgres;
+  select verification::text into txt from achievements where id = ach3;
+  assert txt = 'verified', '40a: the entry is verified, got ' || txt;
+  select verified_by into txt from record_entries where id = ach3;
+  assert txt = 'Tom Bradley, Head Coach', '40a: verified_by names the coach, got ' || coalesce(txt, 'null');
+  select status into txt from verification_requests where id = req_a;
+  assert txt = 'verified', '40b: the request is closed as verified, got ' || txt;
+  set local role anon;
+  perform become_anon();
+  begin
+    perform respond_verification('tok-alpha-0000000001', 'disputed', null, 'Tom Bradley', null);
+    assert false, '40c: a used link must be refused';
+  exception when sqlstate 'RS409' then
+    null;  -- expected
+  end;
+
+  -- 41. revoke, supersede, and edit all close a link ----------------------
+  set local role authenticated;
+  perform become(ava);
+  j := create_verification_request(ach3, ref_tom, tok_hash('tok-charlie-000000001'), null);
+  req_a := (j->>'id')::uuid;
+  perform become(stranger);
+  begin
+    perform revoke_verification_request(req_a);
+    assert false, '41a: only the athlete may revoke';
+  exception when sqlstate 'RS404' then
+    null;  -- expected
+  end;
+  perform become(ava);
+  j := revoke_verification_request(req_a);
+  assert j->>'status' = 'expired', '41a: a revoked request is expired';
+  set local role postgres;
+  select verification::text into txt from achievements where id = ach3;
+  assert txt = 'unverified', '41b: revoking the only open request clears submitted, got ' || txt;
+  set local role authenticated;
+  perform become(ava);
+  begin
+    perform revoke_verification_request(req_a);
+    assert false, '41c: revoking twice must be refused';
+  exception when sqlstate 'RS409' then
+    null;  -- expected
+  end;
+  set local role anon;
+  perform become_anon();
+  begin
+    perform respond_verification('tok-charlie-000000001', 'verified', null, 'Tom Bradley', null);
+    assert false, '41d: a revoked link must be refused';
+  exception when sqlstate 'RS410' then
+    null;  -- expected
+  end;
+
+  -- Supersede: a second link for the same entry kills the first.
+  set local role authenticated;
+  perform become(ava);
+  perform create_verification_request(ach3, ref_tom, tok_hash('tok-delta-0000000001'), null);
+  perform create_verification_request(ach3, ref_tom, tok_hash('tok-echo-00000000001'), null);
+  set local role postgres;
+  select status into txt from verification_requests where token_hash = tok_hash('tok-delta-0000000001');
+  assert txt = 'expired', '41e: a re-request supersedes the old link, got ' || txt;
+  select verification::text into txt from achievements where id = ach3;
+  assert txt = 'submitted', '41e: the entry stays submitted across a re-request, got ' || txt;
+
+  -- Edit: a substantive change expires the open link.
+  set local role authenticated;
+  perform become(ava);
+  update achievements set title = '200m Personal Best' where id = ach3;
+  set local role postgres;
+  select status into txt from verification_requests where token_hash = tok_hash('tok-echo-00000000001');
+  assert txt = 'expired', '41f: a substantive edit expires the open link, got ' || txt;
+
+  -- 42. "I don't know this athlete" is a flagged dispute -------------------
+  set local role authenticated;
+  perform become(ava);
+  perform create_verification_request(ach3, ref_tom, tok_hash('tok-foxtrot-000000001'), null);
+  set local role anon;
+  perform become_anon();
+  j := respond_verification('tok-foxtrot-000000001', 'verified', null, 'Tom Bradley', null, true);
+  assert j->>'outcome' = 'disputed', '42a: a flag forces disputed, got ' || (j->>'outcome');
+  set local role postgres;
+  select count(*) into n from verification_requests
+   where token_hash = tok_hash('tok-foxtrot-000000001')
+     and status = 'disputed' and flagged_unknown_athlete;
+  assert n = 1, '42b: the request records the flag';
+  select verification::text into txt from achievements where id = ach3;
+  assert txt = 'disputed', '42b: the entry is disputed, got ' || txt;
+
+  -- 43. the daily cap -----------------------------------------------------
+  set local role authenticated;
+  perform become(ava);
+  for n in 1..20 loop
+    begin
+      perform create_verification_request(ach3, ref_tom, tok_hash('tok-cap-' || n || '-000000'), null);
+    exception when sqlstate 'RS429' then
+      exit;
+    end;
+  end loop;
+  set local role postgres;
+  select count(*) into n from verification_requests where profile_id = ava;
+  assert n = 10, '43: the daily cap holds at 10 requests, got ' || n;
+
+  raise notice 'ALL 43 CHECKS PASSED';
 end $$;

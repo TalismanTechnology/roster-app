@@ -30,6 +30,10 @@ const schema = z.object({
   NEXT_PUBLIC_SITE_URL: optional(z.url()),
   /** A real handle the landing page may feature in Supabase mode — opt-in, with the athlete's consent. */
   ROSTER_DEMO_HANDLE: optional(z.string()),
+  /** Resend API key. Unset: mail is logged and appended to the local outbox instead. */
+  RESEND_API_KEY: optional(z.string()),
+  /** The From header for transactional mail. */
+  EMAIL_FROM: optional(z.string()),
 });
 
 export type Env = z.infer<typeof schema>;

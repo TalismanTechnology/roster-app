@@ -67,8 +67,8 @@ describe("coach contacts", () => {
 
 describe("verification by link", () => {
   const base: VerificationRequest = {
-    id: "r", token: "t", achievement_id: "a", profile_id: "p1", coach_contact_id: "c1",
-    status: "pending", note: null, verifier_name: null, verifier_role: null,
+    id: "r", achievement_id: "a", profile_id: "p1", coach_contact_id: "c1",
+    status: "pending", note: null, verifier_name: null, verifier_role: null, flagged_unknown_athlete: false,
     created_at: "", responded_at: null, expires_at: new Date(Date.now() + 86_400_000).toISOString(),
   };
   it("an anonymous holder of a live link may respond", () => {

@@ -1,16 +1,19 @@
+import Link from "next/link";
+
 import type { CoachContact, RecordEntry, VerificationState } from "@/lib/database.types";
 import type { VerificationRequest } from "@/lib/data/types";
 import { VerificationMark } from "@/components/record/VerificationMark";
+import { revokeVerification } from "@/lib/actions/resume";
+import { isLiveRequest } from "@/lib/data/rules";
 import { fullDate } from "@/lib/format";
-import { verifyUrl } from "@/lib/site";
 
-import { CopyButton } from "./CopyButton";
 import { EditorSection } from "./ProfileSections";
 
 /**
- * The verification inbox: every link the athlete has created, what the
- * coach said, and — for pending ones — the link itself, in case the first
- * message didn't land.
+ * The verification inbox: every link the athlete has created and what the
+ * coach said. Links themselves are not here — only their hashes are stored —
+ * so a pending row offers Revoke, and a new link comes from the entry's row
+ * in the Record section. A dispute links straight back to that row (#77).
  */
 export function RequestsSection({
   requests,
@@ -54,6 +57,9 @@ export function RequestsSection({
                     To {coach?.name ?? "a coach"} · sent {fullDate(r.created_at.slice(0, 10))}
                     {r.responded_at && ` · answered ${fullDate(r.responded_at.slice(0, 10))}`}
                   </p>
+                  {r.flagged_unknown_athlete && (
+                    <p className="label mt-2 text-disputed">[ Coach says they don&rsquo;t know you — check the reference ]</p>
+                  )}
                   {r.note && <p className="mt-2 max-w-prose italic text-ink-muted">“{r.note}”</p>}
                   {r.verifier_name && r.status !== "pending" && (
                     <p className="mt-1 text-sm text-ink-muted">
@@ -62,8 +68,26 @@ export function RequestsSection({
                     </p>
                   )}
                 </div>
-                <div className="flex items-center gap-3">
-                  {r.status === "pending" && <CopyButton value={verifyUrl(r.token)} label="Copy link" className="btn-row" />}
+                <div className="flex flex-wrap items-center gap-3">
+                  {r.status === "pending" &&
+                    (isLiveRequest(r) ? (
+                      <>
+                        <span className="label text-ink-subtle">Expires {fullDate(r.expires_at.slice(0, 10))}</span>
+                        <form action={revokeVerification}>
+                          <input type="hidden" name="id" value={r.id} />
+                          <button type="submit" className="btn-row">
+                            Revoke
+                          </button>
+                        </form>
+                      </>
+                    ) : (
+                      <span className="label text-ink-subtle">Expired unanswered</span>
+                    ))}
+                  {r.status === "disputed" && entry?.verification === "disputed" && (
+                    <Link href={`/resume?section=record#entry-${r.achievement_id}`} className="btn-row">
+                      Fix entry &amp; request again
+                    </Link>
+                  )}
                   <VerificationMark state={state} />
                 </div>
               </li>

@@ -322,6 +322,28 @@ export type PostReaction = {
   created_at: string;
 };
 
+/**
+ * `verification_requests` (0017) as the athlete may read it — every column
+ * but `token_hash`, which API roles cannot select. Writes go through the
+ * functions below; there are no client INSERT/UPDATE grants.
+ */
+export type VerificationRequestRecord = {
+  id: string;
+  achievement_id: string;
+  profile_id: string;
+  coach_contact_id: string;
+  status: "pending" | "verified" | "disputed" | "expired";
+  note: string | null;
+  verifier_name: string | null;
+  verifier_role: string | null;
+  flagged_unknown_athlete: boolean;
+  created_at: string;
+  responded_at: string | null;
+  expires_at: string;
+};
+
+export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
+
 type Row<T> = {
   Row: T;
   Insert: Partial<T>;
@@ -348,6 +370,7 @@ export type Database = {
       profile_views: Row<ProfileView>;
       recruiter_lists: Row<RecruiterList>;
       recruiter_list_members: Row<RecruiterListMember>;
+      verification_requests: Row<VerificationRequestRecord>;
       /** Not client-accessible since 0015; typed so service-role code can. */
       posts: Row<Post>;
       post_reactions: Row<PostReaction>;
@@ -361,6 +384,30 @@ export type Database = {
       can_view_profile: { Args: { target: string }; Returns: boolean };
       coaches_athlete: { Args: { target: string }; Returns: boolean };
       can_vouch_for_membership: { Args: { target_membership: string }; Returns: boolean };
+      /** 0017. Returns the new row (no hash) as JSON. Authenticated only. */
+      create_verification_request: {
+        Args: { p_achievement: string; p_coach_contact: string; p_token_hash: string; p_expires_at?: string | null };
+        Returns: Json;
+      };
+      /** 0017. Takes the RAW token. The detail payload, or null. Anon-callable. */
+      get_verification_request: { Args: { p_token: string }; Returns: Json | null };
+      /** 0017. Takes the RAW token. Detail payloads of live sibling requests. Anon-callable. */
+      get_coach_batch_requests: { Args: { p_token: string }; Returns: Json[] };
+      /** 0017. Takes the RAW token. Anon-callable; refuses the athlete's own session. */
+      respond_verification: {
+        Args: {
+          p_token: string;
+          p_outcome: string;
+          p_note: string | null;
+          p_verifier_name: string;
+          p_verifier_role: string | null;
+          p_flag_unknown?: boolean;
+          p_request_id?: string | null;
+        };
+        Returns: Json;
+      };
+      /** 0017. Owner only; marks a pending request expired. */
+      revoke_verification_request: { Args: { p_request_id: string }; Returns: Json };
       search_athletes: {
         Args: {
           q?: string | null;

@@ -15,15 +15,13 @@ import { EditorSection, Panel } from "@/components/editor/ProfileSections";
 import { VerificationMark } from "@/components/record/VerificationMark";
 import { Field, Select, TextArea, TextInput } from "@/components/ui/fields";
 import { Unverified } from "@/components/ui/marks";
-import { canPinAnother, MAX_PINNED } from "@/lib/data/rules";
+import { canPinAnother, isLiveRequest, MAX_PINNED } from "@/lib/data/rules";
 import type { VerificationRequest } from "@/lib/data/types";
 import { latestToday } from "@/lib/dates";
 import { KIND_OPTIONS, kindLabel, recordDate } from "@/lib/format";
 import { providerLabel } from "@/lib/film";
-import { verifyUrl } from "@/lib/site";
 
 import { ConfirmDelete } from "./ConfirmDelete";
-import { CopyButton } from "./CopyButton";
 import { RequestVerification } from "./RequestVerification";
 
 /**
@@ -138,10 +136,14 @@ export function RecordSection({
   coaches: CoachContact[];
   requests?: VerificationRequest[];
 }) {
-  // A pending request's link lives on the row, rendered from the server, so
-  // it is there the moment the request is made and on every visit after.
-  const pendingByEntry = new Map(requests.filter((r) => r.status === "pending").map((r) => [r.achievement_id, r]));
-  const coachById = new Map(coaches.map((c) => [c.id, c]));
+  // `requests` is newest first, so the first match per entry wins. The raw
+  // link is never here — only a hash is stored; see RequestVerification.
+  const pendingByEntry = new Map<string, VerificationRequest>();
+  const latestByEntry = new Map<string, VerificationRequest>();
+  for (const r of requests) {
+    if (r.status === "pending" && !pendingByEntry.has(r.achievement_id)) pendingByEntry.set(r.achievement_id, r);
+    if (r.status !== "expired" && !latestByEntry.has(r.achievement_id)) latestByEntry.set(r.achievement_id, r);
+  }
   const canPin = canPinAnother(entries);
 
   return (
@@ -156,9 +158,9 @@ export function RecordSection({
       ) : (
         <ol className="panel divide-y divide-rule">
           {entries.map((entry) => {
-            const pending = pendingByEntry.get(entry.id);
+            const pending = pendingByEntry.get(entry.id) ?? null;
             return (
-              <li key={entry.id} className="flex flex-wrap items-start gap-x-5 gap-y-4" style={{ padding: "var(--feature-pad)" }}>
+              <li key={entry.id} id={`entry-${entry.id}`} className="flex flex-wrap items-start gap-x-5 gap-y-4" style={{ padding: "var(--feature-pad)" }}>
                 <time dateTime={entry.achieved_on} className="w-16 shrink-0 pt-1 text-sm text-ink-muted" data-numeric>
                   {recordDate(entry.achieved_on)}
                 </time>
@@ -201,25 +203,17 @@ export function RecordSection({
                       <EntryFields entry={entry} />
                     </EditorForm>
                   </Disclosure>
-                  {(entry.verification === "unverified" || entry.verification === "disputed") && (
-                    <Disclosure summary="Request verification">
-                      <RequestVerification entryId={entry.id} coaches={coaches} />
-                    </Disclosure>
-                  )}
+                  {/* Rendered in every state so its one-time link survives the refresh. */}
+                  <RequestVerification
+                    entryId={entry.id}
+                    verification={entry.verification}
+                    coaches={coaches}
+                    pending={pending}
+                    pendingIsLive={pending ? isLiveRequest(pending) : false}
+                    latest={latestByEntry.get(entry.id) ?? null}
+                  />
                   <ConfirmDelete action={deleteAchievement} id={entry.id} what="entry" />
                 </div>
-
-                {entry.verification === "submitted" && pending && (
-                  <div className="flex min-w-0 basis-full flex-wrap items-center gap-3 border-t border-rule pt-4" role="status">
-                    <span className="text-sm text-ink-muted">
-                      Sent to {coachById.get(pending.coach_contact_id)?.name ?? "your coach"} — send them this link:
-                    </span>
-                    <code className="min-w-0 max-w-full truncate border border-rule bg-paper-sunken px-2 py-1.5 text-sm text-ink-muted">
-                      {verifyUrl(pending.token)}
-                    </code>
-                    <CopyButton value={verifyUrl(pending.token)} label="Copy link" className="btn-row" />
-                  </div>
-                )}
               </li>
             );
           })}
