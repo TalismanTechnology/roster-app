@@ -6,12 +6,15 @@ import type {
   EmailChangeResult,
   IndexablePage,
   IssuedPasswordReset,
+  CoachPatch,
+  MoveDirection,
   NewCoach,
   NewEntry,
   NewFilm,
   NewProfile,
   RecruiterList,
   RecruiterListDetail,
+  SavedSearch,
   SearchParams,
   SearchResult,
   CreatedVerificationRequest,
@@ -19,6 +22,8 @@ import type {
   VerificationRequest,
   VerificationRequestDetail,
   VerificationResponse,
+  TopMark,
+  ViewerSummary,
 } from "./types";
 
 /**
@@ -104,13 +109,23 @@ export interface Repository {
   // --- film ---------------------------------------------------------------
   listFilm(profileId: string): Promise<FilmClip[]>;
   addFilm(profileId: string, input: NewFilm): Promise<FilmClip>;
+  /** Title, link, season. A new link re-derives provider and thumbnail, as on add. */
+  updateFilm(profileId: string, clipId: string, input: NewFilm): Promise<FilmClip>;
   deleteFilm(profileId: string, clipId: string): Promise<void>;
   featureFilm(profileId: string, clipId: string): Promise<void>;
+  /**
+   * Swaps the clip with its neighbour in `position` order. Positions are
+   * renumbered 0..n-1 first, so gaps left by deletes never stall a move.
+   * At either end it is a no-op.
+   */
+  moveFilm(profileId: string, clipId: string, direction: MoveDirection): Promise<void>;
 
   // --- references ---------------------------------------------------------
   /** Contact details are stripped unless the viewer may see them. */
   listCoaches(profileId: string, viewerId: string | null): Promise<CoachContact[]>;
   addCoach(profileId: string, input: NewCoach): Promise<CoachContact>;
+  /** Details and `is_visible` (hidden references stay usable for verification). */
+  updateCoach(profileId: string, coachId: string, patch: CoachPatch): Promise<CoachContact>;
   deleteCoach(profileId: string, coachId: string): Promise<void>;
 
   // --- verification -------------------------------------------------------
@@ -149,6 +164,12 @@ export interface Repository {
   // --- signals ------------------------------------------------------------
   recordView(profileId: string, viewerId: string | null): Promise<void>;
   weeklyViews(profileId: string): Promise<number>;
+  /**
+   * Distinct signed-in recruiter and coach viewers in the last seven days.
+   * Owner only; counts, never identities. The caller shows it only when
+   * the athlete opted in (`viewer_summary_opt_in`).
+   */
+  viewerSummary(profileId: string): Promise<ViewerSummary>;
 
   // --- discovery ----------------------------------------------------------
   /** Listed athletes only. The query is normalized and the page clamped here. */
@@ -159,6 +180,11 @@ export interface Repository {
    * stable between requests; `limit` is the caller's, not clamped.
    */
   listIndexableProfiles(offset: number, limit: number): Promise<IndexablePage>;
+  /**
+   * The best verified entry per athlete — pinned first, then most recently
+   * verified — for a page of search rows in one read. Absent: none verified.
+   */
+  topVerifiedMarks(profileIds: string[]): Promise<Record<string, TopMark>>;
 
   // --- recruiter lists ----------------------------------------------------
   listLists(ownerId: string): Promise<RecruiterList[]>;
@@ -171,8 +197,22 @@ export interface Repository {
   /** Idempotent. `not_found` when the resume is not visible to the owner. */
   addToList(ownerId: string, listId: string, profileId: string, note: string | null): Promise<void>;
   removeFromList(ownerId: string, listId: string, profileId: string): Promise<void>;
+  /** The recruiter's private note on one athlete in one list. `not_found` when not on it. */
+  setListNote(ownerId: string, listId: string, profileId: string, note: string | null): Promise<void>;
+  /**
+   * Moves an athlete (and their note) to another of the owner's lists.
+   * Already on the target: the source row just goes.
+   */
+  moveListMember(ownerId: string, fromListId: string, toListId: string, profileId: string): Promise<void>;
   /** Which of the owner's lists already hold this athlete. */
   listsContaining(ownerId: string, profileId: string): Promise<string[]>;
   /** `listsContaining` for a page of athletes in one read: profile id → list ids. */
   listsContainingMany(ownerId: string, profileIds: string[]): Promise<Record<string, string[]>>;
+
+  // --- saved searches (0020) ------------------------------------------------
+  listSavedSearches(ownerId: string): Promise<SavedSearch[]>;
+  /** Saving under an existing name replaces that search's filters. */
+  saveSearch(ownerId: string, name: string, query: string, digest: boolean): Promise<SavedSearch>;
+  setSavedSearchDigest(ownerId: string, searchId: string, digest: boolean): Promise<void>;
+  deleteSavedSearch(ownerId: string, searchId: string): Promise<void>;
 }

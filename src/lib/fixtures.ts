@@ -46,6 +46,7 @@ export const previewProfile: Profile = {
   verified_count: 6,
   identity_verified_at: "2026-03-02T00:00:00Z",
   suspended_at: null,
+  viewer_summary_opt_in: false,
   created_at: "2026-01-14T00:00:00Z",
   updated_at: "2026-08-01T00:00:00Z",
 };
@@ -71,6 +72,7 @@ function entry(
     event_name: null,
     evidence_count: 0,
     verified_by: null,
+    value_numeric: null,
     ...partial,
   };
 }

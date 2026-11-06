@@ -1,28 +1,37 @@
 "use server";
 
+import { randomBytes } from "node:crypto";
+
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
+import { onboardingDestination } from "@/lib/accounts";
 import { AVATAR_MAX_BYTES, sniffAvatarType } from "@/lib/avatars";
 import { getRepository, type Repository } from "@/lib/data";
+import { DataError, type MoveDirection } from "@/lib/data/types";
 import type { AthleteLevel, ProfileVisibility } from "@/lib/database.types";
 import { emailCoachRequest } from "@/lib/email/verification";
 import { LEVEL_OPTIONS } from "@/lib/format";
-import { isReservedHandle, HANDLE_PATTERN } from "@/lib/handles";
+import { handleFromName, isReservedHandle, HANDLE_PATTERN } from "@/lib/handles";
 import { toStateCode } from "@/lib/regions";
 import { hit } from "@/lib/rate-limit";
 import { revalidateProfile } from "@/lib/revalidate";
 
 import {
   achievementSchema,
+  athleteOnboardingSchema,
   coachSchema,
   fieldErrorsOf,
   httpUrl,
   idSchema,
+  imperialMeasurablesSchema,
+  memberOnboardingSchema,
+  onboardingKind,
   optionalNumber,
   optionalText,
-  requiredSport,
+  positionsField,
   socialHandleField,
+  type OnboardingKind,
 } from "./schemas";
 import { clientKey, failed, formValues, requireUser, str, type FormValues } from "./shared";
 
@@ -73,26 +82,15 @@ async function refreshOwner(repo: Repository, userId: string): Promise<void> {
 // The label maps in format.ts are the single source for both enums.
 const LEVELS = LEVEL_OPTIONS.map(([value]) => value);
 
-const onboardingSchema = z.object({
-  handle: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .regex(HANDLE_PATTERN, "Handles are 3–30 characters: lowercase letters, numbers, underscores.")
-    .refine((handle) => !isReservedHandle(handle), "That handle is reserved."),
-  display_name: z.string().trim().min(2, "Enter your name.").max(80),
-  level: z.enum(LEVELS as [AthleteLevel, ...AthleteLevel[]]),
-  // No default sport: an athlete who skipped the choice would otherwise be
-  // listed under football in search.
-  primary_sport: requiredSport,
-  grad_year: optionalNumber(z.number().int().min(1950).max(2100)),
-  visibility: z.enum(["private", "unlisted", "public"] satisfies ProfileVisibility[]).default("public"),
-});
+/** Tries before giving up on a generated handle; each collision draws a new suffix. */
+const GENERATED_HANDLE_TRIES = 5;
 
 export async function completeOnboarding(_prev: FormState, formData: FormData): Promise<FormState> {
   const { repo, user } = await requireUser();
+  const kind = onboardingKind.parse(str(formData, "account_kind"));
+  if (kind !== "athlete") return completeMemberOnboarding(repo, user.id, kind, formData);
 
-  const parsed = onboardingSchema.safeParse({
+  const parsed = athleteOnboardingSchema.safeParse({
     handle: str(formData, "handle"),
     display_name: str(formData, "display_name"),
     level: str(formData, "level"),
@@ -110,7 +108,42 @@ export async function completeOnboarding(_prev: FormState, formData: FormData): 
   }
 
   revalidateProfile(parsed.data.handle);
-  redirect("/resume");
+  redirect(onboardingDestination("athlete"));
+}
+
+/**
+ * The recruiter / coach branch (#52): name, program, title. The handle is
+ * generated — these accounts have no resume to share — and the profile is
+ * private, like the seeded staff accounts.
+ */
+async function completeMemberOnboarding(
+  repo: Repository,
+  userId: string,
+  kind: Exclude<OnboardingKind, "athlete">,
+  formData: FormData,
+): Promise<FormState> {
+  const parsed = memberOnboardingSchema.safeParse({
+    display_name: str(formData, "display_name"),
+    school: str(formData, "school"),
+    title: str(formData, "title"),
+  });
+  if (!parsed.success) return invalid(parsed.error, formData);
+
+  let created = false;
+  for (let i = 0; i < GENERATED_HANDLE_TRIES && !created; i++) {
+    const handle = handleFromName(parsed.data.display_name, randomBytes(3).toString("hex"));
+    try {
+      await repo.createProfile({ id: userId, handle, level: null, account_kind: kind, visibility: "private", ...parsed.data });
+      created = true;
+    } catch (error) {
+      // Only a handle collision is worth another draw.
+      if (error instanceof DataError && error.code === "conflict" && /handle/i.test(error.message)) continue;
+      return failed(error, "Could not set up your account. Try again.", formValues(formData));
+    }
+  }
+  if (!created) return { ok: false, error: "Could not set up your account. Try again.", values: formValues(formData) };
+
+  redirect(onboardingDestination(kind));
 }
 
 /**
@@ -155,23 +188,18 @@ const identitySchema = z.object({
   primary_sport: optionalText,
   grad_year: optionalNumber(z.number().int().min(1950).max(2100)),
   level: z.enum(LEVELS as [AthleteLevel, ...AthleteLevel[]]),
-  positions: z
-    .string()
-    .transform((raw) =>
-      raw
-        .split(",")
-        .map((p) => p.trim())
-        .filter(Boolean)
-        .slice(0, 6),
-    ),
+  positions: positionsField,
   jersey: optionalText.pipe(z.string().max(4).nullable()),
-  height_cm: optionalNumber(z.number().int().min(90).max(260)),
-  weight_kg: optionalNumber(z.number().min(25).max(300)),
 });
 
 export async function updateIdentity(_prev: FormState, formData: FormData): Promise<FormState> {
   const { repo, user } = await requireUser();
 
+  const measurables = imperialMeasurablesSchema.safeParse({
+    height_ft: str(formData, "height_ft"),
+    height_in: str(formData, "height_in"),
+    weight_lbs: str(formData, "weight_lbs"),
+  });
   const parsed = identitySchema.safeParse({
     display_name: str(formData, "display_name"),
     bio: str(formData, "bio"),
@@ -181,17 +209,16 @@ export async function updateIdentity(_prev: FormState, formData: FormData): Prom
     primary_sport: str(formData, "primary_sport"),
     grad_year: str(formData, "grad_year"),
     level: str(formData, "level"),
-    positions: str(formData, "positions") ?? "",
+    positions: str(formData, "positions"),
     jersey: str(formData, "jersey"),
-    height_cm: str(formData, "height_cm"),
-    weight_kg: str(formData, "weight_kg"),
   });
 
   if (!parsed.success) return invalid(parsed.error, formData);
+  if (!measurables.success) return invalid(measurables.error, formData);
 
   let handle: string;
   try {
-    ({ handle } = await repo.updateProfile(user.id, parsed.data));
+    ({ handle } = await repo.updateProfile(user.id, { ...parsed.data, ...measurables.data }));
   } catch (error) {
     return failed(error, "Could not save. Try again.", formValues(formData));
   }
@@ -267,6 +294,7 @@ export async function updateContact(_prev: FormState, formData: FormData): Promi
 const visibilitySchema = z.object({
   visibility: z.enum(["private", "unlisted", "public"] satisfies ProfileVisibility[]),
   is_recruitable: z.boolean(),
+  viewer_summary_opt_in: z.boolean(),
 });
 
 export async function updateVisibility(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -275,6 +303,7 @@ export async function updateVisibility(_prev: FormState, formData: FormData): Pr
   const parsed = visibilitySchema.safeParse({
     visibility: str(formData, "visibility"),
     is_recruitable: str(formData, "is_recruitable") === "on",
+    viewer_summary_opt_in: str(formData, "viewer_summary_opt_in") === "on",
   });
 
   if (!parsed.success) return invalid(parsed.error, formData);
@@ -354,6 +383,7 @@ function readAchievement(formData: FormData) {
     location: str(formData, "location"),
     placement: str(formData, "placement"),
     field_size: str(formData, "field_size"),
+    unit: str(formData, "unit"),
     achieved_on: str(formData, "achieved_on"),
   });
 }
@@ -517,6 +547,45 @@ export async function addFilm(_prev: FormState, formData: FormData): Promise<For
   return saved();
 }
 
+export async function updateFilm(_prev: FormState, formData: FormData): Promise<FormState> {
+  const { repo, user } = await requireUser();
+  const id = idSchema.safeParse(str(formData, "id"));
+  const parsed = filmSchema.safeParse({
+    title: str(formData, "title"),
+    url: str(formData, "url"),
+    season: str(formData, "season"),
+  });
+  if (!id.success) return { ok: false, error: "That clip was not found." };
+  if (!parsed.success) return invalid(parsed.error, formData);
+
+  try {
+    await repo.updateFilm(user.id, id.data, parsed.data);
+  } catch (error) {
+    return failed(error, "Could not save the clip. Try again.", formValues(formData));
+  }
+
+  await refreshOwner(repo, user.id);
+  return saved();
+}
+
+const directionSchema = z.enum(["up", "down"] satisfies MoveDirection[]);
+
+/** #56: one step up or down the athlete's film order. */
+export async function moveFilm(formData: FormData): Promise<void> {
+  const { repo, user } = await requireUser();
+  const id = idSchema.safeParse(str(formData, "id"));
+  const direction = directionSchema.safeParse(str(formData, "direction"));
+  if (!id.success || !direction.success) return;
+
+  try {
+    await repo.moveFilm(user.id, id.data, direction.data);
+  } catch {
+    // Stale form; the refreshed page shows the real order.
+  }
+
+  await refreshOwner(repo, user.id);
+}
+
 export async function deleteFilm(formData: FormData): Promise<void> {
   const { repo, user } = await requireUser();
   const id = idSchema.safeParse(str(formData, "id"));
@@ -570,6 +639,49 @@ export async function addCoach(_prev: FormState, formData: FormData): Promise<Fo
 
   await refreshOwner(repo, user.id);
   return saved();
+}
+
+export async function updateCoach(_prev: FormState, formData: FormData): Promise<FormState> {
+  const { repo, user } = await requireUser();
+  const id = idSchema.safeParse(str(formData, "id"));
+  const parsed = coachSchema.safeParse({
+    name: str(formData, "name"),
+    role: str(formData, "role"),
+    org_name: str(formData, "org_name"),
+    email: str(formData, "email"),
+    phone: str(formData, "phone"),
+  });
+  if (!id.success) return { ok: false, error: "That reference was not found." };
+  if (!parsed.success) return invalid(parsed.error, formData);
+
+  try {
+    await repo.updateCoach(user.id, id.data, parsed.data);
+  } catch (error) {
+    return failed(error, "Could not save the reference. Try again.", formValues(formData));
+  }
+
+  await refreshOwner(repo, user.id);
+  return saved();
+}
+
+/**
+ * #56: show or hide a reference on the public resume. A hidden reference
+ * still receives verification requests; only recruiters stop seeing it.
+ */
+export async function toggleCoachVisible(formData: FormData): Promise<void> {
+  const { repo, user } = await requireUser();
+  const id = idSchema.safeParse(str(formData, "id"));
+  if (!id.success) return;
+
+  const coach = (await repo.listCoaches(user.id, user.id)).find((c) => c.id === id.data);
+  if (!coach) return;
+
+  try {
+    await repo.updateCoach(user.id, id.data, { is_visible: !coach.is_visible });
+  } catch {
+    // Deleted meanwhile; the refreshed page shows the truth.
+  }
+  await refreshOwner(repo, user.id);
 }
 
 export async function deleteCoach(formData: FormData): Promise<void> {

@@ -4,7 +4,13 @@ import { redirect } from "next/navigation";
 
 import { buildChecklist, Checklist, firstUnfinished, type SectionId } from "@/components/editor/Checklist";
 import { DirtyGuard } from "@/components/editor/DirtyGuard";
-import { AcademicsSection, ContactSection, IdentitySection, VisibilitySection } from "@/components/editor/ProfileSections";
+import {
+  AcademicsSection,
+  ContactSection,
+  IdentitySection,
+  ViewerSummaryLine,
+  VisibilitySection,
+} from "@/components/editor/ProfileSections";
 import { CoachSection, FilmSection, RecordSection } from "@/components/editor/RecordSections";
 import { RequestsSection } from "@/components/editor/RequestsSection";
 import { ScaledPreview } from "@/components/editor/ScaledPreview";
@@ -59,7 +65,7 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
   // staff work from their lists.
   if (profile.account_kind !== "athlete") redirect(homePathFor(profile.account_kind));
 
-  const [entries, film, coaches, publicCoaches, requests, weekViews, params] = await Promise.all([
+  const [entries, film, coaches, publicCoaches, requests, weekViews, viewers, params] = await Promise.all([
     repo.listEntries(profile.id),
     repo.listFilm(profile.id),
     repo.listCoaches(profile.id, user.id),
@@ -67,6 +73,8 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
     repo.listCoaches(profile.id, null),
     repo.listVerificationRequests(profile.id),
     repo.weeklyViews(profile.id),
+    // #90: only asked for once the athlete opted in.
+    profile.viewer_summary_opt_in ? repo.viewerSummary(profile.id) : null,
     searchParams,
   ]);
 
@@ -92,6 +100,11 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
               <p className="truncate text-sm text-ink-muted">
                 {siteHost()}/{profile.handle}
               </p>
+              {viewers && (
+                <div className="mt-2">
+                  <ViewerSummaryLine summary={viewers} />
+                </div>
+              )}
             </div>
 
             <dl className="flex gap-8">
@@ -156,7 +169,7 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
           {/* The active section */}
           <div className="min-w-0 lg:col-span-6">
             {active === "identity" && <IdentitySection profile={profile} />}
-            {active === "record" && <RecordSection entries={entries} coaches={coaches} requests={requests} />}
+            {active === "record" && <RecordSection entries={entries} coaches={coaches} requests={requests} sport={profile.primary_sport} />}
             {active === "film" && <FilmSection clips={film} />}
             {active === "academics" && <AcademicsSection profile={profile} />}
             {active === "references" && <CoachSection coaches={coaches} />}

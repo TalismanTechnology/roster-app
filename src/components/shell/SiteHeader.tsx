@@ -20,13 +20,19 @@ function primaryLabel(user: NonNullable<HeaderUser>): string {
   return homePathFor(user.accountKind) === "/lists" ? "Your lists" : "Your resume";
 }
 
+/** Lists are recruiter and coach territory (#86): shown once there is a
+ *  profile, and only for a non-athlete one. */
+function showsLists(user: NonNullable<HeaderUser>): boolean {
+  return Boolean(user.handle) && homePathFor(user.accountKind) === "/lists";
+}
+
 /** The bar's below-sm links, in the same order and under the same rules as
- *  the desktop row: Lists only once there is a profile to own one. */
+ *  the desktop row. */
 function menuLinks(user: HeaderUser): [string, string][] {
   if (!user) return [["Find athletes", "/search"], ["Sign in", "/sign-in"]];
   return [
     ["Find athletes", "/search"],
-    ...(user.handle ? ([["Lists", "/lists"]] as [string, string][]) : []),
+    ...(showsLists(user) ? ([["Lists", "/lists"]] as [string, string][]) : []),
     ["Settings", "/settings"],
   ];
 }
@@ -122,7 +128,7 @@ export function SiteHeader({ user, variant = "app", pending = false }: Props) {
             </span>
           ) : user ? (
             <>
-              {user.handle && (
+              {showsLists(user) && (
                 <Link href="/lists" className="hidden rounded-full px-3.5 py-1.5 text-sm text-ink-muted transition-colors hover:text-ink sm:inline">
                   Lists
                 </Link>

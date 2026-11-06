@@ -14,7 +14,7 @@ import type {
 } from "@/lib/database.types";
 
 import { hashToken } from "../tokens";
-import type { VerificationRequest } from "../types";
+import type { SavedSearch, VerificationRequest } from "../types";
 import { dataDir } from "./paths";
 import { buildSeed } from "./seed";
 
@@ -118,6 +118,8 @@ export type Db = {
   recruiter_list_members: RecruiterListMemberRow[];
   /** Files written before Wave 6 have none; `upgrade` adds the array. */
   password_resets: PasswordResetRow[];
+  /** `saved_searches` (0020). Added by `upgrade` to older files. */
+  saved_searches: SavedSearch[];
 };
 
 export function emptyDb(): Db {
@@ -137,6 +139,7 @@ export function emptyDb(): Db {
     recruiter_lists: [],
     recruiter_list_members: [],
     password_resets: [],
+    saved_searches: [],
   };
 }
 
@@ -181,6 +184,10 @@ function upgrade(db: Db): Db {
     row.flagged_unknown_athlete ??= false;
   }
   db.password_resets ??= [];
+  db.saved_searches ??= [];
+  // 0020 columns, defaulted the way the migration defaults them.
+  for (const p of db.profiles) p.viewer_summary_opt_in ??= false;
+  for (const a of db.achievements) a.value_numeric ??= null;
   return db;
 }
 

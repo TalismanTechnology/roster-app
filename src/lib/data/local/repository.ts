@@ -13,12 +13,15 @@ import {
   type EmailChangeResult,
   type IndexablePage,
   type IssuedPasswordReset,
+  type CoachPatch,
+  type MoveDirection,
   type NewCoach,
   type NewEntry,
   type NewFilm,
   type NewProfile,
   type RecruiterList,
   type RecruiterListDetail,
+  type SavedSearch,
   type SearchParams,
   type SearchResult,
   type CreatedVerificationRequest,
@@ -26,6 +29,8 @@ import {
   type VerificationRequest,
   type VerificationRequestDetail,
   type VerificationResponse,
+  type TopMark,
+  type ViewerSummary,
 } from "../types";
 import {
   canActForSibling,
@@ -34,6 +39,10 @@ import {
   DAILY_REQUEST_CAP,
   isListed,
   isLiveRequest,
+  pickTopMark,
+  summarizeViewers,
+  swapNeighbour,
+  weekStart,
   isOverDailyCap,
   REQUEST_TTL_DAYS,
   canSeeCoachContact,
@@ -43,7 +52,7 @@ import {
   MAX_PINNED,
   PASSWORD_RESET_TTL_MINUTES,
   SIGN_UP_CONFLICT_COPY,
-  SUBSTANTIVE_ENTRY_FIELDS,
+  ENTRY_WRITE_FIELDS,
 } from "../rules";
 import { removeAvatars, writeAvatar } from "./avatars";
 import { filmThumbnailUrl, parseFilmUrl } from "./film";
@@ -201,6 +210,7 @@ export class LocalRepository implements Repository {
       db.recruiter_list_members = db.recruiter_list_members.filter(
         (m) => !lists.has(m.list_id) && m.profile_id !== userId,
       );
+      db.saved_searches = db.saved_searches.filter((x) => x.owner_id !== userId);
     });
     removeAvatars(userId);
   }
@@ -296,9 +306,10 @@ export class LocalRepository implements Repository {
         detail: input.detail,
         sport: input.sport ?? profile.primary_sport,
         event_id: null,
-        value_numeric: null,
+        // measured_has_unit (0003): a number without a unit is no measurement.
+        value_numeric: input.unit ? (input.value_numeric ?? null) : null,
         value_display: input.value_display,
-        unit: null,
+        unit: input.unit ?? null,
         competition: input.competition,
         opponent: null,
         placement: input.placement,
@@ -325,6 +336,7 @@ export class LocalRepository implements Repository {
       const row = requireOwned(db.achievements, entryId, profileId, "entry");
       const isSubstantive = isSubstantiveEntryChange(row, patch);
       Object.assign(row, pickEntryFields(patch), { updated_at: now() });
+      if (!row.unit) row.value_numeric = null;
 
       if (isSubstantive) {
         // The coach vouched for the old values. The badge, its date, and any
@@ -401,6 +413,35 @@ export class LocalRepository implements Repository {
     });
   }
 
+  async updateFilm(profileId: string, clipId: string, input: NewFilm): Promise<FilmClip> {
+    return mutate((db) => {
+      const clip = requireOwned(db.film_clips, clipId, profileId, "clip");
+      if (input.url !== clip.url) {
+        // parse_film_url fires on `update of url` (0007), so only then.
+        const parsed = parseFilmUrl(input.url);
+        clip.provider = parsed.provider;
+        clip.external_id = parsed.external_id;
+        clip.thumbnail_url = filmThumbnailUrl(parsed);
+      }
+      Object.assign(clip, { title: input.title, url: input.url, season: input.season, updated_at: now() });
+      return clip;
+    });
+  }
+
+  async moveFilm(profileId: string, clipId: string, direction: MoveDirection): Promise<void> {
+    await mutate((db) => {
+      requireOwned(db.film_clips, clipId, profileId, "clip");
+      const ordered = db.film_clips
+        .filter((f) => f.profile_id === profileId)
+        .sort((a, b) => a.position - b.position || a.created_at.localeCompare(b.created_at));
+      const order = swapNeighbour(ordered.map((f) => f.id), clipId, direction);
+      for (const clip of ordered) {
+        const position = order.indexOf(clip.id);
+        if (clip.position !== position) Object.assign(clip, { position, updated_at: now() });
+      }
+    });
+  }
+
   async deleteFilm(profileId: string, clipId: string): Promise<void> {
     await mutate((db) => {
       requireOwned(db.film_clips, clipId, profileId, "clip");
@@ -451,6 +492,17 @@ export class LocalRepository implements Repository {
         created_at: now(),
       };
       db.coach_contacts.push(contact);
+      return contact;
+    });
+  }
+
+  async updateCoach(profileId: string, coachId: string, patch: CoachPatch): Promise<CoachContact> {
+    return mutate((db) => {
+      const contact = requireOwned(db.coach_contacts, coachId, profileId, "reference");
+      const fields = ["name", "role", "org_name", "email", "phone", "is_visible"] as const;
+      for (const f of fields) {
+        if (patch[f] !== undefined) Object.assign(contact, { [f]: patch[f] });
+      }
       return contact;
     });
   }
@@ -655,6 +707,12 @@ export class LocalRepository implements Repository {
       .reduce((sum, v) => sum + v.view_count, 0);
   }
 
+  async viewerSummary(profileId: string): Promise<ViewerSummary> {
+    const db = readDb();
+    const kinds = new Map(db.profiles.map((p) => [p.id, p.account_kind]));
+    return summarizeViewers(db.profile_views, (id) => kinds.get(id), profileId, weekStart());
+  }
+
   // --- discovery ----------------------------------------------------------
 
   async searchAthletes(params: SearchParams): Promise<SearchResult> {
@@ -669,6 +727,22 @@ export class LocalRepository implements Repository {
       total: all.length,
       profiles: all.slice(offset, offset + limit).map((p) => ({ handle: p.handle, updated_at: p.updated_at })),
     };
+  }
+
+  async topVerifiedMarks(profileIds: string[]): Promise<Record<string, TopMark>> {
+    const db = readDb();
+    const wanted = new Set(profileIds);
+    const byProfile = new Map<string, AchievementRow[]>();
+    for (const a of db.achievements) {
+      if (!wanted.has(a.profile_id) || a.verification !== "verified") continue;
+      byProfile.set(a.profile_id, [...(byProfile.get(a.profile_id) ?? []), a]);
+    }
+    const out: Record<string, TopMark> = {};
+    for (const [id, rows] of byProfile) {
+      const top = pickTopMark(rows);
+      if (top) out[id] = top;
+    }
+    return out;
   }
 
   // --- recruiter lists ----------------------------------------------------
@@ -763,6 +837,31 @@ export class LocalRepository implements Repository {
     });
   }
 
+  async setListNote(ownerId: string, listId: string, profileId: string, note: string | null): Promise<void> {
+    await mutate((db) => {
+      const list = requireList(db, ownerId, listId);
+      const member = db.recruiter_list_members.find((m) => m.list_id === listId && m.profile_id === profileId);
+      if (!member) throw new DataError("not_found", "That athlete is not on this list.");
+      member.note = note;
+      list.updated_at = now();
+    });
+  }
+
+  async moveListMember(ownerId: string, fromListId: string, toListId: string, profileId: string): Promise<void> {
+    if (fromListId === toListId) return;
+    await mutate((db) => {
+      const from = requireList(db, ownerId, fromListId);
+      const to = requireList(db, ownerId, toListId);
+      const member = db.recruiter_list_members.find((m) => m.list_id === fromListId && m.profile_id === profileId);
+      if (!member) throw new DataError("not_found", "That athlete is not on this list.");
+      const already = db.recruiter_list_members.some((m) => m.list_id === toListId && m.profile_id === profileId);
+      db.recruiter_list_members = db.recruiter_list_members.filter((m) => m !== member);
+      if (!already) db.recruiter_list_members.push({ ...member, list_id: toListId, added_at: now() });
+      from.updated_at = now();
+      to.updated_at = now();
+    });
+  }
+
   async listsContaining(ownerId: string, profileId: string): Promise<string[]> {
     const db = readDb();
     const mine = new Set(db.recruiter_lists.filter((l) => l.owner_id === ownerId).map((l) => l.id));
@@ -780,6 +879,43 @@ export class LocalRepository implements Repository {
     }
     return out;
   }
+
+  // --- saved searches -----------------------------------------------------
+
+  async listSavedSearches(ownerId: string): Promise<SavedSearch[]> {
+    return readDb()
+      .saved_searches.filter((x) => x.owner_id === ownerId)
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  }
+
+  async saveSearch(ownerId: string, name: string, query: string, digest: boolean): Promise<SavedSearch> {
+    return mutate((db) => {
+      const existing = db.saved_searches.find((x) => x.owner_id === ownerId && x.name === name);
+      if (existing) {
+        Object.assign(existing, { query, digest, updated_at: now() });
+        return existing;
+      }
+      const row: SavedSearch = { id: randomUUID(), owner_id: ownerId, name, query, digest, created_at: now(), updated_at: now() };
+      db.saved_searches.push(row);
+      return row;
+    });
+  }
+
+  async setSavedSearchDigest(ownerId: string, searchId: string, digest: boolean): Promise<void> {
+    await mutate((db) => {
+      const row = db.saved_searches.find((x) => x.id === searchId && x.owner_id === ownerId);
+      if (!row) throw new DataError("not_found", "That saved search was not found.");
+      Object.assign(row, { digest, updated_at: now() });
+    });
+  }
+
+  async deleteSavedSearch(ownerId: string, searchId: string): Promise<void> {
+    await mutate((db) => {
+      const before = db.saved_searches.length;
+      db.saved_searches = db.saved_searches.filter((x) => !(x.id === searchId && x.owner_id === ownerId));
+      if (db.saved_searches.length === before) throw new DataError("not_found", "That saved search was not found.");
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -794,7 +930,7 @@ export function newProfile(input: NewProfile): Profile {
     account_kind: input.account_kind ?? "athlete",
     visibility: input.visibility ?? "public",
     display_name: input.display_name,
-    title: null,
+    title: input.title ?? null,
     avatar_url: null,
     cover_url: null,
     bio: null,
@@ -808,7 +944,7 @@ export function newProfile(input: NewProfile): Profile {
     positions: [],
     jersey: null,
     region: null,
-    school: null,
+    school: input.school ?? null,
     gpa: null,
     sat_score: null,
     act_score: null,
@@ -824,6 +960,7 @@ export function newProfile(input: NewProfile): Profile {
     verified_count: 0,
     identity_verified_at: null,
     suspended_at: null,
+    viewer_summary_opt_in: false,
     created_at: at,
     updated_at: at,
   };
@@ -853,6 +990,7 @@ export function toEntry(db: Db, a: AchievementRow): RecordEntry {
     event_name: a.event_name,
     evidence_count: db.evidence.filter((e) => e.achievement_id === a.id).length,
     verified_by: a.verification === "verified" ? verifiedBy(db, a.id) : null,
+    value_numeric: a.value_numeric,
   };
 }
 
@@ -880,7 +1018,7 @@ export function syncCounts(db: Db, profileId: string): void {
 
 /** Only the `NewEntry` columns — a direct POST must not smuggle in `verification`. */
 function pickEntryFields(patch: Partial<NewEntry>): Partial<NewEntry> {
-  return Object.fromEntries(SUBSTANTIVE_ENTRY_FIELDS.filter((f) => patch[f] !== undefined).map((f) => [f, patch[f]]));
+  return Object.fromEntries(ENTRY_WRITE_FIELDS.filter((f) => patch[f] !== undefined).map((f) => [f, patch[f]]));
 }
 
 const RESPONSE_COPY = {

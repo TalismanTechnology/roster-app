@@ -18,7 +18,7 @@ import type {
 export type AuthUser = { id: string; email: string };
 
 export type NewProfile = Pick<Profile, "id" | "handle" | "display_name" | "level"> &
-  Partial<Pick<Profile, "primary_sport" | "grad_year" | "visibility" | "account_kind">>;
+  Partial<Pick<Profile, "primary_sport" | "grad_year" | "visibility" | "account_kind" | "title" | "school">>;
 
 export type NewEntry = {
   kind: AchievementKind;
@@ -31,9 +31,15 @@ export type NewEntry = {
   field_size: number | null;
   achieved_on: string;
   sport?: string | null;
+  /** The mark in `unit`, for sorting and chips (#55). Null without a unit (`measured_has_unit`). */
+  value_numeric?: number | null;
+  unit?: string | null;
 };
 
 export type NewFilm = { title: string; url: string; season: string | null };
+
+/** Which way a clip moves in the athlete's order. */
+export type MoveDirection = "up" | "down";
 
 export type NewCoach = {
   name: string;
@@ -42,6 +48,9 @@ export type NewCoach = {
   email: string | null;
   phone: string | null;
 };
+
+/** An edit to a reference: any of its details, and whether recruiters see it. */
+export type CoachPatch = Partial<NewCoach> & { is_visible?: boolean };
 
 export type VerificationRequestStatus = "pending" | "verified" | "disputed" | "expired";
 
@@ -107,6 +116,34 @@ export type ListedAthlete = Profile & { list_note: string | null; added_at: stri
 
 export type RecruiterListDetail = { list: RecruiterList; members: ListedAthlete[] };
 
+/**
+ * A recruiter's saved /search filters (0020). `query` is the canonical
+ * query string (`filtersToQuery`), never a raw URL. `digest` opts the
+ * search into the weekly new-matches email.
+ */
+export type SavedSearch = {
+  id: string;
+  owner_id: string;
+  name: string;
+  query: string;
+  digest: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+/** The order search results come back in (#85). */
+export type SearchSort = "verified_count" | "graduation_year" | "gpa" | "recent";
+
+/** The best verified mark on a resume, for a search row (#91). */
+export type TopMark = Pick<RecordEntry, "title" | "value_display" | "unit">;
+
+/**
+ * Who looked this week, as counts only (#90): distinct signed-in viewers
+ * whose account is a recruiter or a coach. Never names — the athlete opted
+ * into a number, not a guest book.
+ */
+export type ViewerSummary = { recruiters: number; coaches: number };
+
 export type SearchParams = {
   q?: string | null;
   sport?: string | null;
@@ -116,6 +153,9 @@ export type SearchParams = {
   /** One position, matched case-insensitively against the athlete's list. */
   position?: string | null;
   verifiedOnly?: boolean;
+  /** GPA floor, inclusive. Athletes with no GPA drop out when set. */
+  minGpa?: number | null;
+  sort?: SearchSort;
   page?: number;
   pageSize?: number;
 };

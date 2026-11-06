@@ -112,6 +112,8 @@ export type Profile = {
   verified_count: number;
   identity_verified_at: string | null;
   suspended_at: string | null;
+  /** The athlete opted into "viewed by N recruiters this week" (0020). */
+  viewer_summary_opt_in: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -167,6 +169,8 @@ export type RecordEntry = {
    *  unless the entry is currently verified (view column since 0016; the
    *  local adapter derives it the same way). */
   verified_by: string | null;
+  /** The mark in `unit` (view column since 0020). */
+  value_numeric: number | null;
 };
 
 export type AchievementEvidence = {
@@ -284,6 +288,17 @@ export type RecruiterList = {
   updated_at: string;
 };
 
+/** 0020. A recruiter's saved /search filters, owner-only under RLS. */
+export type SavedSearchRow = {
+  id: string;
+  owner_id: string;
+  name: string;
+  query: string;
+  digest: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 export type RecruiterListMember = {
   list_id: string;
   profile_id: string;
@@ -370,6 +385,7 @@ export type Database = {
       profile_views: Row<ProfileView>;
       recruiter_lists: Row<RecruiterList>;
       recruiter_list_members: Row<RecruiterListMember>;
+      saved_searches: Row<SavedSearchRow>;
       verification_requests: Row<VerificationRequestRecord>;
       /** Not client-accessible since 0015; typed so service-role code can. */
       posts: Row<Post>;
@@ -412,6 +428,8 @@ export type Database = {
       feature_film: { Args: { clip: string }; Returns: void };
       /** 0018. Escapes LIKE metacharacters (backslash, `%`, `_`) so a value matches literally. */
       like_literal: { Args: { value: string }; Returns: string };
+      /** 0020. Owner only (auth.uid()); distinct recruiter/coach viewers in the last 7 days. Counts, never ids. */
+      weekly_viewer_summary: { Args: Record<string, never>; Returns: Json };
       search_athletes: {
         Args: {
           q?: string | null;
@@ -421,6 +439,10 @@ export type Database = {
           regions?: string[] | null;
           athlete_positions?: string[] | null;
           verified_only?: boolean;
+          /** 0020. Inclusive GPA floor; null is no floor. */
+          min_gpa?: number | null;
+          /** 0020. verified_count (default) | graduation_year | gpa | recent. */
+          sort_by?: string | null;
           page_size?: number;
           page_offset?: number;
         };

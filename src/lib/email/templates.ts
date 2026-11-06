@@ -125,3 +125,19 @@ export function passwordResetEmail(input: { url: string; expiresInMinutes: numbe
   );
   return { subject, text, html };
 }
+
+/** Confirms a saved search's weekly digest (#88). The weekly send itself is not built yet; see digest.ts. */
+export function digestOptInEmail(input: { searchName: string; url: string }): RenderedEmail {
+  const name = oneLine(input.searchName);
+  const subject = `Weekly matches on: ${name}`;
+  const lines = [
+    `You'll get a weekly email when new athletes match your saved search “${name}”.`,
+    "Turn it off any time from the search page.",
+  ];
+  const text = [...lines, "", input.url].join("\n");
+  const html = layout("Saved search", "Digest on.", para(lines[0]) + "\n" + para(lines[1], true), {
+    href: input.url,
+    text: "Open the search",
+  });
+  return { subject, text, html };
+}

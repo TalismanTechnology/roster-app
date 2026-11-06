@@ -13,13 +13,16 @@ import {
   CURRENT_PASSWORD_MISMATCH,
   DAILY_REQUEST_CAP,
   emailChangeError,
+  ENTRY_WRITE_FIELDS,
   isRecentRecovery,
   isSubstantiveEntryChange,
   MAX_PINNED,
   newPasswordError,
+  pickTopMark,
   REQUEST_TTL_DAYS,
   signUpError,
   SUBSTANTIVE_ENTRY_FIELDS,
+  swapNeighbour,
 } from "../rules";
 import { generateToken, hashToken } from "../tokens";
 import { clampPage, clampPageSize, normalizeSearchQuery } from "../search-query";
@@ -29,13 +32,16 @@ import {
   type EmailChangeResult,
   type IndexablePage,
   type IssuedPasswordReset,
+  type CoachPatch,
   type ListedAthlete,
+  type MoveDirection,
   type NewCoach,
   type NewEntry,
   type NewFilm,
   type NewProfile,
   type RecruiterList,
   type RecruiterListDetail,
+  type SavedSearch,
   type SearchParams,
   type SearchResult,
   type CreatedVerificationRequest,
@@ -43,6 +49,8 @@ import {
   type VerificationRequest,
   type VerificationRequestDetail,
   type VerificationResponse,
+  type TopMark,
+  type ViewerSummary,
 } from "../types";
 
 type Client = SupabaseClient<Database>;
@@ -85,6 +93,8 @@ const AVATAR_BUCKET = "avatars";
 const POSTGREST_MAX_ROWS = 1000;
 
 const LIST_CONFLICT = "You already have a list with that name.";
+
+const SAVED_SEARCH_COLUMNS = "id,owner_id,name,query,digest,created_at,updated_at";
 
 /** Every readable column of verification_requests — `select *` is refused (0017). */
 const REQUEST_COLUMNS =
@@ -343,9 +353,11 @@ export class SupabaseRepository implements Repository {
         .maybeSingle<Pick<Profile, "primary_sport">>();
       sport = profile?.primary_sport ?? null;
     }
+    // measured_has_unit (0003): a number without a unit is no measurement.
+    const measured = input.unit ? { value_numeric: input.value_numeric ?? null, unit: input.unit } : { value_numeric: null, unit: null };
     const { data, error } = await this.client
       .from("achievements")
-      .insert({ profile_id: profileId, ...input, sport })
+      .insert({ profile_id: profileId, ...input, ...measured, sport })
       .select("id")
       .single();
     if (error || !data) {
@@ -367,8 +379,9 @@ export class SupabaseRepository implements Repository {
     if (!current) throw new DataError("not_found", "That entry was not found.");
 
     const fields = Object.fromEntries(
-      SUBSTANTIVE_ENTRY_FIELDS.filter((f) => patch[f] !== undefined).map((f) => [f, patch[f]]),
+      ENTRY_WRITE_FIELDS.filter((f) => patch[f] !== undefined).map((f) => [f, patch[f]]),
     ) as Partial<NewEntry>;
+    if (patch.unit !== undefined && !patch.unit) fields.value_numeric = null;
     // Same rule as the local adapter: a coach vouched for the old values.
     // Any link still out is expired by achievements_expire_requests (0017)
     // when the reset lands.
@@ -445,6 +458,47 @@ export class SupabaseRepository implements Repository {
     return data;
   }
 
+  async updateFilm(profileId: string, clipId: string, input: NewFilm): Promise<FilmClip> {
+    // A changed url re-runs parse_film_url (`update of url`, 0007).
+    const { data, error } = await this.client
+      .from("film_clips")
+      .update({ title: input.title, url: input.url, season: input.season })
+      .eq("id", clipId)
+      .eq("profile_id", profileId)
+      .select("*")
+      .maybeSingle<FilmClip>();
+    if (error) throw new DataError("invalid", "Could not save the clip.");
+    if (!data) throw new DataError("not_found", "That clip was not found.");
+    return data;
+  }
+
+  async moveFilm(profileId: string, clipId: string, direction: MoveDirection): Promise<void> {
+    // No unique index on position (0004), so a renumber is a few plain
+    // UPDATEs; only rows whose position changes are written. RLS keeps
+    // every write to the owner's rows.
+    const { data, error } = await this.client
+      .from("film_clips")
+      .select("id,position")
+      .eq("profile_id", profileId)
+      .order("position")
+      .order("created_at")
+      .returns<Pick<FilmClip, "id" | "position">[]>();
+    if (error) throw new DataError("unavailable", "Could not reorder the clips. Try again.");
+    const rows = data ?? [];
+    if (!rows.some((r) => r.id === clipId)) throw new DataError("not_found", "That clip was not found.");
+    const order = swapNeighbour(rows.map((r) => r.id), clipId, direction);
+    for (const row of rows) {
+      const position = order.indexOf(row.id);
+      if (row.position === position) continue;
+      const result = await this.client
+        .from("film_clips")
+        .update({ position }, { count: "exact" })
+        .eq("id", row.id)
+        .eq("profile_id", profileId);
+      requireAffected(result, "clip");
+    }
+  }
+
   async deleteFilm(profileId: string, clipId: string): Promise<void> {
     requireAffected(
       await this.client.from("film_clips").delete({ count: "exact" }).eq("id", clipId).eq("profile_id", profileId),
@@ -483,6 +537,24 @@ export class SupabaseRepository implements Repository {
       .select("*")
       .single<CoachContact>();
     if (error) throw new DataError("invalid", "Could not add the reference.");
+    return data;
+  }
+
+  async updateCoach(profileId: string, coachId: string, patch: CoachPatch): Promise<CoachContact> {
+    const fields = Object.fromEntries(
+      (["name", "role", "org_name", "email", "phone", "is_visible"] as const)
+        .filter((f) => patch[f] !== undefined)
+        .map((f) => [f, patch[f]]),
+    ) as CoachPatch;
+    const { data, error } = await this.client
+      .from("coach_contacts")
+      .update(fields)
+      .eq("id", coachId)
+      .eq("profile_id", profileId)
+      .select("*")
+      .maybeSingle<CoachContact>();
+    if (error) throw new DataError("invalid", "Could not save the reference.");
+    if (!data) throw new DataError("not_found", "That reference was not found.");
     return data;
   }
 
@@ -608,6 +680,16 @@ export class SupabaseRepository implements Repository {
     return (data ?? []).reduce((sum, row) => sum + row.view_count, 0);
   }
 
+  async viewerSummary(): Promise<ViewerSummary> {
+    // Definer function (0020): a viewer's account kind is behind their own
+    // profile's visibility, so the join cannot run as the athlete. It reads
+    // auth.uid() and returns counts only.
+    const { data, error } = await this.client.rpc("weekly_viewer_summary");
+    if (error || !data) return { recruiters: 0, coaches: 0 };
+    const row = data as Partial<ViewerSummary>;
+    return { recruiters: Number(row.recruiters ?? 0), coaches: Number(row.coaches ?? 0) };
+  }
+
   // --- discovery ----------------------------------------------------------
 
   async searchAthletes(params: SearchParams): Promise<SearchResult> {
@@ -624,6 +706,8 @@ export class SupabaseRepository implements Repository {
       regions: params.region ? [params.region.toUpperCase()] : null,
       athlete_positions: position ? [position] : null,
       verified_only: params.verifiedOnly ?? false,
+      min_gpa: params.minGpa ?? null,
+      sort_by: params.sort ?? "verified_count",
     };
     const fetchPage = (page: number) =>
       this.client.rpc("search_athletes", { ...args, page_size: pageSize, page_offset: (page - 1) * pageSize });
@@ -673,6 +757,26 @@ export class SupabaseRepository implements Repository {
       if ((data?.length ?? 0) < to - from + 1) break;
     }
     return { profiles, total };
+  }
+
+  async topVerifiedMarks(profileIds: string[]): Promise<Record<string, TopMark>> {
+    const out: Record<string, TopMark> = {};
+    if (profileIds.length === 0) return out;
+    const { data, error } = await this.client
+      .from("record_entries")
+      .select("profile_id,title,value_display,unit,verification,is_pinned,verified_at")
+      .in("profile_id", profileIds)
+      .eq("verification", "verified")
+      .returns<(Pick<RecordEntry, "profile_id" | "title" | "value_display" | "unit" | "verification" | "is_pinned" | "verified_at">)[]>();
+    // A decoration on search rows: a failed read shows rows without a mark.
+    if (error) return out;
+    const byProfile = new Map<string, NonNullable<typeof data>>();
+    for (const e of data ?? []) byProfile.set(e.profile_id, [...(byProfile.get(e.profile_id) ?? []), e]);
+    for (const [id, rows] of byProfile) {
+      const top = pickTopMark(rows);
+      if (top) out[id] = top;
+    }
+    return out;
   }
 
   // --- recruiter lists ----------------------------------------------------
@@ -784,6 +888,35 @@ export class SupabaseRepository implements Repository {
     await this.touchList(listId);
   }
 
+  async setListNote(ownerId: string, listId: string, profileId: string, note: string | null): Promise<void> {
+    await this.requireList(ownerId, listId);
+    const result = await this.client
+      .from("recruiter_list_members")
+      .update({ note }, { count: "exact" })
+      .eq("list_id", listId)
+      .eq("profile_id", profileId);
+    if (result.error) throw new DataError("unavailable", "Could not save the note. Try again.");
+    if (result.count === 0) throw new DataError("not_found", "That athlete is not on this list.");
+    await this.touchList(listId);
+  }
+
+  async moveListMember(ownerId: string, fromListId: string, toListId: string, profileId: string): Promise<void> {
+    if (fromListId === toListId) return;
+    await Promise.all([this.requireList(ownerId, fromListId), this.requireList(ownerId, toListId)]);
+    const { data: member, error } = await this.client
+      .from("recruiter_list_members")
+      .select("note")
+      .eq("list_id", fromListId)
+      .eq("profile_id", profileId)
+      .maybeSingle<{ note: string | null }>();
+    if (error) throw new DataError("unavailable", "Could not move the athlete. Try again.");
+    if (!member) throw new DataError("not_found", "That athlete is not on this list.");
+    // Insert before delete: a failure in between leaves the athlete on both
+    // lists, never on neither. Already on the target is a no-op insert.
+    await this.addToList(ownerId, toListId, profileId, member.note);
+    await this.removeFromList(ownerId, fromListId, profileId);
+  }
+
   async listsContaining(ownerId: string, profileId: string): Promise<string[]> {
     return (await this.listsContainingMany(ownerId, [profileId]))[profileId] ?? [];
   }
@@ -804,6 +937,48 @@ export class SupabaseRepository implements Repository {
     if (error) return out;
     for (const m of data ?? []) out[m.profile_id]?.push(m.list_id);
     return out;
+  }
+
+  // --- saved searches (0020; owner-only under RLS) -------------------------
+
+  async listSavedSearches(ownerId: string): Promise<SavedSearch[]> {
+    const { data, error } = await this.client
+      .from("saved_searches")
+      .select(SAVED_SEARCH_COLUMNS)
+      .eq("owner_id", ownerId)
+      .order("updated_at", { ascending: false })
+      .returns<SavedSearch[]>();
+    if (error) return [];
+    return data ?? [];
+  }
+
+  async saveSearch(ownerId: string, name: string, query: string, digest: boolean): Promise<SavedSearch> {
+    // Same name replaces, as locally: (owner_id, name) is unique.
+    const { data, error } = await this.client
+      .from("saved_searches")
+      .upsert({ owner_id: ownerId, name, query, digest }, { onConflict: "owner_id,name" })
+      .select(SAVED_SEARCH_COLUMNS)
+      .single<SavedSearch>();
+    if (error || !data) throw new DataError("unavailable", "Could not save the search. Try again.");
+    return data;
+  }
+
+  async setSavedSearchDigest(ownerId: string, searchId: string, digest: boolean): Promise<void> {
+    const result = await this.client
+      .from("saved_searches")
+      .update({ digest }, { count: "exact" })
+      .eq("id", searchId)
+      .eq("owner_id", ownerId);
+    requireAffected(result, "saved search");
+  }
+
+  async deleteSavedSearch(ownerId: string, searchId: string): Promise<void> {
+    const result = await this.client
+      .from("saved_searches")
+      .delete({ count: "exact" })
+      .eq("id", searchId)
+      .eq("owner_id", ownerId);
+    requireAffected(result, "saved search");
   }
 
   /** The owner's list, or not-found — for writes that touch only member rows. */

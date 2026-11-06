@@ -1,11 +1,14 @@
 import type { Profile } from "@/lib/database.types";
 import { updateAcademics, updateContact, updateIdentity, updateVisibility } from "@/lib/actions/resume";
 import { AvatarUpload } from "@/components/editor/AvatarUpload";
+import { PositionPicker } from "@/components/editor/PositionPicker";
 import { EditorForm } from "@/components/editor/EditorForm";
 import { Avatar } from "@/components/record/Avatar";
-import { Checkbox, Field, Select, TextArea, TextInput } from "@/components/ui/fields";
+import { Checkbox, Field, FieldError, FieldGroup, Select, TextArea, TextInput } from "@/components/ui/fields";
 import { Corner, CORNER } from "@/components/ui/marks";
+import type { ViewerSummary } from "@/lib/data/types";
 import { LEVEL_OPTIONS } from "@/lib/format";
+import { cmToFeetInches, kgToLbs } from "@/lib/measurables";
 import { US_STATES } from "@/lib/regions";
 import { SPORTS } from "@/lib/sports";
 
@@ -57,6 +60,7 @@ export function Panel({ children, className = "" }: { children: React.ReactNode;
 }
 
 export function IdentitySection({ profile }: { profile: Profile }) {
+  const height = cmToFeetInches(profile.height_cm);
   return (
     <EditorSection id="identity" title="Identity" lede="Photo, name, sport, school, and the two sentences a recruiter reads first.">
       <Panel className="mb-6">
@@ -113,10 +117,6 @@ export function IdentitySection({ profile }: { profile: Profile }) {
               <TextInput name="grad_year" type="number" min={1950} max={2100} defaultValue={profile.grad_year ?? ""} />
             </Field>
 
-            <Field label="Positions" hint="Comma-separated: WR, DB">
-              <TextInput name="positions" defaultValue={profile.positions.join(", ")} />
-            </Field>
-
             <Field label="Jersey #">
               <TextInput name="jersey" defaultValue={profile.jersey ?? ""} maxLength={4} />
             </Field>
@@ -136,14 +136,33 @@ export function IdentitySection({ profile }: { profile: Profile }) {
               </Select>
             </Field>
 
-            <Field label="Height (cm)">
-              <TextInput name="height_cm" type="number" min={90} max={260} defaultValue={profile.height_cm ?? ""} />
-            </Field>
+            <FieldGroup label="Height">
+              <div className="grid grid-cols-2 gap-3">
+                <span className="relative block">
+                  <TextInput name="height_ft" type="number" min={3} max={8} inputMode="numeric" aria-label="Height, feet" defaultValue={height?.feet ?? ""} externalError />
+                  <span className="label pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-ink-subtle">ft</span>
+                </span>
+                <span className="relative block">
+                  <TextInput name="height_in" type="number" min={0} max={11} step="0.5" inputMode="decimal" aria-label="Height, inches" defaultValue={height?.inches ?? ""} externalError />
+                  <span className="label pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-ink-subtle">in</span>
+                </span>
+              </div>
+              <FieldError name="height_ft" />
+              <FieldError name="height_in" />
+            </FieldGroup>
 
-            <Field label="Weight (kg)">
-              <TextInput name="weight_kg" type="number" step="0.1" min={25} max={300} defaultValue={profile.weight_kg ?? ""} />
+            <Field label="Weight">
+              <span className="relative block">
+                <TextInput name="weight_lbs" type="number" min={55} max={660} inputMode="numeric" defaultValue={kgToLbs(profile.weight_kg) ?? ""} externalError />
+                <span className="label pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-ink-subtle">lbs</span>
+              </span>
+              <FieldError name="weight_lbs" />
             </Field>
           </div>
+
+          <FieldGroup label="Positions" hint="Tap the ones you play, or add your own. Up to six — recruiters filter on these.">
+            <PositionPicker initial={profile.positions} sport={profile.primary_sport} />
+          </FieldGroup>
         </EditorForm>
       </Panel>
     </EditorSection>
@@ -245,8 +264,32 @@ export function VisibilitySection({ profile }: { profile: Profile }) {
             label="Open to recruiting"
             hint="Shows your contact details and your coaches' contact details to recruiters. Requires a public resume."
           />
+
+          <Checkbox
+            name="viewer_summary_opt_in"
+            defaultChecked={profile.viewer_summary_opt_in}
+            label="Show who's looking"
+            hint="Adds “viewed by N recruiters and coaches this week” to your editor. Counts only — never names. Only signed-in recruiter and coach accounts are counted."
+          />
         </EditorForm>
       </Panel>
     </EditorSection>
+  );
+}
+
+/**
+ * #90: the opted-in viewer count, in the share bar's voice. Counts only;
+ * the repository never hands back who.
+ */
+export function ViewerSummaryLine({ summary }: { summary: ViewerSummary }) {
+  const parts = [
+    summary.recruiters > 0 && `${summary.recruiters} ${summary.recruiters === 1 ? "recruiter" : "recruiters"}`,
+    summary.coaches > 0 && `${summary.coaches} ${summary.coaches === 1 ? "coach" : "coaches"}`,
+  ].filter(Boolean);
+  return (
+    <p className="label flex items-center gap-2 text-ink-muted" data-numeric>
+      <Corner d={CORNER.bl} />
+      {parts.length === 0 ? "No recruiters or coaches have opened your resume this week." : <>Viewed by {parts.join(" and ")} this week</>}
+    </p>
   );
 }

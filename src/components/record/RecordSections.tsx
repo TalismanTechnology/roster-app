@@ -5,6 +5,7 @@ import type { CoachContact, FilmClip, Profile, RecordEntry } from "@/lib/databas
 import { entryContext, fullDate, kindLabel, placementLabel, recordDate } from "@/lib/format";
 
 import { posterFor, providerLabel } from "@/lib/film";
+import { formatMeasurable } from "@/lib/sport-events";
 
 import { FilmPlayer } from "./FilmPlayer";
 import { VerificationMark } from "./VerificationMark";
@@ -115,9 +116,12 @@ export function RecordList({ entries, isOwner }: { entries: RecordEntry[]; isOwn
 
               <div className="min-w-0">
                 <p className="font-bold">{e.title}</p>
-                <p className="label mt-0.5 text-ink-muted">
-                  {kindLabel(e.kind)}
-                  {context && <> · {context}</>}
+                <p className="label mt-0.5 flex flex-wrap items-center gap-x-2 text-ink-muted">
+                  <span>
+                    {kindLabel(e.kind)}
+                    {context && <> · {context}</>}
+                  </span>
+                  {e.value_numeric !== null && e.unit && <MeasurableChip value={e.value_numeric} unit={e.unit} />}
                 </p>
                 {e.detail && <p className="mt-2 max-w-2xl leading-normal">{e.detail}</p>}
                 <Provenance entry={e} />
@@ -206,6 +210,18 @@ export function VerificationNote() {
         </li>
       </ol>
     </aside>
+  );
+}
+
+/**
+ * #55: a mark stored as a number in a known unit — comparable, sortable —
+ * flagged as such beside the entry. The display string stays the headline.
+ */
+function MeasurableChip({ value, unit }: { value: number; unit: string }) {
+  return (
+    <span className="font-mono text-ink-subtle" title="Measured mark">
+      [ {formatMeasurable(value, unit)} ]
+    </span>
   );
 }
 

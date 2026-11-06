@@ -1,6 +1,6 @@
-import type { CoachContact, Profile, RecordEntry } from "@/lib/database.types";
+import type { AccountKind, CoachContact, Profile, ProfileView, RecordEntry } from "@/lib/database.types";
 
-import { DataError, type NewEntry, type VerificationRequest } from "./types";
+import { DataError, type MoveDirection, type NewEntry, type TopMark, type VerificationRequest, type ViewerSummary } from "./types";
 
 /**
  * The visibility model, in TypeScript.
@@ -178,7 +178,16 @@ export const SUBSTANTIVE_ENTRY_FIELDS = [
   "placement",
   "field_size",
   "achieved_on",
+  "unit",
 ] as const satisfies readonly (keyof NewEntry)[];
+
+/**
+ * What an entry edit may write: the claim, plus `value_numeric`, which is
+ * derived from the mark and unit (`parseMark`) and so never decides on its
+ * own whether the badge goes — an entry saved before 0020 gaining its number
+ * is not a new claim.
+ */
+export const ENTRY_WRITE_FIELDS = [...SUBSTANTIVE_ENTRY_FIELDS, "value_numeric"] as const satisfies readonly (keyof NewEntry)[];
 
 /**
  * Whether applying `patch` changes what the entry claims. Fields the patch
@@ -193,6 +202,16 @@ export function isSubstantiveEntryChange(
   return SUBSTANTIVE_ENTRY_FIELDS.some(
     (field) => field in patch && patch[field] !== undefined && norm(patch[field]) !== norm(current[field]),
   );
+}
+
+/** Film order (#56): `ids` with `id` swapped one place toward the front ("up") or back; unchanged at an end. */
+export function swapNeighbour(ids: readonly string[], id: string, direction: MoveDirection): string[] {
+  const out = [...ids];
+  const i = out.indexOf(id);
+  const j = direction === "up" ? i - 1 : i + 1;
+  if (i === -1 || j < 0 || j >= out.length) return out;
+  [out[i], out[j]] = [out[j], out[i]];
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -281,4 +300,54 @@ export function newPasswordError(error: AuthErrorLike): DataError {
     return new DataError("invalid", "Choose a stronger password — at least 8 characters, hard to guess.");
   }
   return new DataError("unavailable", "Could not update your password. Try again.");
+}
+
+// ---------------------------------------------------------------------------
+// Recruiter signals (0020)
+// ---------------------------------------------------------------------------
+
+/** The account kinds that use lists and saved searches: everyone but athletes. */
+export function isRecruiterKind(kind: AccountKind | null | undefined): boolean {
+  return Boolean(kind) && kind !== "athlete";
+}
+
+/**
+ * `weekly_viewer_summary()`: distinct signed-in viewers of `profileId` on or
+ * after `since` (a YYYY-MM-DD day), split by account kind. Anonymous views
+ * (null viewer) and every other kind are left out; a viewer seen on three
+ * days counts once.
+ */
+export function summarizeViewers(
+  views: readonly ProfileView[],
+  kindOf: (viewerId: string) => AccountKind | undefined,
+  profileId: string,
+  since: string,
+): ViewerSummary {
+  const recruiters = new Set<string>();
+  const coaches = new Set<string>();
+  for (const v of views) {
+    if (v.profile_id !== profileId || v.viewer_id === null || v.viewed_on < since) continue;
+    const kind = kindOf(v.viewer_id);
+    if (kind === "recruiter") recruiters.add(v.viewer_id);
+    else if (kind === "coach") coaches.add(v.viewer_id);
+  }
+  return { recruiters: recruiters.size, coaches: coaches.size };
+}
+
+/** The first day of the seven-day window, as `viewed_on` stores it. */
+export function weekStart(now = Date.now()): string {
+  return new Date(now - 7 * 86_400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * The entry a search row leads with: verified only, pinned first, then the
+ * most recently verified. Null when nothing on the record is verified.
+ */
+export function pickTopMark(
+  entries: readonly Pick<RecordEntry, "title" | "value_display" | "unit" | "verification" | "is_pinned" | "verified_at">[],
+): TopMark | null {
+  const best = entries
+    .filter((e) => e.verification === "verified")
+    .sort((a, b) => Number(b.is_pinned) - Number(a.is_pinned) || (b.verified_at ?? "").localeCompare(a.verified_at ?? ""))[0];
+  return best ? { title: best.title, value_display: best.value_display, unit: best.unit } : null;
 }

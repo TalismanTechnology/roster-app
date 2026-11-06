@@ -92,6 +92,21 @@ export function Field({
   );
 }
 
+/**
+ * A `Field` for more than one control — chips, feet + inches — where a
+ * wrapping <label> would hand every click to the first input. A fieldset
+ * whose legend reads like a Field's label.
+ */
+export function FieldGroup({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return (
+    <fieldset className="block min-w-0">
+      <legend className="mb-2 block text-sm font-bold">{label}</legend>
+      {children}
+      {hint && <span className="mt-2 block text-sm text-ink-muted">{hint}</span>}
+    </fieldset>
+  );
+}
+
 const invalidClasses = "aria-invalid:border-disputed aria-invalid:focus:border-disputed";
 
 export function TextInput({

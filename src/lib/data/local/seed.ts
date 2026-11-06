@@ -2,8 +2,11 @@ import { randomUUID } from "node:crypto";
 
 import type { CoachContact, FilmClip, Profile } from "@/lib/database.types";
 
+import { parseMark } from "@/lib/sport-events";
+
 import { hashPassword } from "./password";
 import { parseFilmUrl } from "./film";
+
 import { ATHLETES, DEMO_PASSWORD, STAFF_ACCOUNTS, type SeedAthlete } from "./seed-data";
 import { emptyDb, type AchievementRow, type Db } from "./store";
 
@@ -51,7 +54,7 @@ export function buildSeed(): Db {
         detail: e.detail ?? null,
         sport: a.sport,
         event_id: null,
-        value_numeric: null,
+        value_numeric: parseMark(e.value, e.unit),
         value_display: e.value ?? null,
         unit: e.unit ?? null,
         competition: e.competition ?? null,
@@ -204,6 +207,7 @@ function toProfile(id: string, a: SeedAthlete, createdAt: string): Profile {
     verified_count: 0,
     identity_verified_at: null,
     suspended_at: null,
+    viewer_summary_opt_in: false,
     created_at: createdAt,
     updated_at: createdAt,
   };

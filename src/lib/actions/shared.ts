@@ -3,8 +3,10 @@ import "server-only";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { homePathFor } from "@/lib/accounts";
 import { getRepository } from "@/lib/data";
-import { getCurrentUser } from "@/lib/data/auth";
+import { getCurrentProfile, getCurrentUser } from "@/lib/data/auth";
+import { isRecruiterKind } from "@/lib/data/rules";
 import { DataError } from "@/lib/data/types";
 
 /**
@@ -58,6 +60,20 @@ export async function requireUser(signIn = "/sign-in?next=/resume") {
   const user = await getCurrentUser();
   if (!user) redirect(signIn);
   return { repo: await getRepository(), user };
+}
+
+/**
+ * `requireUser`, and the account must be a recruiter or coach (any
+ * non-athlete kind) — lists and saved searches are theirs (#86). An athlete
+ * is sent back to the editor; an account mid-onboarding to finish it. RLS
+ * would let an athlete own a list, so this is the gate, not the database.
+ */
+export async function requireRecruiter(signIn: string) {
+  const session = await requireUser(signIn);
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/onboarding");
+  if (!isRecruiterKind(profile.account_kind)) redirect(homePathFor(profile.account_kind));
+  return { ...session, profile };
 }
 
 /**

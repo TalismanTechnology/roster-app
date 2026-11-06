@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 
-import { createList, renameList, type ListFormState } from "@/lib/actions/lists";
+import { createList, renameList, updateListNote, type ListFormState } from "@/lib/actions/lists";
 import { Field, FieldErrors, FormNotice, TextInput } from "@/components/ui/fields";
 import { SubmitButton } from "@/components/ui/SubmitButton";
 
@@ -49,6 +49,32 @@ export function RenameListForm({ listId, name }: { listId: string; name: string 
         </SubmitButton>
         <FormNotice ok={state.ok} error={state.error} />
       </div>
+    </form>
+  );
+}
+
+/**
+ * #86: the recruiter's note on one athlete, inline on the list row. Private
+ * to the list's owner (RLS owner-only); "" clears it.
+ */
+export function ListNoteForm({ listId, profileId, note, athleteName }: { listId: string; profileId: string; note: string | null; athleteName: string }) {
+  const [state, formAction] = useActionState(updateListNote, IDLE);
+  return (
+    <form action={formAction} className="flex flex-wrap items-center gap-2">
+      <input type="hidden" name="list_id" value={listId} />
+      <input type="hidden" name="profile_id" value={profileId} />
+      <input
+        name="note"
+        defaultValue={state.values?.note ?? note ?? ""}
+        maxLength={300}
+        placeholder="Add a note — visits, contact, what to watch"
+        aria-label={`Note on ${athleteName}`}
+        className="min-w-0 flex-1 basis-56 border-0 border-b border-rule bg-transparent px-0 py-1.5 text-sm text-ink placeholder:text-ink-subtle focus:border-ink focus:outline-none"
+      />
+      <SubmitButton className="label cursor-pointer text-ink-subtle underline decoration-transparent underline-offset-4 hover:text-ink hover:decoration-ink" pendingLabel="Saving…">
+        Save note
+      </SubmitButton>
+      <FormNotice ok={state.ok} error={state.error} />
     </form>
   );
 }

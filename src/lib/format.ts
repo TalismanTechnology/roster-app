@@ -95,25 +95,10 @@ export function entryContext(entry: RecordEntry): string {
 }
 
 /**
- * 170cm → 5'7". Recruiters in US sports read height in feet and inches;
- * storing metric keeps the column sortable and this converts at the edge.
+ * Recruiters in US sports read height in feet and inches and weight in
+ * pounds; the columns stay metric and `@/lib/measurables` converts at the edge.
  */
-export function heightLabel(heightCm: number | null): string | null {
-  if (heightCm === null) return null;
-
-  const totalInches = Math.round(heightCm / 2.54);
-  const feet = Math.floor(totalInches / 12);
-  const inches = totalInches % 12;
-
-  return `${feet}'${inches}"`;
-}
-
-/** 59kg → 130 lbs, same reasoning as height. */
-export function weightLabel(weightKg: number | null): string | null {
-  if (weightKg === null) return null;
-
-  return `${Math.round(weightKg * 2.20462)} lbs`;
-}
+export { heightLabel, weightLabel } from "@/lib/measurables";
 
 /** Select options for forms, in the order an athlete climbs them. */
 export const LEVEL_OPTIONS = Object.entries(LEVEL_LABELS) as [AthleteLevel, string][];

@@ -233,6 +233,28 @@ await step("an athlete uploads a photo: resized in the browser, shown on the res
   if (!/"image":"https?:\/\/[^"]+\/media\/avatars\//.test(html)) throw new Error("JSON-LD has no image");
 });
 
+await step("an athlete saves height and weight in feet, inches, and pounds", async () => {
+  await page.goto(`${base}/resume?section=identity`, { waitUntil: "networkidle" });
+  const form = page.locator("form").filter({ has: page.locator('input[name="height_ft"]') }).first();
+  await form.locator('input[name="height_ft"]').fill("6");
+  await form.locator('input[name="height_in"]').fill("1");
+  await form.locator('input[name="weight_lbs"]').fill("190");
+  await form.getByRole("button", { name: /save identity/i }).click();
+  const notice = form.locator('[role="status"], [role="alert"]').first();
+  await notice.waitFor({ state: "visible", timeout: 20_000 });
+  const verdict = (await notice.textContent())?.trim() ?? "";
+  if (!/^Saved/.test(verdict)) throw new Error(`form said: ${verdict}`);
+  // Stored metric, shown imperial: the same numbers come back.
+  await page.goto(`${base}/resume?section=identity`, { waitUntil: "networkidle" });
+  const values = await Promise.all(
+    ["height_ft", "height_in", "weight_lbs"].map((n) => page.locator(`input[name="${n}"]`).first().inputValue()),
+  );
+  if (values.join("/") !== "6/1/190") throw new Error(`reloaded as ${values.join("/")}`);
+  await page.goto(`${base}/jordanreyes`, { waitUntil: "networkidle" });
+  await expectText(`6'1"`);
+  await expectText("190 lbs");
+});
+
 await step("a hostile next= never leaves the site", async () => {
   // Signed in, /sign-in bounces straight to `next` — the sharpest edge.
   for (const next of ["/%5Cevil.com", "//evil.com", "/%09/evil.com", "https://evil.com"]) {
@@ -498,6 +520,48 @@ await step("a recruiter manages lists: create, save from search, open, remove", 
   await page.getByRole("heading", { name: `${listName} renamed` }).waitFor({ timeout: 15_000 });
 });
 
+await step("a recruiter filters by GPA and sort, saves the search, notes a list member, exports CSV", async () => {
+  await page.goto(`${base}/search?gpa=3&sort=gpa`, { waitUntil: "networkidle" });
+  const results = page.locator('section[aria-label="Results"]');
+  await results.locator("li").first().waitFor({ timeout: 10_000 });
+  const gpas = (await results.getByText(/\d\.\d\d GPA/).allTextContents()).map((t) => Number(t.match(/(\d\.\d\d) GPA/)[1]));
+  if (gpas.length === 0) throw new Error("no GPA on any row");
+  if (gpas.some((g) => g < 3)) throw new Error(`GPA under the floor: ${gpas}`);
+  if (gpas.join() !== [...gpas].sort((a, b) => b - a).join()) throw new Error(`not sorted by GPA: ${gpas}`);
+
+  const name = `Smoke search ${stamp}`;
+  await page.getByLabel("Saved search name").fill(name);
+  await page.getByRole("button", { name: /save search/i }).click();
+  await page.getByRole("link", { name }).waitFor({ timeout: 15_000 });
+  await page.goto(`${base}/search`, { waitUntil: "networkidle" });
+  await page.getByRole("link", { name }).click();
+  await page.waitForURL(/gpa=3/, { timeout: 15_000 });
+
+  await page.goto(`${base}/lists`, { waitUntil: "networkidle" });
+  await page.getByRole("link", { name: "Class of 2027 receivers" }).click();
+  await page.waitForURL(/\/lists\/[^/]+$/, { timeout: 15_000 });
+  const note = `Call after spring ball ${stamp}`;
+  const row = page.locator("li").filter({ hasText: "Jordan Reyes" }).first();
+  await row.getByLabel("Note on Jordan Reyes").fill(note);
+  await row.getByRole("button", { name: /save note/i }).click();
+  await row.getByText("Saved").first().waitFor({ timeout: 15_000 });
+  await page.reload({ waitUntil: "networkidle" });
+  const kept = await page.locator("li").filter({ hasText: "Jordan Reyes" }).first().getByLabel("Note on Jordan Reyes").inputValue();
+  if (kept !== note) throw new Error(`note reloaded as "${kept}"`);
+
+  // Fetched from the page, with its session: Playwright's own request client
+  // won't send the session cookie over plain http.
+  const href = await page.getByRole("link", { name: /export csv/i }).getAttribute("href");
+  const csv = await page.evaluate(async (url) => {
+    const r = await fetch(url);
+    return { type: r.headers.get("content-type"), disposition: r.headers.get("content-disposition"), body: await r.text() };
+  }, href);
+  if (!csv.type?.startsWith("text/csv")) throw new Error(`export is ${csv.type}`);
+  if (!/attachment; filename="class-of-2027-receivers\.csv"/.test(csv.disposition ?? "")) throw new Error(`disposition ${csv.disposition}`);
+  const body = csv.body;
+  if (!body.includes("Jordan Reyes") || !body.includes(note)) throw new Error("export is missing the athlete or the note");
+});
+
 await step("settings: wrong current password is refused, sign out works", async () => {
   await page.goto(`${base}/settings`, { waitUntil: "networkidle" });
   await expectText("recruiter@roster.local");
@@ -557,6 +621,21 @@ await step("reserved handle is refused before submit", async () => {
   await page.getByText("Some words are reserved.").waitFor({ timeout: 10_000 });
   const isDisabled = await page.getByRole("button", { name: /continue/i }).isDisabled();
   if (!isDisabled) throw new Error("Continue should be disabled for a reserved handle");
+});
+
+await step("a recruiter signs up: role choice → short form → search, and lists are theirs", async () => {
+  // The account from the previous step, still at onboarding.
+  await page.goto(`${base}/onboarding`, { waitUntil: "networkidle" });
+  await page.getByText("Recruiter", { exact: true }).click();
+  await page.getByLabel("Your name").fill("Smoke Scout");
+  await page.getByLabel("Program or organization").fill("Smoke State University");
+  await page.locator('input[name="title"]').fill("Recruiting Coordinator");
+  await page.getByRole("button", { name: /start searching/i }).click();
+  await page.waitForURL(/\/search$/, { timeout: 15_000 });
+  await page.locator('section[aria-label="Results"]').getByRole("button", { name: /^save$/i }).first().waitFor({ timeout: 10_000 });
+  // No resume to edit: the editor sends a recruiter to their lists.
+  await page.goto(`${base}/resume`, { waitUntil: "networkidle" });
+  if (!/\/lists$/.test(page.url())) throw new Error(`recruiter at /resume landed on ${page.url()}`);
 });
 
 await step("changing the password signs out every other session", async () => {

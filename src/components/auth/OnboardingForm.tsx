@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 
 import { checkHandle, completeOnboarding, type FormState } from "@/lib/actions/resume";
+import type { OnboardingKind } from "@/lib/actions/schemas";
 import { Field, FieldError, FieldErrors, Select, TextInput } from "@/components/ui/fields";
 import { Corner, CORNER, Verified } from "@/components/ui/marks";
 import { restoreFormValues } from "@/components/ui/restore-form";
@@ -29,6 +30,100 @@ function stepWithError(fieldErrors: FormState["fieldErrors"]): number | null {
   return i === -1 ? null : i;
 }
 
+/** "I am a…" (#52). Athlete first and preselected: the flow every existing link expects. */
+const ROLES: { value: OnboardingKind; label: string; body: string }[] = [
+  { value: "athlete", label: "Athlete", body: "Build a verified resume." },
+  { value: "recruiter", label: "Recruiter", body: "Find and track athletes." },
+  { value: "coach", label: "Coach", body: "Scout, and vouch for your own." },
+];
+
+/**
+ * The account-kind choice, then the form for that kind. Athletes get the
+ * three-step resume setup below; recruiters and coaches a single short
+ * form — they have no resume, so no handle to claim and no sport to pick.
+ */
+export function OnboardingForm() {
+  const [role, setRole] = useState<OnboardingKind>("athlete");
+
+  return (
+    <div className="flex flex-col gap-8">
+      <fieldset className="flex flex-col gap-3">
+        <legend className="label mb-3 text-ink-muted">[ I am a… ]</legend>
+        <div className="grid gap-2 sm:grid-cols-3">
+          {ROLES.map((r) => (
+            <label
+              key={r.value}
+              className="relative flex cursor-pointer flex-col gap-0.5 border border-rule px-4 py-3 transition-colors has-[:checked]:border-ink has-[:focus-visible]:outline has-[:focus-visible]:outline-2"
+            >
+              <input
+                type="radio"
+                name="role"
+                value={r.value}
+                checked={role === r.value}
+                onChange={() => setRole(r.value)}
+                className="peer sr-only"
+              />
+              <span className="font-bold">{r.label}</span>
+              <span className="label text-ink-muted">{r.body}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+
+      {role === "athlete" ? <AthleteOnboarding /> : <MemberOnboarding kind={role} />}
+    </div>
+  );
+}
+
+/**
+ * Recruiters and coaches: name, program, title — one submit. The account
+ * gets a generated handle and a private profile, and lands on search.
+ */
+function MemberOnboarding({ kind }: { kind: Exclude<OnboardingKind, "athlete"> }) {
+  const [state, formAction] = useActionState(completeOnboarding, IDLE);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  useEffect(() => {
+    if (state.error && state.values && formRef.current) restoreFormValues(formRef.current, state.values);
+  }, [state]);
+
+  return (
+    <form ref={formRef} action={formAction} className="flex flex-col gap-8">
+      <input type="hidden" name="account_kind" value={kind} />
+      <h2 className="font-display text-display leading-none tracking-tight">
+        {kind === "coach" ? "Your program" : "Who you scout for"}
+      </h2>
+      <FieldErrors errors={state.fieldErrors}>
+        <div className="flex flex-col gap-6">
+          <Field label="Your name">
+            <TextInput name="display_name" autoComplete="name" required minLength={2} maxLength={80} autoFocus />
+          </Field>
+          <Field label="Program or organization" hint={kind === "coach" ? "“Westlake High School”, “Texas Elite 17U”" : "“University of Oregon”, “NCSA”"}>
+            <TextInput name="school" autoComplete="organization" required minLength={2} maxLength={120} />
+          </Field>
+          <Field label="Title" hint={kind === "coach" ? "“Head Coach”, “Assistant Coach”" : "“Recruiting Coordinator”"}>
+            <TextInput name="title" autoComplete="organization-title" maxLength={80} />
+          </Field>
+        </div>
+      </FieldErrors>
+
+      {state.error && (
+        <p role="alert" className="text-sm text-disputed">
+          {state.error}
+        </p>
+      )}
+
+      <div className="flex items-center justify-end gap-4 border-t border-rule pt-6">
+        <SubmitButton pendingLabel="Setting up…">Start searching</SubmitButton>
+      </div>
+
+      <p className="label flex items-center gap-2 text-ink-subtle">
+        <Corner d={CORNER.bl} /> No public page is created for {kind === "coach" ? "coach" : "recruiter"} accounts. Lists and saved searches are private to you.
+      </p>
+    </form>
+  );
+}
+
 /**
  * Three steps, one form. The steps are progressive disclosure, not separate
  * submissions: everything posts once at the end, so a refresh mid-way loses
@@ -40,7 +135,7 @@ function stepWithError(fieldErrors: FormState["fieldErrors"]): number | null {
  * step's heading; finished steps are buttons back; and a disabled Continue
  * says why, in text it is described by.
  */
-export function OnboardingForm() {
+function AthleteOnboarding() {
   const host = siteHost();
   const [state, formAction] = useActionState(completeOnboarding, IDLE);
   const [step, setStep] = useState(0);
@@ -136,6 +231,7 @@ export function OnboardingForm() {
         advance();
       }}
     >
+      <input type="hidden" name="account_kind" value="athlete" />
       {/* Progress: the numerals, the current one in ink. Finished steps are
           buttons back; steps ahead open only through Continue. */}
       <ol className="flex items-center gap-4" aria-label="Progress">

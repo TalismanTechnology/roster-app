@@ -5,12 +5,12 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import { idSchema } from "./schemas";
-import { failed, formValues, requireUser as requireSession, str } from "./shared";
+import { failed, formValues, requireRecruiter, str } from "./shared";
 
 /**
- * Recruiter lists. Owner-only at the repository; here we only require a
- * session and pass the user through. Forms post from search rows and the
- * list pages, so each action revalidates both.
+ * Recruiter lists. Owner-only at the repository; here we require a session
+ * on a recruiter or coach account (#86) and pass the user through. Forms
+ * post from search rows and the list pages, so each action revalidates both.
  */
 
 export type ListFormState = {
@@ -23,7 +23,7 @@ export type ListFormState = {
 
 const IDLE: ListFormState = { ok: true, error: null };
 
-const requireUser = () => requireSession("/sign-in?next=/lists");
+const requireUser = () => requireRecruiter("/sign-in?next=/lists");
 
 function refresh() {
   revalidatePath("/lists");
@@ -139,4 +139,46 @@ export async function removeFromList(formData: FormData): Promise<void> {
   }
 
   refresh();
+}
+
+/** #86: the recruiter's private note on one athlete in one list. Empty clears it. */
+export async function updateListNote(_prev: ListFormState, formData: FormData): Promise<ListFormState> {
+  const { repo, user } = await requireUser();
+  const listId = idSchema.safeParse(str(formData, "list_id"));
+  const profileId = idSchema.safeParse(str(formData, "profile_id"));
+  const note = noteSchema.safeParse(str(formData, "note"));
+  const values = formValues(formData);
+  if (!listId.success || !profileId.success) return { ok: false, error: "That athlete is not on this list." };
+  if (!note.success) {
+    const fieldErrors = { note: note.error.issues.map((i) => i.message) };
+    return { ok: false, error: fieldErrors.note[0], values, fieldErrors };
+  }
+
+  try {
+    await repo.setListNote(user.id, listId.data, profileId.data, note.data);
+  } catch (error) {
+    return failed(error, "Could not save the note.", values);
+  }
+
+  revalidatePath(`/lists/${listId.data}`);
+  return { ok: true, error: null };
+}
+
+/** #89: move an athlete, note and all, to another of the recruiter's lists. */
+export async function moveToList(formData: FormData): Promise<void> {
+  const { repo, user } = await requireUser();
+  const from = idSchema.safeParse(str(formData, "list_id"));
+  const to = idSchema.safeParse(str(formData, "to_list_id"));
+  const profileId = idSchema.safeParse(str(formData, "profile_id"));
+  if (!from.success || !to.success || !profileId.success) return;
+
+  try {
+    await repo.moveListMember(user.id, from.data, to.data, profileId.data);
+  } catch {
+    // A list deleted or the athlete moved meanwhile; the page shows the truth.
+  }
+
+  refresh();
+  revalidatePath(`/lists/${from.data}`);
+  revalidatePath(`/lists/${to.data}`);
 }

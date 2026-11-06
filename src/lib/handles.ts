@@ -85,3 +85,24 @@ export function handleFromPath(pathname: string): string | null {
   const handle = match[1].toLowerCase();
   return isValidHandle(handle) ? handle : null;
 }
+
+/**
+ * A handle for an account that never chose one — recruiters and coaches
+ * skip the athlete's "claim your handle" step, but `profiles.handle` is
+ * still required. "Casey Morgan" + "k3f9" → "casey_morgan_k3f9": the name
+ * as lowercase words joined by underscores, capped so the suffix always
+ * fits, with a short suffix the caller varies on a collision.
+ */
+export function handleFromName(name: string, suffix: string): string {
+  const base = name
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 20)
+    .replace(/_+$/, "");
+  const tail = suffix.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8) || "0";
+  const handle = `${base || "member"}_${tail}`;
+  return isValidHandle(handle) ? handle : `member_${tail}`;
+}
