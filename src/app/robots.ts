@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 
-import { env } from "@/lib/env";
+import { siteUrl } from "@/lib/site";
 
 /**
  * The site is public and meant to be found; only the surfaces that belong
@@ -17,8 +17,4 @@ export default function robots(): MetadataRoute.Robots {
     },
     sitemap: `${siteUrl()}/sitemap.xml`,
   };
-}
-
-export function siteUrl(): string {
-  return env().NEXT_PUBLIC_SITE_URL ?? "https://roster.us";
 }

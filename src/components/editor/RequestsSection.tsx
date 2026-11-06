@@ -2,6 +2,7 @@ import type { CoachContact, RecordEntry, VerificationState } from "@/lib/databas
 import type { VerificationRequest } from "@/lib/data/types";
 import { VerificationMark } from "@/components/record/VerificationMark";
 import { fullDate } from "@/lib/format";
+import { verifyUrl } from "@/lib/site";
 
 import { CopyButton } from "./CopyButton";
 import { EditorSection } from "./ProfileSections";
@@ -62,7 +63,7 @@ export function RequestsSection({
                   )}
                 </div>
                 <div className="flex items-center gap-3">
-                  {r.status === "pending" && <CopyButton value={`/verify/${r.token}`} label="Copy link" className="btn-row" />}
+                  {r.status === "pending" && <CopyButton value={verifyUrl(r.token)} label="Copy link" className="btn-row" />}
                   <VerificationMark state={state} />
                 </div>
               </li>

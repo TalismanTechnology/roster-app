@@ -16,12 +16,22 @@ import {
   type RecruiterList,
   type RecruiterListDetail,
   type SearchParams,
+  type SearchResult,
   type VerificationRequest,
   type VerificationRequestDetail,
+  type VerificationResponse,
 } from "../types";
+import {
+  canPinAnother,
+  canRespondToRequest,
+  canSeeCoachContact,
+  canViewProfile,
+  isSubstantiveEntryChange,
+  MAX_PINNED,
+  SUBSTANTIVE_ENTRY_FIELDS,
+} from "../rules";
 import { parseFilmUrl } from "./film";
-import { hashPassword, verifyPassword } from "./password";
-import { canRespondToRequest, canSeeCoachContact, canViewProfile } from "./rules";
+import { hashPassword, verifyPassword, verifyPasswordConstantTime } from "./password";
 import { searchProfiles } from "./search";
 import { mutate, readDb, type AchievementRow, type Db, type RecruiterListRow } from "./store";
 
@@ -62,7 +72,8 @@ export class LocalRepository implements Repository {
   async signIn(email: string, password: string): Promise<AuthUser | null> {
     const normalized = email.trim().toLowerCase();
     const user = readDb().users.find((u) => u.email === normalized);
-    if (!user || !verifyPassword(password, user.password_hash)) return null;
+    // One scrypt run whether or not the account exists — see dummyPasswordHash.
+    if (!verifyPasswordConstantTime(password, user?.password_hash) || !user) return null;
     return { id: user.id, email: user.email };
   }
 
@@ -73,7 +84,7 @@ export class LocalRepository implements Repository {
 
   async updateEmail(userId: string, email: string): Promise<void> {
     const normalized = email.trim().toLowerCase();
-    mutate((db) => {
+    await mutate((db) => {
       if (db.users.some((u) => u.email === normalized && u.id !== userId)) {
         throw new DataError("conflict", "That email is already in use.");
       }
@@ -83,7 +94,7 @@ export class LocalRepository implements Repository {
   }
 
   async updatePassword(userId: string, current: string, next: string): Promise<void> {
-    mutate((db) => {
+    await mutate((db) => {
       const user = requireUser(db, userId);
       if (!verifyPassword(current, user.password_hash)) {
         throw new DataError("forbidden", "Your current password did not match.");
@@ -93,7 +104,7 @@ export class LocalRepository implements Repository {
   }
 
   async deleteAccount(userId: string): Promise<void> {
-    mutate((db) => {
+    await mutate((db) => {
       const mine = new Set(db.achievements.filter((a) => a.profile_id === userId).map((a) => a.id));
       db.users = db.users.filter((u) => u.id !== userId);
       db.profiles = db.profiles.filter((p) => p.id !== userId);
@@ -209,13 +220,25 @@ export class LocalRepository implements Repository {
   async updateEntry(profileId: string, entryId: string, patch: Partial<NewEntry>): Promise<RecordEntry> {
     return mutate((db) => {
       const row = requireOwned(db.achievements, entryId, profileId, "entry");
-      Object.assign(row, patch, { updated_at: now() });
+      const isSubstantive = isSubstantiveEntryChange(row, patch);
+      Object.assign(row, pickEntryFields(patch), { updated_at: now() });
+
+      if (isSubstantive) {
+        // The coach vouched for the old values. The badge, its date, and any
+        // link still waiting on an answer all describe a claim that no
+        // longer exists. `verified_by` is derived from `verification`, so it
+        // clears with it.
+        row.verification = "unverified";
+        row.verified_at = null;
+        expirePendingRequests(db, row.id);
+        syncCounts(db, profileId);
+      }
       return toEntry(db, row);
     });
   }
 
   async deleteEntry(profileId: string, entryId: string): Promise<void> {
-    mutate((db) => {
+    await mutate((db) => {
       requireOwned(db.achievements, entryId, profileId, "entry");
       db.achievements = db.achievements.filter((a) => a.id !== entryId);
       db.evidence = db.evidence.filter((e) => e.achievement_id !== entryId);
@@ -226,8 +249,11 @@ export class LocalRepository implements Repository {
   }
 
   async setPinned(profileId: string, entryId: string, isPinned: boolean): Promise<void> {
-    mutate((db) => {
+    await mutate((db) => {
       const row = requireOwned(db.achievements, entryId, profileId, "entry");
+      if (isPinned && !row.is_pinned && !canPinAnother(db.achievements.filter((a) => a.profile_id === profileId))) {
+        throw new DataError("invalid", `You can pin up to ${MAX_PINNED} entries. Unpin one first.`);
+      }
       row.is_pinned = isPinned;
       row.updated_at = now();
     });
@@ -276,14 +302,14 @@ export class LocalRepository implements Repository {
   }
 
   async deleteFilm(profileId: string, clipId: string): Promise<void> {
-    mutate((db) => {
+    await mutate((db) => {
       requireOwned(db.film_clips, clipId, profileId, "clip");
       db.film_clips = db.film_clips.filter((f) => f.id !== clipId);
     });
   }
 
   async featureFilm(profileId: string, clipId: string): Promise<void> {
-    mutate((db) => {
+    await mutate((db) => {
       requireOwned(db.film_clips, clipId, profileId, "clip");
       for (const clip of db.film_clips) {
         if (clip.profile_id !== profileId) continue;
@@ -330,7 +356,7 @@ export class LocalRepository implements Repository {
   }
 
   async deleteCoach(profileId: string, coachId: string): Promise<void> {
-    mutate((db) => {
+    await mutate((db) => {
       requireOwned(db.coach_contacts, coachId, profileId, "reference");
       db.coach_contacts = db.coach_contacts.filter((c) => c.id !== coachId);
     });
@@ -348,9 +374,7 @@ export class LocalRepository implements Repository {
       requireOwned(db.coach_contacts, coachContactId, profileId, "reference");
 
       // One live request per entry; re-requesting supersedes the old link.
-      for (const r of db.verification_requests) {
-        if (r.achievement_id === achievementId && r.status === "pending") r.status = "expired";
-      }
+      expirePendingRequests(db, achievementId);
 
       const request: VerificationRequest = {
         id: randomUUID(),
@@ -390,8 +414,8 @@ export class LocalRepository implements Repository {
     note: string | null,
     verifier: { name: string; role: string | null },
     responderUserId: string | null,
-  ): Promise<void> {
-    mutate((db) => {
+  ): Promise<VerificationResponse> {
+    return mutate((db) => {
       const request = db.verification_requests.find((r) => r.token === token);
       if (!request) throw new DataError("not_found", "That verification link is not valid.");
 
@@ -433,6 +457,8 @@ export class LocalRepository implements Repository {
       request.responded_at = at;
 
       syncCounts(db, entry.profile_id);
+      const athlete = requireProfile(db, entry.profile_id);
+      return { handle: athlete.handle, outcome };
     });
   }
 
@@ -445,13 +471,15 @@ export class LocalRepository implements Repository {
   // --- signals ------------------------------------------------------------
 
   async recordView(profileId: string, viewerId: string | null): Promise<void> {
-    const db = readDb();
     if (viewerId === profileId) return;
-    const target = db.profiles.find((p) => p.id === profileId);
-    const viewer = viewerId ? db.profiles.find((p) => p.id === viewerId) : null;
-    if (!canViewProfile(target, viewerId, viewer)) return;
 
-    mutate((d) => {
+    // The visibility check and the increment share one locked snapshot, so
+    // a resume going private mid-request is never counted against.
+    await mutate((d) => {
+      const target = d.profiles.find((p) => p.id === profileId);
+      const viewer = viewerId ? d.profiles.find((p) => p.id === viewerId) : null;
+      if (!canViewProfile(target, viewerId, viewer)) return;
+
       const day = today();
       const existing = d.profile_views.find(
         (v) => v.profile_id === profileId && v.viewer_id === viewerId && v.viewed_on === day,
@@ -470,7 +498,7 @@ export class LocalRepository implements Repository {
 
   // --- discovery ----------------------------------------------------------
 
-  async searchAthletes(params: SearchParams): Promise<Profile[]> {
+  async searchAthletes(params: SearchParams): Promise<SearchResult> {
     return searchProfiles(readDb().profiles, params);
   }
 
@@ -523,7 +551,7 @@ export class LocalRepository implements Repository {
   }
 
   async deleteList(ownerId: string, listId: string): Promise<void> {
-    mutate((db) => {
+    await mutate((db) => {
       requireList(db, ownerId, listId);
       db.recruiter_lists = db.recruiter_lists.filter((l) => l.id !== listId);
       db.recruiter_list_members = db.recruiter_list_members.filter((m) => m.list_id !== listId);
@@ -531,7 +559,7 @@ export class LocalRepository implements Repository {
   }
 
   async addToList(ownerId: string, listId: string, profileId: string, note: string | null): Promise<void> {
-    mutate((db) => {
+    await mutate((db) => {
       const list = requireList(db, ownerId, listId);
       const target = db.profiles.find((p) => p.id === profileId);
       const owner = db.profiles.find((p) => p.id === ownerId) ?? null;
@@ -545,7 +573,7 @@ export class LocalRepository implements Repository {
   }
 
   async removeFromList(ownerId: string, listId: string, profileId: string): Promise<void> {
-    mutate((db) => {
+    await mutate((db) => {
       const list = requireList(db, ownerId, listId);
       db.recruiter_list_members = db.recruiter_list_members.filter(
         (m) => !(m.list_id === listId && m.profile_id === profileId),
@@ -560,6 +588,16 @@ export class LocalRepository implements Repository {
     return db.recruiter_list_members
       .filter((m) => m.profile_id === profileId && mine.has(m.list_id))
       .map((m) => m.list_id);
+  }
+
+  async listsContainingMany(ownerId: string, profileIds: string[]): Promise<Record<string, string[]>> {
+    const db = readDb();
+    const mine = new Set(db.recruiter_lists.filter((l) => l.owner_id === ownerId).map((l) => l.id));
+    const out: Record<string, string[]> = Object.fromEntries(profileIds.map((id) => [id, []]));
+    for (const m of db.recruiter_list_members) {
+      if (mine.has(m.list_id) && m.profile_id in out) out[m.profile_id].push(m.list_id);
+    }
+    return out;
   }
 }
 
@@ -652,6 +690,18 @@ export function syncCounts(db: Db, profileId: string): void {
   const mine = db.achievements.filter((a) => a.profile_id === profileId);
   profile.entry_count = mine.length;
   profile.verified_count = mine.filter((a) => a.verification === "verified").length;
+}
+
+/** Only the `NewEntry` columns — a direct POST must not smuggle in `verification`. */
+function pickEntryFields(patch: Partial<NewEntry>): Partial<NewEntry> {
+  return Object.fromEntries(SUBSTANTIVE_ENTRY_FIELDS.filter((f) => patch[f] !== undefined).map((f) => [f, patch[f]]));
+}
+
+/** Supersedes every link still waiting on an answer for this entry. */
+function expirePendingRequests(db: Db, achievementId: string): void {
+  for (const r of db.verification_requests) {
+    if (r.achievement_id === achievementId && r.status === "pending") r.status = "expired";
+  }
 }
 
 function requireUser(db: Db, userId: string) {

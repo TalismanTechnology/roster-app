@@ -3,19 +3,20 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { homePathFor } from "@/lib/accounts";
 import { signOut } from "@/lib/actions/auth";
 import { ArrowUpRight } from "@/components/ui/marks";
 
-/** Where the one filled button goes: an athlete to their resume, a
- *  recruiter to their lists, anyone unfinished to onboarding. */
+/** Where the one filled button goes: an athlete to their resume, every
+ *  other account kind to their lists, anyone unfinished to onboarding. */
 function primaryHref(user: NonNullable<HeaderUser>): string {
   if (!user.handle) return "/onboarding";
-  return user.accountKind === "recruiter" ? "/lists" : "/resume";
+  return homePathFor(user.accountKind);
 }
 
 function primaryLabel(user: NonNullable<HeaderUser>): string {
   if (!user.handle) return "Finish setup";
-  return user.accountKind === "recruiter" ? "Your lists" : "Your resume";
+  return homePathFor(user.accountKind) === "/lists" ? "Your lists" : "Your resume";
 }
 
 export type HeaderUser = {

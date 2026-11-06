@@ -6,7 +6,7 @@ import { z } from "zod";
 import { getRepository } from "@/lib/data";
 import { getCurrentUser } from "@/lib/data/auth";
 
-import { failed, str } from "./shared";
+import { failed, formValues, str, type FormValues } from "./shared";
 
 /**
  * A coach's answer to a verification request. No account required: the
@@ -14,7 +14,13 @@ import { failed, str } from "./shared";
  * athlete's own session, a used link, and an expired one.
  */
 
-export type VerifyFormState = { ok: boolean; error: string | null; outcome?: "verified" | "disputed" };
+export type VerifyFormState = {
+  ok: boolean;
+  error: string | null;
+  outcome?: "verified" | "disputed";
+  /** The coach's name, role, and note, put back after a failure. */
+  values?: FormValues;
+};
 
 const schema = z.object({
   token: z.string().min(10),
@@ -41,23 +47,22 @@ export async function respondVerification(_prev: VerifyFormState, formData: Form
     note: str(formData, "note"),
   });
 
-  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message, values: formValues(formData) };
 
   const [repo, user] = await Promise.all([getRepository(), getCurrentUser()]);
   const { token, outcome, name, role, note } = parsed.data;
 
   try {
-    const request = await repo.getVerificationRequest(token);
-    await repo.respondToVerification(token, outcome, note, { name, role }, user?.id ?? null);
+    const { handle } = await repo.respondToVerification(token, outcome, note, { name, role }, user?.id ?? null);
 
-    // The athlete's surfaces update now. The coach's own page is deliberately
-    // not revalidated: doing so re-renders it as "already answered" and
-    // unmounts the form before the thank-you shows. A fresh visit still sees
-    // the answered state.
+    // The athlete's surfaces update now: the editor and the public resume
+    // whose badge just changed. The coach's page re-renders too, as
+    // "answered" — VerifyForm keeps this action's result across that
+    // refresh, so the thank-you comes from what happened, not a clock.
     revalidatePath("/resume");
-    if (request) revalidatePath(`/${request.athlete.handle}`);
+    revalidatePath(`/${handle}`);
   } catch (error) {
-    return failed(error, "Could not record your answer. Try again.");
+    return failed(error, "Could not record your answer. Try again.", formValues(formData));
   }
 
   return { ok: true, error: null, outcome };

@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { signOutEverywhere } from "@/lib/data/auth";
 
-import { failed, requireUser as requireSession, str } from "./shared";
+import { failed, formValues, requireUser as requireSession, str, type FormValues } from "./shared";
 
 /**
  * Account settings: the sign-in email, the password, and deletion. Each
@@ -13,7 +13,8 @@ import { failed, requireUser as requireSession, str } from "./shared";
  * the rest (uniqueness, current-password check, the cascade on delete).
  */
 
-export type AccountFormState = { ok: boolean; error: string | null };
+/** `values` carries non-secret fields back after a failure; passwords never return. */
+export type AccountFormState = { ok: boolean; error: string | null; values?: FormValues };
 
 const IDLE: AccountFormState = { ok: true, error: null };
 
@@ -22,12 +23,12 @@ const requireUser = () => requireSession("/sign-in?next=/settings");
 export async function updateEmail(_prev: AccountFormState, formData: FormData): Promise<AccountFormState> {
   const { repo, user } = await requireUser();
   const parsed = z.string().trim().email("Enter a valid email address.").safeParse(str(formData, "email"));
-  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message, values: formValues(formData) };
 
   try {
     await repo.updateEmail(user.id, parsed.data);
   } catch (error) {
-    return failed(error, "Could not update your email.");
+    return failed(error, "Could not update your email.", formValues(formData));
   }
   return IDLE;
 }
@@ -65,13 +66,13 @@ export async function deleteAccount(_prev: AccountFormState, formData: FormData)
   const typed = str(formData, "confirm_handle").trim().toLowerCase();
 
   if (typed !== expected.toLowerCase()) {
-    return { ok: false, error: `Type ${expected} to confirm.` };
+    return { ok: false, error: `Type ${expected} to confirm.`, values: formValues(formData) };
   }
 
   try {
     await repo.deleteAccount(user.id);
   } catch (error) {
-    return failed(error, "Could not delete the account.");
+    return failed(error, "Could not delete the account.", formValues(formData));
   }
 
   await signOutEverywhere();

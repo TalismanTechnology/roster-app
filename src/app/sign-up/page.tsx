@@ -6,14 +6,18 @@ import { AuthForm } from "@/components/auth/AuthForm";
 import { AuthLayout } from "@/components/auth/AuthLayout";
 import { signUp } from "@/lib/actions/auth";
 import { getCurrentUser } from "@/lib/data/auth";
+import { safeNext, signInHref } from "@/lib/safe-next";
 
 export const metadata: Metadata = {
   title: "Create your resume",
   robots: { index: false, follow: false },
 };
 
-export default async function SignUpPage() {
-  if (await getCurrentUser()) redirect("/resume");
+export default async function SignUpPage({ searchParams }: PageProps<"/sign-up">) {
+  const params = await searchParams;
+  const next = safeNext(params.next, "") || undefined;
+
+  if (await getCurrentUser()) redirect(next ?? "/resume");
 
   return (
     <AuthLayout
@@ -28,13 +32,13 @@ export default async function SignUpPage() {
       below={
         <>
           Already on Roster?{" "}
-          <Link href="/sign-in" className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+          <Link href={signInHref(next)} className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
             Sign in
           </Link>
         </>
       }
     >
-      <AuthForm action={signUp} submitLabel="Create account" />
+      <AuthForm action={signUp} submitLabel="Create account" next={next} />
     </AuthLayout>
   );
 }

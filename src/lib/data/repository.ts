@@ -9,8 +9,10 @@ import type {
   RecruiterList,
   RecruiterListDetail,
   SearchParams,
+  SearchResult,
   VerificationRequest,
   VerificationRequestDetail,
+  VerificationResponse,
 } from "./types";
 
 /**
@@ -52,8 +54,14 @@ export interface Repository {
   // --- the record ---------------------------------------------------------
   listEntries(profileId: string): Promise<RecordEntry[]>;
   addEntry(profileId: string, input: NewEntry): Promise<RecordEntry>;
+  /**
+   * Changing what the entry claims (see `SUBSTANTIVE_ENTRY_FIELDS`) drops it
+   * back to unverified and expires any pending request: a coach vouched for
+   * the old values, not the new ones.
+   */
   updateEntry(profileId: string, entryId: string, patch: Partial<NewEntry>): Promise<RecordEntry>;
   deleteEntry(profileId: string, entryId: string): Promise<void>;
+  /** Throws `invalid` when pinning would exceed `MAX_PINNED`. */
   setPinned(profileId: string, entryId: string, isPinned: boolean): Promise<void>;
 
   // --- film ---------------------------------------------------------------
@@ -82,7 +90,7 @@ export interface Repository {
     note: string | null,
     verifier: { name: string; role: string | null },
     responderUserId: string | null,
-  ): Promise<void>;
+  ): Promise<VerificationResponse>;
   listVerificationRequests(profileId: string): Promise<VerificationRequest[]>;
 
   // --- signals ------------------------------------------------------------
@@ -90,7 +98,8 @@ export interface Repository {
   weeklyViews(profileId: string): Promise<number>;
 
   // --- discovery ----------------------------------------------------------
-  searchAthletes(params: SearchParams): Promise<Profile[]>;
+  /** Listed athletes only. The query is normalized and the page clamped here. */
+  searchAthletes(params: SearchParams): Promise<SearchResult>;
 
   // --- recruiter lists ----------------------------------------------------
   listLists(ownerId: string): Promise<RecruiterList[]>;
@@ -101,4 +110,6 @@ export interface Repository {
   removeFromList(ownerId: string, listId: string, profileId: string): Promise<void>;
   /** Which of the owner's lists already hold this athlete. */
   listsContaining(ownerId: string, profileId: string): Promise<string[]>;
+  /** `listsContaining` for a page of athletes in one read: profile id → list ids. */
+  listsContainingMany(ownerId: string, profileIds: string[]): Promise<Record<string, string[]>>;
 }

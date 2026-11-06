@@ -11,8 +11,11 @@ import { ShareBar } from "@/components/record/ShareBar";
 import { Site } from "@/components/shell/Site";
 import { Corner, CORNER } from "@/components/ui/marks";
 import { getRepository } from "@/lib/data";
+import { homePathFor } from "@/lib/accounts";
 import { getCurrentUser } from "@/lib/data/auth";
 import type { VerificationRequest } from "@/lib/data/types";
+import { signInHref } from "@/lib/safe-next";
+import { siteHost } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Edit your resume",
@@ -41,15 +44,16 @@ const SECTION_IDS = new Set<string>(SECTIONS.map((s) => s.id));
  */
 export default async function ResumeEditorPage({ searchParams }: PageProps<"/resume">) {
   const user = await getCurrentUser();
-  if (!user) redirect("/sign-in");
+  if (!user) redirect(signInHref("/resume"));
 
   const repo = await getRepository();
   const profile = await repo.getProfileById(user.id);
 
   // Signed in but no profile yet: onboarding was abandoned partway.
   if (!profile) redirect("/onboarding");
-  // A recruiter has no resume to edit; their workspace is their lists.
-  if (profile.account_kind === "recruiter") redirect("/lists");
+  // Only athletes have a resume to edit; recruiters, coaches, brands, and
+  // staff work from their lists.
+  if (profile.account_kind !== "athlete") redirect(homePathFor(profile.account_kind));
 
   const [entries, film, coaches, publicCoaches, requests, weekViews, params] = await Promise.all([
     repo.listEntries(profile.id),
@@ -80,7 +84,9 @@ export default async function ResumeEditorPage({ searchParams }: PageProps<"/res
                 <span className={profile.visibility === "public" ? "font-bold text-ink" : "font-bold text-pending"}>{visibility}</span>
               </p>
               <p className="font-display mt-1 truncate text-display-sm">{profile.display_name}</p>
-              <p className="truncate text-sm text-ink-muted">roster.us/{profile.handle}</p>
+              <p className="truncate text-sm text-ink-muted">
+                {siteHost()}/{profile.handle}
+              </p>
             </div>
 
             <dl className="flex gap-8">

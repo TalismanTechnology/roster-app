@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import type { CoachContact, Profile } from "@/lib/database.types";
 
 import { newProfile } from "../local/repository";
-import { canRespondToRequest, canSeeCoachContact, canViewProfile, isListed } from "../local/rules";
+import { canRespondToRequest, canSeeCoachContact, canViewProfile, isListed } from "../rules";
 import type { VerificationRequest } from "../types";
 
 function profile(over: Partial<Profile> = {}): Profile {

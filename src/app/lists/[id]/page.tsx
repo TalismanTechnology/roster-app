@@ -5,9 +5,11 @@ import { notFound, redirect } from "next/navigation";
 import { Site } from "@/components/shell/Site";
 import { Corner, CORNER, Verified } from "@/components/ui/marks";
 import { deleteList, removeFromList } from "@/lib/actions/lists";
+import { idSchema } from "@/lib/actions/schemas";
 import { getRepository } from "@/lib/data";
 import { getCurrentUser } from "@/lib/data/auth";
 import { fullDate, levelLabel } from "@/lib/format";
+import { signInHref } from "@/lib/safe-next";
 import { sportName } from "@/lib/sports";
 
 export const metadata: Metadata = {
@@ -19,7 +21,8 @@ export const metadata: Metadata = {
 export default async function ListPage({ params }: PageProps<"/lists/[id]">) {
   const { id } = await params;
   const user = await getCurrentUser();
-  if (!user) redirect("/sign-in?next=/lists");
+  if (!user) redirect(signInHref(`/lists/${id}`));
+  if (!idSchema.safeParse(id).success) notFound();
 
   const repo = await getRepository();
   const detail = await repo.getList(user.id, id);

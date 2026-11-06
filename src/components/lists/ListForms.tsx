@@ -14,10 +14,10 @@ export function CreateListForm() {
     <form action={formAction} className="flex flex-col gap-5">
       <div className="grid gap-5 sm:grid-cols-2">
         <Field label="Name" hint="“Class of 2027 receivers”, “Spring visits”">
-          <TextInput name="name" required minLength={2} maxLength={60} />
+          <TextInput name="name" defaultValue={state.values?.name} required minLength={2} maxLength={60} />
         </Field>
         <Field label="Note">
-          <TextInput name="note" maxLength={300} placeholder="Optional" />
+          <TextInput name="note" defaultValue={state.values?.note} maxLength={300} placeholder="Optional" />
         </Field>
       </div>
       <div className="flex items-center gap-4">

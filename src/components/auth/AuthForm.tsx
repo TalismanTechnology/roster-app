@@ -15,12 +15,15 @@ export function AuthForm({
   action,
   submitLabel,
   next,
+  initialError = null,
 }: {
   action: (prev: AuthFormState, formData: FormData) => Promise<AuthFormState>;
   submitLabel: string;
   next?: string;
+  /** A message the page arrived with — e.g. a confirmation link that failed. */
+  initialError?: string | null;
 }) {
-  const [state, formAction] = useActionState(action, { error: null });
+  const [state, formAction] = useActionState(action, { error: initialError });
   const isSignUp = /create/i.test(submitLabel);
 
   if (state.confirmEmail) {
@@ -39,7 +42,9 @@ export function AuthForm({
       {next && <input type="hidden" name="next" value={next} />}
 
       <Field label="Email">
-        <TextInput name="email" type="email" autoComplete="email" required autoFocus />
+        {/* defaultValue from the last attempt: React resets the form after the
+            action, and retyping an email to fix a password is a small insult. */}
+        <TextInput name="email" type="email" autoComplete="email" defaultValue={state.email} required autoFocus />
       </Field>
 
       <Field label="Password" hint={isSignUp ? "At least 8 characters." : undefined}>

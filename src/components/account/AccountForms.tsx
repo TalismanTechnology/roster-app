@@ -13,7 +13,7 @@ export function EmailForm({ email }: { email: string }) {
   return (
     <form action={formAction} className="flex flex-col gap-5">
       <Field label="Sign-in email" hint="Not shown on your resume. Recruiters see the contact email you set in the editor.">
-        <TextInput name="email" type="email" defaultValue={email} required autoComplete="email" />
+        <TextInput name="email" type="email" defaultValue={state.values?.email ?? email} required autoComplete="email" />
       </Field>
       <div className="flex items-center gap-4">
         <SubmitButton className="btn-outline">Update email</SubmitButton>
@@ -51,7 +51,7 @@ export function DeleteForm({ confirmWith }: { confirmWith: string }) {
   return (
     <form action={formAction} className="flex flex-col gap-5">
       <Field label={`Type ${confirmWith} to confirm`} hint="Deletes your account, your resume, and everything on it. There is no undo.">
-        <TextInput name="confirm_handle" required autoComplete="off" autoCapitalize="none" spellCheck={false} />
+        <TextInput name="confirm_handle" defaultValue={state.values?.confirm_handle} required autoComplete="off" autoCapitalize="none" spellCheck={false} />
       </Field>
       <div className="flex items-center gap-4">
         <SubmitButton className="btn-outline border-disputed text-disputed hover:border-disputed hover:bg-disputed hover:text-white" pendingLabel="Deleting…">

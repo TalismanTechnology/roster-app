@@ -5,11 +5,13 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import { getRepository } from "@/lib/data";
-import type { AchievementKind, AthleteLevel, ProfileVisibility } from "@/lib/database.types";
-import { KIND_OPTIONS, LEVEL_OPTIONS } from "@/lib/format";
+import type { AthleteLevel, ProfileVisibility } from "@/lib/database.types";
+import { LEVEL_OPTIONS } from "@/lib/format";
 import { isReservedHandle, HANDLE_PATTERN } from "@/lib/handles";
+import { toStateCode } from "@/lib/regions";
 
-import { failed, requireUser, str } from "./shared";
+import { achievementSchema, httpUrl, idSchema, optionalNumber, optionalText } from "./schemas";
+import { failed, formValues, requireUser, str, type FormValues } from "./shared";
 
 /**
  * Every write behind the resume editor.
@@ -24,29 +26,16 @@ import { failed, requireUser, str } from "./shared";
 export type FormState = {
   ok: boolean;
   error: string | null;
+  /** On failure, what was submitted — the form puts it back. */
+  values?: FormValues;
 };
 
 const IDLE: FormState = { ok: true, error: null };
 
-function firstIssue(error: z.ZodError): string {
-  return error.issues[0].message;
+/** A validation failure, carrying the submitted fields back to the form. */
+function invalid(error: z.ZodError, formData: FormData): FormState {
+  return { ok: false, error: error.issues[0].message, values: formValues(formData) };
 }
-
-/** "" → null, so an emptied optional field clears the column instead of
- *  writing an empty string that renders as a blank line forever after. */
-const optionalText = z
-  .string()
-  .trim()
-  .transform((value) => (value === "" ? null : value));
-
-const optionalNumber = (schema: z.ZodNumber) =>
-  z
-    .string()
-    .trim()
-    .transform((value) => (value === "" ? null : Number(value)))
-    .pipe(schema.nullable());
-
-const uuidField = z.string().min(1);
 
 // ---------------------------------------------------------------------------
 // Onboarding — the one insert into profiles
@@ -81,14 +70,12 @@ export async function completeOnboarding(_prev: FormState, formData: FormData): 
     visibility: str(formData, "visibility") || "public",
   });
 
-  if (!parsed.success) {
-    return { ok: false, error: firstIssue(parsed.error) };
-  }
+  if (!parsed.success) return invalid(parsed.error, formData);
 
   try {
     await repo.createProfile({ id: user.id, ...parsed.data });
   } catch (error) {
-    return failed(error, "Could not create your resume. Try again.");
+    return failed(error, "Could not create your resume. Try again.", formValues(formData));
   }
 
   redirect("/resume");
@@ -111,7 +98,14 @@ const identitySchema = z.object({
   bio: optionalText.pipe(z.string().max(500).nullable()),
   location: optionalText,
   region: optionalText.pipe(
-    z.string().length(2, "State is the two-letter code, e.g. MI.").toUpperCase().nullable(),
+    z
+      .string()
+      .transform((code, ctx) => {
+        const state = toStateCode(code);
+        if (!state) ctx.addIssue({ code: "custom", message: "Pick a state from the list." });
+        return state ?? z.NEVER;
+      })
+      .nullable(),
   ),
   school: optionalText.pipe(z.string().max(120).nullable()),
   primary_sport: optionalText,
@@ -149,12 +143,12 @@ export async function updateIdentity(_prev: FormState, formData: FormData): Prom
     weight_kg: str(formData, "weight_kg"),
   });
 
-  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
+  if (!parsed.success) return invalid(parsed.error, formData);
 
   try {
     await repo.updateProfile(user.id, parsed.data);
   } catch (error) {
-    return failed(error, "Could not save. Try again.");
+    return failed(error, "Could not save. Try again.", formValues(formData));
   }
 
   revalidatePath("/resume");
@@ -178,12 +172,12 @@ export async function updateAcademics(_prev: FormState, formData: FormData): Pro
     ncaa_id: str(formData, "ncaa_id"),
   });
 
-  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
+  if (!parsed.success) return invalid(parsed.error, formData);
 
   try {
     await repo.updateProfile(user.id, parsed.data);
   } catch (error) {
-    return failed(error, "Could not save. Try again.");
+    return failed(error, "Could not save. Try again.", formValues(formData));
   }
 
   revalidatePath("/resume");
@@ -193,10 +187,10 @@ export async function updateAcademics(_prev: FormState, formData: FormData): Pro
 const contactSchema = z.object({
   contact_email: optionalText.pipe(z.string().email("Enter a valid email.").nullable()),
   phone: optionalText.pipe(z.string().max(25).nullable()),
-  instagram: optionalText,
-  x_handle: optionalText,
-  hudl_url: optionalText.pipe(z.string().url("Enter a full URL.").nullable()),
-  results_url: optionalText.pipe(z.string().url("Enter a full URL.").nullable()),
+  instagram: optionalText.pipe(z.string().max(60).nullable()),
+  x_handle: optionalText.pipe(z.string().max(60).nullable()),
+  hudl_url: optionalText.pipe(httpUrl.nullable()),
+  results_url: optionalText.pipe(httpUrl.nullable()),
 });
 
 export async function updateContact(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -211,12 +205,12 @@ export async function updateContact(_prev: FormState, formData: FormData): Promi
     results_url: str(formData, "results_url"),
   });
 
-  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
+  if (!parsed.success) return invalid(parsed.error, formData);
 
   try {
     await repo.updateProfile(user.id, parsed.data);
   } catch (error) {
-    return failed(error, "Could not save. Try again.");
+    return failed(error, "Could not save. Try again.", formValues(formData));
   }
 
   revalidatePath("/resume");
@@ -236,12 +230,12 @@ export async function updateVisibility(_prev: FormState, formData: FormData): Pr
     is_recruitable: str(formData, "is_recruitable") === "on",
   });
 
-  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
+  if (!parsed.success) return invalid(parsed.error, formData);
 
   try {
     await repo.updateProfile(user.id, parsed.data);
   } catch (error) {
-    return failed(error, "Could not save. Try again.");
+    return failed(error, "Could not save. Try again.", formValues(formData));
   }
 
   revalidatePath("/resume");
@@ -252,20 +246,8 @@ export async function updateVisibility(_prev: FormState, formData: FormData): Pr
 // The record
 // ---------------------------------------------------------------------------
 
-const KINDS = KIND_OPTIONS.map(([value]) => value);
-
-const achievementSchema = z.object({
-  kind: z.enum(KINDS as [AchievementKind, ...AchievementKind[]]),
-  title: z.string().trim().min(3, "Give the entry a title.").max(120),
-  detail: optionalText.pipe(z.string().max(500).nullable()),
-  value_display: optionalText.pipe(z.string().max(20).nullable()),
-  competition: optionalText.pipe(z.string().max(120).nullable()),
-  location: optionalText.pipe(z.string().max(120).nullable()),
-  placement: optionalNumber(z.number().int().min(1).max(10000)),
-  field_size: optionalNumber(z.number().int().min(1).max(100000)),
-  achieved_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick the date it happened."),
-});
-
+// The schema (with its date ≤ today and placement ≤ field rules) lives in
+// ./schemas so the unit tests run exactly what this enforces.
 function readAchievement(formData: FormData) {
   return achievementSchema.safeParse({
     kind: str(formData, "kind"),
@@ -283,12 +265,12 @@ function readAchievement(formData: FormData) {
 export async function addAchievement(_prev: FormState, formData: FormData): Promise<FormState> {
   const { repo, user } = await requireUser();
   const parsed = readAchievement(formData);
-  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
+  if (!parsed.success) return invalid(parsed.error, formData);
 
   try {
     await repo.addEntry(user.id, parsed.data);
   } catch (error) {
-    return failed(error, "Could not add the entry. Try again.");
+    return failed(error, "Could not add the entry. Try again.", formValues(formData));
   }
 
   revalidatePath("/resume");
@@ -297,15 +279,17 @@ export async function addAchievement(_prev: FormState, formData: FormData): Prom
 
 export async function updateAchievement(_prev: FormState, formData: FormData): Promise<FormState> {
   const { repo, user } = await requireUser();
-  const id = uuidField.safeParse(str(formData, "id"));
+  const id = idSchema.safeParse(str(formData, "id"));
   const parsed = readAchievement(formData);
   if (!id.success) return { ok: false, error: "That entry was not found." };
-  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
+  if (!parsed.success) return invalid(parsed.error, formData);
 
   try {
+    // Changing the mark, date, or any other claim clears a verified badge
+    // and expires pending links — the repository enforces it.
     await repo.updateEntry(user.id, id.data, parsed.data);
   } catch (error) {
-    return failed(error, "Could not save the entry. Try again.");
+    return failed(error, "Could not save the entry. Try again.", formValues(formData));
   }
 
   revalidatePath("/resume");
@@ -314,7 +298,7 @@ export async function updateAchievement(_prev: FormState, formData: FormData): P
 
 export async function deleteAchievement(formData: FormData): Promise<void> {
   const { repo, user } = await requireUser();
-  const id = uuidField.safeParse(str(formData, "id"));
+  const id = idSchema.safeParse(str(formData, "id"));
   if (!id.success) return;
 
   try {
@@ -328,13 +312,19 @@ export async function deleteAchievement(formData: FormData): Promise<void> {
 
 export async function togglePinned(formData: FormData): Promise<void> {
   const { repo, user } = await requireUser();
-  const id = uuidField.safeParse(str(formData, "id"));
+  const id = idSchema.safeParse(str(formData, "id"));
   if (!id.success) return;
 
   const entry = (await repo.listEntries(user.id)).find((e) => e.id === id.data);
   if (!entry) return;
 
-  await repo.setPinned(user.id, id.data, !entry.is_pinned);
+  try {
+    await repo.setPinned(user.id, id.data, !entry.is_pinned);
+  } catch {
+    // Over the pin cap (the editor hides Pin at the cap, so only a stale
+    // page or a direct POST lands here) or a row deleted meanwhile. A row
+    // button has nowhere to show an error; the refreshed page shows the truth.
+  }
   revalidatePath("/resume");
 }
 
@@ -346,8 +336,8 @@ export type RequestState = FormState & { token?: string };
 
 export async function requestVerification(_prev: RequestState, formData: FormData): Promise<RequestState> {
   const { repo, user } = await requireUser();
-  const entryId = uuidField.safeParse(str(formData, "entry_id"));
-  const coachId = uuidField.safeParse(str(formData, "coach_id"));
+  const entryId = idSchema.safeParse(str(formData, "entry_id"));
+  const coachId = idSchema.safeParse(str(formData, "coach_id"));
   if (!entryId.success || !coachId.success) {
     return { ok: false, error: "Pick the entry and the coach who saw it." };
   }
@@ -367,11 +357,7 @@ export async function requestVerification(_prev: RequestState, formData: FormDat
 
 const filmSchema = z.object({
   title: z.string().trim().min(3, "Give the clip a title.").max(120),
-  url: z
-    .string()
-    .trim()
-    .url("Enter a full URL.")
-    .refine((url) => /^https?:\/\//i.test(url), "Film links must be web URLs."),
+  url: z.string().trim().pipe(httpUrl),
   season: optionalText.pipe(z.string().max(40).nullable()),
 });
 
@@ -384,12 +370,12 @@ export async function addFilm(_prev: FormState, formData: FormData): Promise<For
     season: str(formData, "season"),
   });
 
-  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
+  if (!parsed.success) return invalid(parsed.error, formData);
 
   try {
     await repo.addFilm(user.id, parsed.data);
   } catch (error) {
-    return failed(error, "Could not add the clip. Try again.");
+    return failed(error, "Could not add the clip. Try again.", formValues(formData));
   }
 
   revalidatePath("/resume");
@@ -398,7 +384,7 @@ export async function addFilm(_prev: FormState, formData: FormData): Promise<For
 
 export async function deleteFilm(formData: FormData): Promise<void> {
   const { repo, user } = await requireUser();
-  const id = uuidField.safeParse(str(formData, "id"));
+  const id = idSchema.safeParse(str(formData, "id"));
   if (!id.success) return;
 
   try {
@@ -412,7 +398,7 @@ export async function deleteFilm(formData: FormData): Promise<void> {
 
 export async function featureFilm(formData: FormData): Promise<void> {
   const { repo, user } = await requireUser();
-  const id = uuidField.safeParse(str(formData, "id"));
+  const id = idSchema.safeParse(str(formData, "id"));
   if (!id.success) return;
 
   try {
@@ -451,12 +437,12 @@ export async function addCoach(_prev: FormState, formData: FormData): Promise<Fo
     phone: str(formData, "phone"),
   });
 
-  if (!parsed.success) return { ok: false, error: firstIssue(parsed.error) };
+  if (!parsed.success) return invalid(parsed.error, formData);
 
   try {
     await repo.addCoach(user.id, parsed.data);
   } catch (error) {
-    return failed(error, "Could not add the reference. Try again.");
+    return failed(error, "Could not add the reference. Try again.", formValues(formData));
   }
 
   revalidatePath("/resume");
@@ -465,7 +451,7 @@ export async function addCoach(_prev: FormState, formData: FormData): Promise<Fo
 
 export async function deleteCoach(formData: FormData): Promise<void> {
   const { repo, user } = await requireUser();
-  const id = uuidField.safeParse(str(formData, "id"));
+  const id = idSchema.safeParse(str(formData, "id"));
   if (!id.success) return;
 
   try {

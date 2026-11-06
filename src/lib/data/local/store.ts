@@ -24,7 +24,8 @@ import { buildSeed } from "./seed";
  * hundred rows; parsing them on every request costs less than a database
  * round trip would, and a single file is something a developer can open,
  * read, and delete. Writes go to a temp file and rename into place so a
- * crash mid-write never leaves a half-written database.
+ * crash mid-write never leaves a half-written database, and every
+ * read-modify-write runs under one in-process lock (`mutate`).
  *
  * Reads are never cached — see `readDb` for why.
  */
@@ -152,15 +153,42 @@ export function writeDb(db: Db): void {
 }
 
 /**
- * Applies a change to a fresh copy of the database and persists it. The
- * callback receives its own clone, so a thrown error leaves the file as it
- * was and no caller ever sees a half-applied change.
+ * The tail of the write queue. Kept on `globalThis` rather than in module
+ * state: Next's dev server can hold several instances of this module in one
+ * process (see `readDb`), and a lock each instance keeps to itself would
+ * serialize nothing.
  */
-export function mutate<T>(change: (db: Db) => T): T {
-  const db = structuredClone(readDb());
-  const result = change(db);
-  writeDb(db);
-  return result;
+const LOCK = Symbol.for("roster.local.store.lock");
+type LockHolder = { [LOCK]?: Promise<unknown> };
+
+/**
+ * Runs `task` once every earlier task has settled. A failure releases the
+ * lock like a success does — one bad write must not wedge every write after.
+ */
+export function withStoreLock<T>(task: () => T | Promise<T>): Promise<T> {
+  const holder = globalThis as LockHolder;
+  const previous = holder[LOCK] ?? Promise.resolve();
+  const run = previous.then(task, task);
+  holder[LOCK] = run.catch(() => undefined);
+  return run;
+}
+
+/**
+ * Applies a change to a fresh copy of the database and persists it, holding
+ * the store lock from the read to the write so two concurrent saves can
+ * never both start from the same snapshot and silently drop one change.
+ *
+ * The callback receives its own clone, so a thrown error leaves the file as
+ * it was and no caller ever sees a half-applied change. It may be async;
+ * the lock is held until it settles.
+ */
+export function mutate<T>(change: (db: Db) => T | Promise<T>): Promise<T> {
+  return withStoreLock(async () => {
+    const db = structuredClone(readDb());
+    const result = await change(db);
+    writeDb(db);
+    return result;
+  });
 }
 
 /** Drops the file so the next read reseeds. Tests and `npm run seed`. */

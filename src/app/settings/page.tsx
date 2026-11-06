@@ -9,6 +9,7 @@ import { Corner, CORNER } from "@/components/ui/marks";
 import { signOut } from "@/lib/actions/auth";
 import { getRepository } from "@/lib/data";
 import { getCurrentUser } from "@/lib/data/auth";
+import { siteHost } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Settings",
@@ -42,7 +43,7 @@ export default async function SettingsPage() {
                 {" · "}
                 {isAthlete ? (
                   <Link href={`/${profile.handle}`} className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
-                    roster.us/{profile.handle}
+                    {siteHost()}/{profile.handle}
                   </Link>
                 ) : (
                   <span className="capitalize">{profile.account_kind}</span>

@@ -96,6 +96,21 @@ export type SearchParams = {
   pageSize?: number;
 };
 
+/** One page of search results and the size of the whole match. `page` is
+ *  the page actually served — out-of-range requests are clamped. */
+export type SearchResult = {
+  athletes: Profile[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+/** What a coach's answer changed — the handle lets the caller revalidate the resume. */
+export type VerificationResponse = {
+  handle: string;
+  outcome: "verified" | "disputed";
+};
+
 export type DataErrorCode = "conflict" | "not_found" | "forbidden" | "invalid" | "unavailable";
 
 /** The one error adapters throw. Actions map `code` to user copy. */

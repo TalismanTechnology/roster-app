@@ -1,7 +1,8 @@
 import type { Profile } from "@/lib/database.types";
 
-import type { SearchParams } from "../types";
-import { isListed } from "./rules";
+import { isListed } from "../rules";
+import { allowsFuzzy, clampPage, clampPageSize, normalizeSearchQuery } from "../search-query";
+import type { SearchParams, SearchResult } from "../types";
 
 /**
  * Mirror of `search_athletes()` in migration 0007: the listing rule, the
@@ -11,11 +12,11 @@ import { isListed } from "./rules";
  * Postgres uses trigram similarity; this uses bigram Dice, which agrees
  * closely enough for a name typed from memory at a meet.
  */
-export function searchProfiles(profiles: Profile[], params: SearchParams): Profile[] {
-  const q = params.q?.trim() ?? "";
+export function searchProfiles(profiles: Profile[], params: SearchParams): SearchResult {
+  const q = normalizeSearchQuery(params.q) ?? "";
   const qLower = q.toLowerCase();
-  const pageSize = Math.min(params.pageSize ?? 24, 100);
-  const page = Math.max(params.page ?? 1, 1);
+  const fuzzy = allowsFuzzy(q || null);
+  const pageSize = clampPageSize(params.pageSize);
 
   const matches = profiles.filter((p) => {
     if (!isListed(p)) return false;
@@ -29,7 +30,7 @@ export function searchProfiles(profiles: Profile[], params: SearchParams): Profi
     return (
       p.display_name.toLowerCase().includes(qLower) ||
       p.handle.toLowerCase().includes(qLower) ||
-      similarity(p.display_name, q) >= 0.3
+      (fuzzy && similarity(p.display_name, q) >= 0.3)
     );
   });
 
@@ -45,8 +46,10 @@ export function searchProfiles(profiles: Profile[], params: SearchParams): Profi
     );
   });
 
+  const total = matches.length;
+  const page = clampPage(params.page, total, pageSize);
   const start = (page - 1) * pageSize;
-  return matches.slice(start, start + pageSize);
+  return { athletes: matches.slice(start, start + pageSize), total, page, pageSize };
 }
 
 function bigrams(text: string): Map<string, number> {

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { after } from "next/server";
 
 import { ResumeDocument } from "@/components/record/ResumeDocument";
 import { Site } from "@/components/shell/Site";
@@ -41,9 +42,14 @@ export async function generateMetadata({ params }: PageProps<"/[handle]">): Prom
       type: "profile",
       url: `/${profile.handle}`,
     },
-    // Only a public resume is indexable. Unlisted means "reachable by link but
-    // not findable", and letting a crawler index it would break that promise.
-    robots: profile.visibility === "public" ? { index: true, follow: true } : { index: false, follow: false },
+    // Only a public resume with something on it is indexable. Unlisted means
+    // "reachable by link but not findable", and letting a crawler index it
+    // would break that promise; an empty record is a thin page that would
+    // sit in search results under the athlete's name saying nothing.
+    robots:
+      profile.visibility === "public" && profile.entry_count > 0
+        ? { index: true, follow: true }
+        : { index: false, follow: false },
   };
 }
 
@@ -65,8 +71,16 @@ export default async function ResumePage({ params }: PageProps<"/[handle]">) {
     repo.listCoaches(profile.id, viewerId),
   ]);
 
-  // Fire-and-forget: the view counter must never delay or fail the render.
-  void repo.recordView(profile.id, viewerId);
+  // After the response: the counter must never delay or fail the render,
+  // but it must actually run — a bare un-awaited promise can be dropped
+  // when the request ends (and a lazy PostgREST call never sends at all).
+  after(async () => {
+    try {
+      await repo.recordView(profile.id, viewerId);
+    } catch (error) {
+      console.error("[roster] recordView failed", error);
+    }
+  });
 
   return (
     <Site>

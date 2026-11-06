@@ -3,8 +3,11 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { CoachContact, Database, FilmClip, Profile, RecordEntry } from "@/lib/database.types";
+import { HANDLE_PATTERN, isReservedHandle } from "@/lib/handles";
 
 import type { Repository } from "../repository";
+import { isSubstantiveEntryChange, MAX_PINNED, SUBSTANTIVE_ENTRY_FIELDS } from "../rules";
+import { clampPage, clampPageSize, escapeLike, normalizeSearchQuery } from "../search-query";
 import {
   DataError,
   type AuthUser,
@@ -15,11 +18,34 @@ import {
   type RecruiterList,
   type RecruiterListDetail,
   type SearchParams,
+  type SearchResult,
   type VerificationRequest,
   type VerificationRequestDetail,
+  type VerificationResponse,
 } from "../types";
 
 type Client = SupabaseClient<Database>;
+
+/**
+ * The most rows `search_athletes` is asked for when counting. The function
+ * applies its own LIMIT, so the total is exact up to this and saturates
+ * beyond it — fine for a pager, and it bounds the work an anonymous URL
+ * can ask Postgres to do.
+ */
+const SEARCH_COUNT_WINDOW = 1000;
+
+/**
+ * A write's outcome, made loud. PostgREST reports an RLS refusal or a stale
+ * id as zero rows affected with no error, so "nothing happened" has to be
+ * checked explicitly or a failed delete looks exactly like a successful one.
+ */
+function requireAffected(
+  result: { error: { message: string } | null; count: number | null },
+  noun: string,
+): void {
+  if (result.error) throw new DataError("unavailable", `Could not save the ${noun}. Try again.`);
+  if (result.count === 0) throw new DataError("not_found", `That ${noun} was not found.`);
+}
 
 /**
  * The Supabase adapter. Authorization is RLS: every query runs as the
@@ -80,11 +106,16 @@ export class SupabaseRepository implements Repository {
   }
 
   async isHandleAvailable(handle: string): Promise<boolean> {
-    const { data } = await this.client.from("profiles").select("id").eq("handle", handle).maybeSingle();
+    // The app-side list is newer than the migration's (see handles.ts), so
+    // check it here rather than trusting the insert trigger alone.
+    const h = handle.toLowerCase();
+    if (!HANDLE_PATTERN.test(h) || isReservedHandle(h)) return false;
+    const { data } = await this.client.from("profiles").select("id").eq("handle", h).maybeSingle();
     return !data;
   }
 
   async createProfile(input: NewProfile): Promise<Profile> {
+    if (isReservedHandle(input.handle)) throw new DataError("invalid", "That handle is reserved.");
     const { data, error } = await this.client.from("profiles").insert(input).select("*").single<Profile>();
     if (error) {
       if (error.code === "23505") throw new DataError("conflict", "That handle is taken.");
@@ -128,18 +159,66 @@ export class SupabaseRepository implements Repository {
   }
 
   async updateEntry(profileId: string, entryId: string, patch: Partial<NewEntry>): Promise<RecordEntry> {
-    await this.client.from("achievements").update(patch).eq("id", entryId).eq("profile_id", profileId);
+    const { data: current, error: readError } = await this.client
+      .from("achievements")
+      .select(SUBSTANTIVE_ENTRY_FIELDS.join(","))
+      .eq("id", entryId)
+      .eq("profile_id", profileId)
+      .maybeSingle<Partial<Record<(typeof SUBSTANTIVE_ENTRY_FIELDS)[number], unknown>>>();
+    if (readError) throw new DataError("unavailable", "Could not save the entry. Try again.");
+    if (!current) throw new DataError("not_found", "That entry was not found.");
+
+    const fields = Object.fromEntries(
+      SUBSTANTIVE_ENTRY_FIELDS.filter((f) => patch[f] !== undefined).map((f) => [f, patch[f]]),
+    ) as Partial<NewEntry>;
+    // Same rule as the local adapter: a coach vouched for the old values.
+    // There is no verification_requests table here yet, so there is no
+    // pending link to expire — the reset is the whole of it.
+    const reset = isSubstantiveEntryChange(current, patch) ? { verification: "unverified" as const, verified_at: null } : {};
+
+    const result = await this.client
+      .from("achievements")
+      .update({ ...fields, ...reset }, { count: "exact" })
+      .eq("id", entryId)
+      .eq("profile_id", profileId);
+    if (result.error?.code === "23514") {
+      throw new DataError("invalid", "Check the date and placement — one of them is out of range.");
+    }
+    requireAffected(result, "entry");
+
     const { data } = await this.client.from("record_entries").select("*").eq("id", entryId).single<RecordEntry>();
     if (!data) throw new DataError("not_found", "That entry was not found.");
     return data;
   }
 
   async deleteEntry(profileId: string, entryId: string): Promise<void> {
-    await this.client.from("achievements").delete().eq("id", entryId).eq("profile_id", profileId);
+    requireAffected(
+      await this.client.from("achievements").delete({ count: "exact" }).eq("id", entryId).eq("profile_id", profileId),
+      "entry",
+    );
   }
 
   async setPinned(profileId: string, entryId: string, isPinned: boolean): Promise<void> {
-    await this.client.from("achievements").update({ is_pinned: isPinned }).eq("id", entryId).eq("profile_id", profileId);
+    if (isPinned) {
+      const { count, error } = await this.client
+        .from("achievements")
+        .select("id", { count: "exact", head: true })
+        .eq("profile_id", profileId)
+        .eq("is_pinned", true)
+        .neq("id", entryId);
+      if (error) throw new DataError("unavailable", "Could not save the entry. Try again.");
+      if ((count ?? 0) >= MAX_PINNED) {
+        throw new DataError("invalid", `You can pin up to ${MAX_PINNED} entries. Unpin one first.`);
+      }
+    }
+    requireAffected(
+      await this.client
+        .from("achievements")
+        .update({ is_pinned: isPinned }, { count: "exact" })
+        .eq("id", entryId)
+        .eq("profile_id", profileId),
+      "entry",
+    );
   }
 
   // --- film ---------------------------------------------------------------
@@ -167,7 +246,10 @@ export class SupabaseRepository implements Repository {
   }
 
   async deleteFilm(profileId: string, clipId: string): Promise<void> {
-    await this.client.from("film_clips").delete().eq("id", clipId).eq("profile_id", profileId);
+    requireAffected(
+      await this.client.from("film_clips").delete({ count: "exact" }).eq("id", clipId).eq("profile_id", profileId),
+      "clip",
+    );
   }
 
   async featureFilm(profileId: string, clipId: string): Promise<void> {
@@ -201,7 +283,10 @@ export class SupabaseRepository implements Repository {
   }
 
   async deleteCoach(profileId: string, coachId: string): Promise<void> {
-    await this.client.from("coach_contacts").delete().eq("id", coachId).eq("profile_id", profileId);
+    requireAffected(
+      await this.client.from("coach_contacts").delete({ count: "exact" }).eq("id", coachId).eq("profile_id", profileId),
+      "reference",
+    );
   }
 
   // --- verification (needs a verification_requests table; see types.ts) ---
@@ -214,7 +299,7 @@ export class SupabaseRepository implements Repository {
     return null;
   }
 
-  async respondToVerification(): Promise<void> {
+  async respondToVerification(): Promise<VerificationResponse> {
     throw new DataError("unavailable", "Verification by link is not wired to Supabase yet.");
   }
 
@@ -225,8 +310,11 @@ export class SupabaseRepository implements Repository {
   // --- signals ------------------------------------------------------------
 
   async recordView(profileId: string): Promise<void> {
-    // Fire-and-forget: the counter must never delay or fail a render.
-    void this.client.rpc("record_profile_view", { target: profileId });
+    // Awaited: a PostgREST builder is lazy and sends nothing until it is
+    // awaited, so the old `void rpc(…)` never reached the database. The page
+    // schedules this with `after()`, which keeps it off the render path.
+    const { error } = await this.client.rpc("record_profile_view", { target: profileId });
+    if (error) throw new DataError("unavailable", `Could not record the view: ${error.message}`);
   }
 
   async weeklyViews(profileId: string): Promise<number> {
@@ -241,20 +329,37 @@ export class SupabaseRepository implements Repository {
 
   // --- discovery ----------------------------------------------------------
 
-  async searchAthletes(params: SearchParams): Promise<Profile[]> {
-    const pageSize = params.pageSize ?? 24;
-    const { data } = await this.client.rpc("search_athletes", {
-      q: params.q ?? null,
+  async searchAthletes(params: SearchParams): Promise<SearchResult> {
+    const pageSize = clampPageSize(params.pageSize);
+    const q = normalizeSearchQuery(params.q);
+    const args = {
+      // The function interpolates q into ILIKE '%' || q || '%', so % and _
+      // in a name typed by a stranger must match literally.
+      q: q ? escapeLike(q) : null,
       sport: params.sport ?? null,
       levels: params.level ? [params.level] : null,
       grad_years: params.gradYear ? [params.gradYear] : null,
       regions: params.region ? [params.region.toUpperCase()] : null,
       athlete_positions: null,
       verified_only: params.verifiedOnly ?? false,
-      page_size: pageSize,
-      page_offset: ((params.page ?? 1) - 1) * pageSize,
-    });
-    return data ?? [];
+    };
+    const fetchPage = (page: number) =>
+      this.client.rpc("search_athletes", { ...args, page_size: pageSize, page_offset: (page - 1) * pageSize });
+
+    const requested = Math.max(Math.trunc(params.page ?? 1) || 1, 1);
+    // The count and the requested page in parallel; a page past the end is
+    // refetched clamped, which only costs a second trip on a stale link.
+    const [counted, first] = await Promise.all([
+      this.client.rpc("search_athletes", { ...args, page_size: SEARCH_COUNT_WINDOW, page_offset: 0 }, { count: "exact", head: true }),
+      fetchPage(requested),
+    ]);
+    if (counted.error) throw new DataError("unavailable", "Search is unavailable right now.");
+
+    const total = counted.count ?? 0;
+    const page = clampPage(requested, total, pageSize);
+    const { data, error } = page === requested ? first : await fetchPage(page);
+    if (error) throw new DataError("unavailable", "Search is unavailable right now.");
+    return { athletes: data ?? [], total, page, pageSize };
   }
 
   // --- recruiter lists ----------------------------------------------------
@@ -287,5 +392,9 @@ export class SupabaseRepository implements Repository {
 
   async listsContaining(): Promise<string[]> {
     return [];
+  }
+
+  async listsContainingMany(_ownerId: string, profileIds: string[]): Promise<Record<string, string[]>> {
+    return Object.fromEntries(profileIds.map((id) => [id, []]));
   }
 }

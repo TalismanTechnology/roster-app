@@ -5,6 +5,7 @@ import { useActionState } from "react";
 import { requestVerification, type RequestState } from "@/lib/actions/resume";
 import type { CoachContact } from "@/lib/database.types";
 import { Select } from "@/components/ui/fields";
+import { verifyUrl } from "@/lib/site";
 import { SubmitButton } from "@/components/ui/SubmitButton";
 
 import { CopyButton } from "./CopyButton";
@@ -28,7 +29,8 @@ export function RequestVerification({ entryId, coaches }: { entryId: string; coa
   }
 
   if (state.ok && state.token) {
-    const path = `/verify/${state.token}`;
+    // Absolute: this is pasted into an email, where a bare path means nothing.
+    const path = verifyUrl(state.token);
     return (
       <div className="flex flex-col gap-3" role="status">
         <p className="text-sm">

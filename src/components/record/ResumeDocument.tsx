@@ -85,7 +85,7 @@ export function ResumeDocument({
 
         {coaches.length > 0 && (
           <Block id="references" label="References" count={coaches.length}>
-            <ReferencesSection coaches={coaches} isOwner={isOwner} />
+            <ReferencesSection coaches={coaches} isOwner={isOwner} profile={profile} />
           </Block>
         )}
 

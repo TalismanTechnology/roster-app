@@ -48,7 +48,7 @@ describe("visibility", () => {
   });
   it("unlisted resumes open by link but stay out of search", async () => {
     assert.ok(await repo.getProfileByHandle("elijahbrooks", null));
-    const results = await repo.searchAthletes({ q: "Elijah" });
+    const { athletes: results } = await repo.searchAthletes({ q: "Elijah" });
     assert.equal(results.some((p) => p.handle === "elijahbrooks"), false);
   });
   it("coach contact details need public + recruitable", async () => {
@@ -183,9 +183,9 @@ describe("signals and lists", () => {
 
 describe("search", () => {
   it("tolerates a misspelled name and ranks verified first", async () => {
-    const results = await repo.searchAthletes({ q: "Jordn Reys" });
+    const { athletes: results } = await repo.searchAthletes({ q: "Jordn Reys" });
     assert.equal(results[0]?.handle, "jordanreyes");
-    const football = await repo.searchAthletes({ sport: "football" });
+    const { athletes: football } = await repo.searchAthletes({ sport: "football" });
     assert.ok(football.every((p) => p.primary_sport === "football"));
     assert.ok(football.every((p) => p.visibility === "public"));
   });

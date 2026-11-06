@@ -8,6 +8,7 @@ import { Corner, CORNER, Verified } from "@/components/ui/marks";
 import { SubmitButton } from "@/components/ui/SubmitButton";
 import { LEVEL_OPTIONS } from "@/lib/format";
 import { HANDLE_PATTERN, isReservedHandle } from "@/lib/handles";
+import { siteHost } from "@/lib/site";
 import { SPORTS } from "@/lib/sports";
 
 const IDLE: FormState = { ok: false, error: null };
@@ -27,6 +28,7 @@ const STEPS = [
  * against the repository as the athlete types.
  */
 export function OnboardingForm() {
+  const host = siteHost();
   const [state, formAction] = useActionState(completeOnboarding, IDLE);
   const [step, setStep] = useState(0);
   const [handle, setHandle] = useState("");
@@ -84,7 +86,7 @@ export function OnboardingForm() {
       <div className={step === 0 ? "flex flex-col gap-6" : "hidden"}>
         <Field label="Handle" hint="Your resume's address. Lowercase letters, numbers, underscores.">
           <div className="relative">
-            <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-lg text-ink-subtle">roster.us/</span>
+            <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-lg text-ink-subtle">{host}/</span>
             <TextInput
               name="handle"
               value={handle}
@@ -95,7 +97,9 @@ export function OnboardingForm() {
               autoCorrect="off"
               spellCheck={false}
               autoFocus
-              style={{ paddingLeft: "6.1rem" }}
+              // The prefix is absolutely positioned; reserve roughly its width
+              // (6.1rem for "roster.us/") whatever the configured host is.
+              style={{ paddingLeft: `${(0.61 * (host.length + 1)).toFixed(2)}rem` }}
               aria-describedby="handle-status"
             />
           </div>
@@ -104,7 +108,7 @@ export function OnboardingForm() {
           {availability === "checking" && <span className="text-ink-muted">Checking…</span>}
           {availability === "available" && (
             <>
-              <Verified /> <span>roster.us/{handle.trim().toLowerCase()} is yours.</span>
+              <Verified /> <span>{host}/{handle.trim().toLowerCase()} is yours.</span>
             </>
           )}
           {availability === "taken" && <span className="text-disputed">That handle is taken.</span>}

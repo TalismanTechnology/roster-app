@@ -28,6 +28,8 @@ const schema = z.object({
   NEXT_PUBLIC_SUPABASE_ANON_KEY: optional(z.string()),
   SUPABASE_SERVICE_ROLE_KEY: optional(z.string()),
   NEXT_PUBLIC_SITE_URL: optional(z.url()),
+  /** A real handle the landing page may feature in Supabase mode — opt-in, with the athlete's consent. */
+  ROSTER_DEMO_HANDLE: optional(z.string()),
 });
 
 export type Env = z.infer<typeof schema>;
@@ -65,9 +67,32 @@ export type DataMode = "local" | "supabase";
 /**
  * Which adapter serves this process. `ROSTER_DATA` forces one; otherwise
  * Supabase when real credentials are present, the local file when not.
+ *
+ * Production never falls back silently. A Supabase deploy whose credentials
+ * went missing would otherwise come up serving the seeded JSON demo —
+ * fake athletes, writes to an ephemeral disk — and look healthy doing it.
+ * Local mode in production must be asked for by name with
+ * `ROSTER_DATA=local`. `next build` is exempt: it runs with
+ * NODE_ENV=production on machines that hold no runtime secrets.
  */
 export function dataMode(): DataMode {
-  return env().ROSTER_DATA ?? (isSupabaseConfigured() ? "supabase" : "local");
+  const e = env();
+  if (e.ROSTER_DATA) return e.ROSTER_DATA;
+  if (isSupabaseConfigured()) return "supabase";
+
+  if (e.NODE_ENV === "production" && !isBuildPhase()) {
+    throw new Error(
+      "No data source configured for production: Supabase credentials are missing or placeholders, " +
+        "and ROSTER_DATA is unset. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY, " +
+        "or set ROSTER_DATA=local explicitly to run the file-backed demo. See .env.example.",
+    );
+  }
+  return "local";
+}
+
+/** `next build` sets this while it prerenders; `next start` does not. */
+function isBuildPhase(): boolean {
+  return process.env.NEXT_PHASE === "phase-production-build";
 }
 
 /** The project URL and anon key, or a clear error naming what is missing. */

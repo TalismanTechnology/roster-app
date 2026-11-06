@@ -15,9 +15,12 @@ import { EditorSection, Panel } from "@/components/editor/ProfileSections";
 import { VerificationMark } from "@/components/record/VerificationMark";
 import { Field, Select, TextArea, TextInput } from "@/components/ui/fields";
 import { Unverified } from "@/components/ui/marks";
+import { canPinAnother, MAX_PINNED } from "@/lib/data/rules";
 import type { VerificationRequest } from "@/lib/data/types";
+import { latestToday } from "@/lib/dates";
 import { KIND_OPTIONS, kindLabel, recordDate } from "@/lib/format";
 import { providerLabel } from "@/lib/film";
+import { verifyUrl } from "@/lib/site";
 
 import { CopyButton } from "./CopyButton";
 import { RequestVerification } from "./RequestVerification";
@@ -97,7 +100,7 @@ function EntryFields({ entry }: { entry?: RecordEntry }) {
         </Field>
 
         <Field label="Date">
-          <TextInput name="achieved_on" type="date" defaultValue={entry?.achieved_on ?? ""} required />
+          <TextInput name="achieved_on" type="date" max={latestToday()} defaultValue={entry?.achieved_on ?? ""} required />
         </Field>
       </div>
 
@@ -147,13 +150,14 @@ export function RecordSection({
   // it is there the moment the request is made and on every visit after.
   const pendingByEntry = new Map(requests.filter((r) => r.status === "pending").map((r) => [r.achievement_id, r]));
   const coachById = new Map(coaches.map((c) => [c.id, c]));
+  const canPin = canPinAnother(entries);
 
   return (
     <EditorSection
       id="record"
       title="The record"
       count={entries.length}
-      lede="Every PR, result, award, and honor. Pin the three that matter most — they lead your resume — then send each entry to the coach who saw it."
+      lede="Every PR, result, award, and honor. Pin the three that matter most — they lead your resume — then send each entry to the coach who saw it. Editing a verified entry clears its badge."
     >
       {entries.length === 0 ? (
         <Empty>Nothing on the record yet. Add the first entry below.</Empty>
@@ -192,7 +196,13 @@ export function RecordSection({
                 <VerificationMark state={entry.verification} className="mt-1.5" />
 
                 <div className="flex basis-full flex-wrap items-center gap-2">
-                  <RowAction action={togglePinned} id={entry.id} label={entry.is_pinned ? "Unpin" : "Pin"} />
+                  {entry.is_pinned || canPin ? (
+                    <RowAction action={togglePinned} id={entry.id} label={entry.is_pinned ? "Unpin" : "Pin"} />
+                  ) : (
+                    <button type="button" className="btn-row cursor-not-allowed opacity-40" disabled title={`${MAX_PINNED} entries are pinned. Unpin one first.`}>
+                      Pin
+                    </button>
+                  )}
                   <Disclosure summary="Edit">
                     <EditorForm action={updateAchievement} submitLabel="Save entry" compact>
                       <input type="hidden" name="id" value={entry.id} />
@@ -213,9 +223,9 @@ export function RecordSection({
                       Sent to {coachById.get(pending.coach_contact_id)?.name ?? "your coach"} — send them this link:
                     </span>
                     <code className="max-w-full truncate border border-rule bg-paper-sunken px-2 py-1.5 text-sm text-ink-muted">
-                      /verify/{pending.token}
+                      {verifyUrl(pending.token)}
                     </code>
-                    <CopyButton value={`/verify/${pending.token}`} label="Copy link" className="btn-row" />
+                    <CopyButton value={verifyUrl(pending.token)} label="Copy link" className="btn-row" />
                   </div>
                 )}
               </li>

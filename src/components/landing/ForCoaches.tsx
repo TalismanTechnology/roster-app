@@ -22,7 +22,7 @@ const POINTS = [
 /** The search, shown with live results from the seeded roster. */
 export async function ForCoaches() {
   const repo = await getRepository();
-  const results = (await repo.searchAthletes({ sport: "football", gradYear: 2027, region: "TX", pageSize: 3 })).slice(0, 3);
+  const results = (await repo.searchAthletes({ sport: "football", gradYear: 2027, region: "TX", pageSize: 3 })).athletes;
   const query = FILTERS.map(([, q]) => q).join("&");
 
   return (

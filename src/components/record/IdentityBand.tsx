@@ -1,9 +1,11 @@
 import Link from "next/link";
 
 import { Img } from "@/components/ui/Img";
-import { Corner, CORNER, Frame, Verified } from "@/components/ui/marks";
+import { ArrowUpRight, Corner, CORNER, Frame, Verified } from "@/components/ui/marks";
 import type { FilmClip, Profile, RecordEntry } from "@/lib/database.types";
 import { heightLabel, levelLabel, weightLabel } from "@/lib/format";
+import { recordLinks, socialLinks } from "@/lib/links";
+import { siteHost } from "@/lib/site";
 import { sportName } from "@/lib/sports";
 
 import { ShareBar } from "./ShareBar";
@@ -38,7 +40,12 @@ export function IdentityBand({
   ].filter(Boolean);
 
   const label = [levelLabel(profile.level), sportName(profile.primary_sport)].filter(Boolean).join(" · ") || "Athlete";
-  const isContactable = profile.is_recruitable && profile.visibility === "public" && Boolean(profile.contact_email);
+  // Same gate as the contact email and the references: open to recruiting,
+  // on a public resume. Hudl and results pages are the record itself, so
+  // they show whenever the resume does.
+  const isRecruitingOpen = profile.is_recruitable && profile.visibility === "public";
+  const isContactable = isRecruitingOpen && Boolean(profile.contact_email);
+  const links = [...recordLinks(profile), ...(isRecruitingOpen ? socialLinks(profile) : [])];
 
   const stats = [
     { value: profile.verified_count, label: "Verified" },
@@ -68,11 +75,29 @@ export function IdentityBand({
             {profile.identity_verified_at && <Verified className="text-[0.5em]" label="Identity verified" />}
           </h1>
 
-          <p className="mt-2 text-ink-muted">roster.us/{profile.handle}</p>
+          <p className="mt-2 text-ink-muted">
+            {siteHost()}/{profile.handle}
+          </p>
 
           {roster.length > 0 && <p className="mt-5 text-lg font-bold">{roster.join(" · ")}</p>}
           {context.length > 0 && <p className="mt-1 text-ink-muted">{context.join(" · ")}</p>}
           {profile.bio && <p className="mt-5 max-w-2xl whitespace-pre-line leading-relaxed">{profile.bio}</p>}
+
+          {links.length > 0 && (
+            <ul className="mt-5 flex flex-wrap gap-2" aria-label="Links">
+              {links.map((link) => (
+                <li key={link.kind}>
+                  {/* rel=me ties the account to this page; nofollow because
+                      the athlete, not Roster, vouches for the destination. */}
+                  <a href={link.href} rel="me nofollow noopener noreferrer" target="_blank" className="chip group transition-colors hover:border-ink hover:text-ink">
+                    {link.label}
+                    <ArrowUpRight className="!size-3 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                  </a>
+                  <span className="hidden print:inline"> {link.href}</span>
+                </li>
+              ))}
+            </ul>
+          )}
 
           {isOwner && (
             <p className="print-hidden label mt-6 flex flex-wrap items-center gap-x-3 gap-y-1 text-ink-muted">

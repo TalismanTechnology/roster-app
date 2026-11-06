@@ -7,9 +7,11 @@ import { Checkbox, Field, Select, TextInput } from "@/components/ui/fields";
 import { Corner, CORNER, Frame, Verified } from "@/components/ui/marks";
 import { getRepository } from "@/lib/data";
 import { getCurrentUser } from "@/lib/data/auth";
+import { MAX_QUERY_LENGTH, normalizeSearchQuery, pageCount } from "@/lib/data/search-query";
 import type { RecruiterList } from "@/lib/data/types";
 import type { AthleteLevel, Profile } from "@/lib/database.types";
 import { LEVEL_OPTIONS, levelLabel } from "@/lib/format";
+import { toStateCode, US_STATES } from "@/lib/regions";
 import { SPORTS, sportName } from "@/lib/sports";
 
 export const metadata: Metadata = {
@@ -41,34 +43,36 @@ type Filters = {
 export default async function SearchPage({ searchParams }: PageProps<"/search">) {
   const params = await searchParams;
   const filters: Filters = {
-    q: str(params.q),
+    q: normalizeSearchQuery(str(params.q)),
     sport: str(params.sport),
     level: str(params.level),
     gradYear: int(params.class),
-    region: str(params.state)?.toUpperCase() ?? null,
+    region: toStateCode(str(params.state)),
     verifiedOnly: params.verified === "1",
   };
-  const page = Math.max(int(params.page) ?? 1, 1);
 
   const [repo, user] = await Promise.all([getRepository(), getCurrentUser()]);
-  const athletes = await repo.searchAthletes({
+  // The repository clamps the page: `?page=999` serves the last page, not an
+  // empty one that still offers "Previous".
+  const { athletes, total, page, pageSize } = await repo.searchAthletes({
     q: filters.q,
     sport: filters.sport,
     level: filters.level && LEVEL_VALUES.has(filters.level) ? (filters.level as AthleteLevel) : null,
     gradYear: filters.gradYear,
     region: filters.region,
     verifiedOnly: filters.verifiedOnly,
-    page,
+    page: int(params.page) ?? 1,
     pageSize: PAGE_SIZE,
   });
+  const pages = pageCount(total, pageSize);
 
   // Only a recruiter (or coach/staff) saves to lists; athletes never see the control.
   const viewer = user ? await repo.getProfileById(user.id) : null;
   const canSave = Boolean(viewer && viewer.account_kind !== "athlete");
   const lists = canSave && user ? await repo.listLists(user.id) : [];
-  const savedIn = canSave && user
-    ? Object.fromEntries(await Promise.all(athletes.map(async (a) => [a.id, await repo.listsContaining(user.id, a.id)])))
-    : {};
+  // One read for the whole page, not one per row.
+  const savedIn: Record<string, string[]> =
+    canSave && user ? await repo.listsContainingMany(user.id, athletes.map((a) => a.id)) : {};
 
   const active = describe(filters);
 
@@ -93,7 +97,7 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
           <Frame className="self-start lg:sticky lg:top-[calc(var(--header-h)+1rem)] lg:col-span-3">
             <form method="GET" role="search" aria-label="Filters" className="flex flex-col gap-5" style={{ padding: "var(--feature-pad)" }}>
               <Field label="Name or handle">
-                <TextInput name="q" type="search" defaultValue={filters.q ?? ""} placeholder="Reyes" />
+                <TextInput name="q" type="search" defaultValue={filters.q ?? ""} placeholder="Reyes" maxLength={MAX_QUERY_LENGTH} />
               </Field>
               <Field label="Sport">
                 <Select name="sport" defaultValue={filters.sport ?? ""}>
@@ -120,7 +124,14 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
                   <TextInput name="class" type="number" min={1950} max={2100} defaultValue={filters.gradYear ?? ""} placeholder="2027" />
                 </Field>
                 <Field label="State">
-                  <TextInput name="state" maxLength={2} defaultValue={filters.region ?? ""} placeholder="TX" autoCapitalize="characters" />
+                  <Select name="state" defaultValue={filters.region ?? ""}>
+                    <option value="">Any</option>
+                    {US_STATES.map(([code, name]) => (
+                      <option key={code} value={code}>
+                        {code} — {name}
+                      </option>
+                    ))}
+                  </Select>
                 </Field>
               </div>
               <Checkbox name="verified" value="1" defaultChecked={filters.verifiedOnly} label="Verified only" hint="At least one coach-verified entry." />
@@ -140,8 +151,8 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
           <section aria-label="Results" className="min-w-0 lg:col-span-9">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rule pb-3">
               <p className="label text-ink-muted" data-numeric>
-                {athletes.length === 0 ? "No results" : `${athletes.length}${athletes.length === PAGE_SIZE ? "+" : ""} ${athletes.length === 1 ? "athlete" : "athletes"}`}
-                {page > 1 && ` · page ${page}`}
+                {total === 0 ? "No results" : `${total} ${total === 1 ? "athlete" : "athletes"}`}
+                {pages > 1 && ` · page ${page} of ${pages}`}
               </p>
               {active.length > 0 && (
                 <ul className="flex flex-wrap gap-2" aria-label="Active filters">
@@ -164,7 +175,7 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
               </ol>
             )}
 
-            <Pager page={page} hasMore={athletes.length === PAGE_SIZE} filters={filters} />
+            <Pager page={page} hasMore={page < pages} filters={filters} />
           </section>
         </div>
       </main>

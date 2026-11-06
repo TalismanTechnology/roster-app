@@ -9,7 +9,7 @@ import { Img } from "@/components/ui/Img";
 import { Corner, CORNER, Frame } from "@/components/ui/marks";
 import { getRepository } from "@/lib/data";
 import { getCurrentUser } from "@/lib/data/auth";
-import { canRespondToRequest } from "@/lib/data/local/rules";
+import { canRespondToRequest } from "@/lib/data/rules";
 import { entryContext, fullDate, kindLabel, placementLabel } from "@/lib/format";
 import { sportName } from "@/lib/sports";
 
@@ -74,11 +74,12 @@ export default async function VerifyPage({ params }: PageProps<"/verify/[token]"
             </Frame>
 
             <div className="mt-10">
-              {allowed.ok ? (
-                <VerifyForm token={token} coachName={coach.name} coachRole={coach.role} />
-              ) : (
-                <Outcome reason={allowed.reason} request={request} />
-              )}
+              <VerifyForm
+                token={token}
+                coachName={coach.name}
+                coachRole={coach.role}
+                closed={allowed.ok ? null : <Outcome reason={allowed.reason} request={request} />}
+              />
             </div>
           </div>
         </section>
@@ -114,30 +115,9 @@ function Outcome({
       </p>
     );
   }
+  // "Just answered" is VerifyForm's to say — it holds the action's result.
+  // Here the link was answered before this render, by whoever answered it.
   const state = request.status === "verified" ? "verified" : "disputed";
-  // The action's revalidation re-renders this page the moment a coach
-  // answers, so "just answered" is rendered here from the timestamp rather
-  // than held in client state that would unmount. A Server Component renders
-  // once per request, so reading the clock here is deliberate.
-  // eslint-disable-next-line react-hooks/purity
-  const isFresh = Boolean(request.responded_at && Date.now() - new Date(request.responded_at).getTime() < 2 * 60_000);
-
-  if (isFresh) {
-    return (
-      <div role="status" className="flex flex-col gap-2 border-t border-rule pt-5">
-        <p className="font-display flex items-center gap-2 text-display-sm">
-          <VerificationMark state={state} />
-          {request.status === "verified" ? "Verified. Thank you." : "Recorded as disputed."}
-        </p>
-        <p className="text-sm text-ink-muted">
-          {request.status === "verified"
-            ? "The entry now carries your name on the athlete's resume."
-            : "The athlete will see your note and can correct the entry or ask again."}
-        </p>
-        <p className="label text-ink-muted">Each link works once.</p>
-      </div>
-    );
-  }
 
   return (
     <div role="status" className="flex flex-col gap-2 border-t border-rule pt-5">

@@ -1,9 +1,10 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect, useRef } from "react";
 
 import type { FormState } from "@/lib/actions/resume";
 import { FormNotice } from "@/components/ui/fields";
+import { restoreFormValues } from "@/components/ui/restore-form";
 import { SubmitButton } from "@/components/ui/SubmitButton";
 
 const IDLE: FormState = { ok: false, error: null };
@@ -13,6 +14,11 @@ const IDLE: FormState = { ok: false, error: null };
  * The fields arrive as children from a Server Component, which is what lets
  * each section prefill from the database without shipping its data-fetching
  * to the browser.
+ *
+ * On a failed save the action returns what was submitted and the fields are
+ * put back, so one bad value never costs the athlete everything else they
+ * typed. On success the reset stands: an "add" form clears for the next one,
+ * and an edit form shows the saved values the server re-rendered.
  */
 export function EditorForm({
   action,
@@ -27,9 +33,14 @@ export function EditorForm({
   compact?: boolean;
 }) {
   const [state, formAction] = useActionState(action, IDLE);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  useEffect(() => {
+    if (state.error && state.values && formRef.current) restoreFormValues(formRef.current, state.values);
+  }, [state]);
 
   return (
-    <form action={formAction} className="flex flex-col gap-6">
+    <form ref={formRef} action={formAction} className="flex flex-col gap-6">
       {children}
 
       <div className={`flex flex-wrap items-center gap-4 ${compact ? "" : "border-t border-rule pt-5"}`}>

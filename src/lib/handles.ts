@@ -6,16 +6,41 @@
  * migration 0002; the database trigger is the enforcement point, so drift here
  * costs a worse error message, not a broken route.
  *
- * Two callers: `src/proxy.ts` uses it to route single-segment paths, and the
- * onboarding form uses it to refuse a reserved handle before submit.
+ * Callers: the onboarding action and form refuse a reserved handle before
+ * submit, and the local adapter refuses one on insert.
+ *
+ * The migration that brings `reserved_handles` level with this list is
+ * deferred (Wave 4); until then Supabase accepts the newer words here.
  */
 
 export const RESERVED_HANDLES = new Set([
+  // Top-level segments under src/app — a handle here would be shadowed by
+  // the route (or shadow it). The handles test fails if a new route is
+  // added without its name landing in this block.
+  "auth",
+  "lists",
+  "onboarding",
+  "preview",
+  "resume",
+  "search",
+  "settings",
+  "sign-in",
+  "sign-up",
+  "verify",
+  // Metadata files Next serves from the root.
+  "apple-icon",
+  "favicon",
+  "icon",
+  "manifest",
+  "opengraph-image",
+  "robots",
+  "sitemap",
+  "twitter-image",
+  // Words held for routes and pages that will exist, or that read as official.
   "about",
   "account",
   "admin",
   "api",
-  "auth",
   "edit",
   "explore",
   "help",
@@ -23,23 +48,15 @@ export const RESERVED_HANDLES = new Set([
   "legal",
   "login",
   "logout",
-  "onboarding",
-  "preview",
   "privacy",
   "recruit",
-  "resume",
   "roster",
-  "search",
-  "settings",
-  "sign-in",
   "sign-out",
-  "sign-up",
   "signin",
   "signup",
   "static",
   "support",
   "terms",
-  "verify",
   "www",
 ]);
 

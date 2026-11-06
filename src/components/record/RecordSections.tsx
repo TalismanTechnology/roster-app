@@ -250,12 +250,21 @@ export function AcademicsSection({ profile }: { profile: Profile }) {
 // References
 // ---------------------------------------------------------------------------
 
-export function ReferencesSection({ coaches, isOwner }: { coaches: CoachContact[]; isOwner: boolean }) {
+export function ReferencesSection({
+  coaches,
+  isOwner,
+  profile,
+}: {
+  coaches: CoachContact[];
+  isOwner: boolean;
+  profile: Pick<Profile, "visibility" | "is_recruitable">;
+}) {
   if (coaches.length === 0) return null;
-  // Rows arrive only when the viewer may see them (or is the owner); an
-  // owner whose resume isn't public + recruitable is told what a recruiter
-  // gets instead.
-  const isOwnerOnly = isOwner && coaches.every((c) => !c.email && !c.phone);
+  // Rows arrive only when the viewer may see them, and the owner always
+  // may — so the owner can't tell from the rows whether a recruiter sees
+  // them. The rule can: coach_contacts_select needs a public resume that is
+  // open to recruiting.
+  const isOwnerOnly = isOwner && !(profile.visibility === "public" && profile.is_recruitable);
 
   return (
     <div>

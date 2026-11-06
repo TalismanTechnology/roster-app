@@ -128,8 +128,10 @@ await step("editor shows the live preview and creates a verification link", asyn
   // from server data, outside the disclosure.
   const code = page.locator("code", { hasText: "/verify/" }).first();
   await code.waitFor({ timeout: 20_000 });
-  const path = (await code.textContent())?.trim();
-  if (!path?.startsWith("/verify/")) throw new Error(`no link: ${path}`);
+  // The link is absolute (NEXT_PUBLIC_SITE_URL); visit its path on this server.
+  const text = (await code.textContent())?.trim() ?? "";
+  const path = text ? new URL(text, base).pathname : "";
+  if (!path.startsWith("/verify/")) throw new Error(`no link: ${text}`);
   globalThis.__verifyPath = path;
   await shot("editor-request");
 });

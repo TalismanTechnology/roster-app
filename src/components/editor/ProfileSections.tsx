@@ -4,6 +4,7 @@ import { EditorForm } from "@/components/editor/EditorForm";
 import { Checkbox, Field, Select, TextArea, TextInput } from "@/components/ui/fields";
 import { Corner, CORNER } from "@/components/ui/marks";
 import { LEVEL_OPTIONS } from "@/lib/format";
+import { US_STATES } from "@/lib/regions";
 import { SPORTS } from "@/lib/sports";
 
 /**
@@ -107,8 +108,15 @@ export function IdentitySection({ profile }: { profile: Profile }) {
               <TextInput name="location" defaultValue={profile.location ?? ""} />
             </Field>
 
-            <Field label="State" hint="Two letters — TX">
-              <TextInput name="region" defaultValue={profile.region ?? ""} maxLength={2} />
+            <Field label="State">
+              <Select name="region" defaultValue={profile.region ?? ""}>
+                <option value="">—</option>
+                {US_STATES.map(([code, name]) => (
+                  <option key={code} value={code}>
+                    {name}
+                  </option>
+                ))}
+              </Select>
             </Field>
 
             <Field label="Height (cm)">
