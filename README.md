@@ -100,7 +100,10 @@ lists need small additions there (see the comments in that file).
 | `npm run audit` | Every route at 320/375/768/1024/1440 + print: overflow, console errors, alt text, control names, labels, heading order |
 | `npm run shots [route]` | Screenshots one route at four widths into `.shots/` (`--section=film`, `--base=url` or `BASE_URL`/`PORT`) |
 | `npm run seed` | Rebuild `.data/roster.json` |
+| `npm run moderate -- reports \| suspend <handle> \| reinstate <handle>` | Local-mode moderation: open reports, suspend or reinstate a resume |
 | `npm run test:schema` | Schema tests against a local PostgreSQL (`brew install postgresql@16`) |
+
+Going live: [`docs/LAUNCH-CHECKLIST.md`](docs/LAUNCH-CHECKLIST.md) — migrations, domain, env vars, auth redirects, email, backups, moderation. `GET /api/health` reports readiness as JSON.
 
 ## Where things live
 

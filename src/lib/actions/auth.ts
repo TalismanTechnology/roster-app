@@ -8,7 +8,8 @@ import { getRepository } from "@/lib/data";
 import { getCurrentUser, reissueSession, signInWithPassword, signOutEverywhere, signUpWithPassword } from "@/lib/data/auth";
 import { DataError } from "@/lib/data/types";
 import { emailPasswordReset } from "@/lib/email/account";
-import { hit } from "@/lib/rate-limit";
+import { logger } from "@/lib/logger";
+import { limitAll, type Budget } from "@/lib/rate-limit";
 import { safeNext } from "@/lib/safe-next";
 import { absoluteUrl } from "@/lib/site";
 
@@ -46,6 +47,28 @@ const credentialsSchema = z.object({
   password: z.string().min(8, "Password must be at least 8 characters."),
 });
 
+/**
+ * Budgets for the two credential forms (#39), per 10 minutes. Per address
+ * stops one client guessing across accounts; per email stops many clients
+ * guessing one account. Both sit far above a person mistyping a password,
+ * and Supabase's own auth limits stand behind them in production.
+ */
+const CREDENTIAL_WINDOW_MS = 10 * 60_000;
+const SIGN_INS_PER_CLIENT = 30;
+const SIGN_INS_PER_EMAIL = 10;
+/** Sign-ups per address per hour: a family on one connection, not a farm. */
+const SIGN_UPS_PER_CLIENT = 10;
+const SIGN_UP_WINDOW_MS = 60 * 60_000;
+
+const TOO_MANY_ATTEMPTS = "Too many attempts. Wait a few minutes and try again.";
+
+function signInBudgets(client: string, email: string): Budget[] {
+  return [
+    { scope: "sign-in:client", key: client, limit: SIGN_INS_PER_CLIENT, windowMs: CREDENTIAL_WINDOW_MS },
+    { scope: "sign-in:email", key: email.toLowerCase(), limit: SIGN_INS_PER_EMAIL, windowMs: CREDENTIAL_WINDOW_MS },
+  ];
+}
+
 export async function signIn(_prev: AuthFormState, formData: FormData): Promise<AuthFormState> {
   const parsed = credentialsSchema.safeParse({
     email: formData.get("email"),
@@ -55,6 +78,12 @@ export async function signIn(_prev: AuthFormState, formData: FormData): Promise<
   const email = typeof formData.get("email") === "string" ? String(formData.get("email")) : "";
   if (!parsed.success) {
     return { error: parsed.error.issues[0].message, email, fieldErrors: fieldErrorsOf(parsed.error) };
+  }
+
+  const client = await clientKey();
+  if (!limitAll(signInBudgets(client, parsed.data.email))) {
+    logger.warn("auth.sign_in.rate_limited");
+    return { error: TOO_MANY_ATTEMPTS, email };
   }
 
   const result = await signInWithPassword(parsed.data.email, parsed.data.password);
@@ -72,6 +101,11 @@ export async function signUp(_prev: AuthFormState, formData: FormData): Promise<
   const email = typeof formData.get("email") === "string" ? String(formData.get("email")) : "";
   if (!parsed.success) {
     return { error: parsed.error.issues[0].message, email, fieldErrors: fieldErrorsOf(parsed.error) };
+  }
+
+  if (!limitAll([{ scope: "sign-up:client", key: await clientKey(), limit: SIGN_UPS_PER_CLIENT, windowMs: SIGN_UP_WINDOW_MS }])) {
+    logger.warn("auth.sign_up.rate_limited");
+    return { error: TOO_MANY_ATTEMPTS, email };
   }
 
   const result = await signUpWithPassword(parsed.data.email, parsed.data.password);
@@ -123,10 +157,12 @@ export async function requestPasswordReset(_prev: ResetRequestState, formData: F
 
   // Both budgets apply to any address, known or not, so hitting one says
   // nothing about the account — only that the form was used too often.
-  const withinBudget =
-    hit("reset:client", await clientKey(), RESETS_PER_CLIENT, RESET_WINDOW_MS) &&
-    hit("reset:email", parsed.data.email, RESETS_PER_EMAIL, RESET_WINDOW_MS);
+  const withinBudget = limitAll([
+    { scope: "reset:client", key: await clientKey(), limit: RESETS_PER_CLIENT, windowMs: RESET_WINDOW_MS },
+    { scope: "reset:email", key: parsed.data.email, limit: RESETS_PER_EMAIL, windowMs: RESET_WINDOW_MS },
+  ]);
   if (!withinBudget) {
+    logger.warn("auth.reset.rate_limited");
     return { error: "Too many reset requests. Wait a few minutes and try again.", email };
   }
 
@@ -145,7 +181,7 @@ export async function requestPasswordReset(_prev: ResetRequestState, formData: F
   } catch (error) {
     if (error instanceof DataError && error.code === "rate_limited") return { error: error.message, email };
     // Anything else is ours to log, not theirs to learn from.
-    console.error("[auth] password reset request failed:", error instanceof Error ? error.message : error);
+    logger.error("auth.reset.failed", { error });
   }
   return { error: null, sent: true, email: parsed.data.email };
 }

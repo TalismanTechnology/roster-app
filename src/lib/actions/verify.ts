@@ -5,10 +5,12 @@ import { z } from "zod";
 import { getRepository } from "@/lib/data";
 import { getCurrentUser } from "@/lib/data/auth";
 import { emailAthleteAnswer } from "@/lib/email/verification";
+import { logger } from "@/lib/logger";
+import { limitAll } from "@/lib/rate-limit";
 import { revalidateProfile } from "@/lib/revalidate";
 
 import { fieldErrorsOf } from "./schemas";
-import { failed, formValues, str, type FormValues } from "./shared";
+import { clientKey, failed, formValues, str, type FormValues } from "./shared";
 
 /**
  * A coach's answer to a verification request. No account required: the
@@ -57,6 +59,15 @@ const schema = z.object({
     .transform((v) => (v === "" ? null : v)),
 });
 
+/**
+ * Answers per 10 minutes (#39). A coach answering a batch of five entries
+ * from one athlete posts five times; a script trying tokens posts thousands.
+ * The per-link budget keeps one link from being hammered from many places.
+ */
+const ANSWER_WINDOW_MS = 10 * 60_000;
+const ANSWERS_PER_CLIENT = 40;
+const ANSWERS_PER_LINK = 15;
+
 export async function respondVerification(_prev: VerifyFormState, formData: FormData): Promise<VerifyFormState> {
   const parsed = schema.safeParse({
     token: str(formData, "token"),
@@ -87,6 +98,15 @@ export async function respondVerification(_prev: VerifyFormState, formData: Form
       values: formValues(formData),
       fieldErrors: { attest: ["Tick this to verify."] },
     };
+  }
+
+  const withinBudget = limitAll([
+    { scope: "verify:client", key: await clientKey(), limit: ANSWERS_PER_CLIENT, windowMs: ANSWER_WINDOW_MS },
+    { scope: "verify:link", key: token, limit: ANSWERS_PER_LINK, windowMs: ANSWER_WINDOW_MS },
+  ]);
+  if (!withinBudget) {
+    logger.warn("verify.respond.rate_limited");
+    return { ok: false, error: "Too many answers from here at once. Wait a few minutes and try again.", values: formValues(formData) };
   }
 
   const [repo, user] = await Promise.all([getRepository(), getCurrentUser()]);

@@ -2,9 +2,11 @@ import Link from "next/link";
 
 import { Img } from "@/components/ui/Img";
 import { ArrowUpRight, Corner, CORNER, Frame, Verified } from "@/components/ui/marks";
+import { contactGate, type ContactGate } from "@/lib/contact";
 import type { FilmClip, Profile, RecordEntry } from "@/lib/database.types";
 import { heightLabel, levelLabel, weightLabel } from "@/lib/format";
 import { recordLinks, socialLinks } from "@/lib/links";
+import { signInHref } from "@/lib/safe-next";
 import { siteHost } from "@/lib/site";
 import { sportName } from "@/lib/sports";
 
@@ -21,11 +23,14 @@ export function IdentityBand({
   entries,
   film,
   isOwner,
+  contact,
 }: {
   profile: Profile;
   entries: RecordEntry[];
   film: FilmClip[];
   isOwner: boolean;
+  /** What "Contact" may show this viewer (lib/contact.ts). Omitted: the profile as given, revealed. */
+  contact?: ContactGate;
 }) {
   const roster = [
     profile.positions.length > 0 ? profile.positions.join(" / ") : null,
@@ -45,7 +50,8 @@ export function IdentityBand({
   // on a public resume. Hudl and results pages are the record itself, so
   // they show whenever the resume does.
   const isRecruitingOpen = profile.is_recruitable && profile.visibility === "public";
-  const isContactable = isRecruitingOpen && Boolean(profile.contact_email);
+  // Signed-out visitors and athletes get a masked hint, never the address (#44).
+  const gate = contact ?? contactGate(profile, { id: profile.id, account_kind: profile.account_kind });
   const links = [...recordLinks(profile), ...(isRecruitingOpen ? socialLinks(profile) : [])];
 
   const stats = [
@@ -134,13 +140,30 @@ export function IdentityBand({
             </dl>
 
             <div className="print-hidden flex flex-wrap items-center gap-2 border-t border-rule pt-4">
-              {isContactable && (
-                <a href={`mailto:${profile.contact_email}`} className="btn-primary min-h-9 px-4 text-sm">
+              {gate.state === "revealed" && gate.email && (
+                <a href={`mailto:${gate.email}`} className="btn-primary min-h-9 px-4 text-sm">
                   Contact
                 </a>
               )}
+              {gate.state === "revealed" && gate.phone && (
+                <a href={`tel:${gate.phone}`} className="btn-outline min-h-9 px-4 text-sm">
+                  Call
+                </a>
+              )}
+              {gate.state === "gated" && (
+                <Link href={signInHref(`/${profile.handle}`)} className="btn-primary min-h-9 px-4 text-sm" data-contact-gate>
+                  Request contact
+                </Link>
+              )}
               <ShareBar handle={profile.handle} />
             </div>
+            {gate.state === "gated" && (
+              <p className="print-hidden label -mt-2 text-ink-muted">
+                <span className="text-ink-subtle">{[gate.maskedEmail, gate.maskedPhone].filter(Boolean).join(" · ")}</span>
+                <br />
+                Contact details open to signed-in recruiters and coaches.
+              </p>
+            )}
           </div>
         </Frame>
       </div>

@@ -19,6 +19,8 @@ import {
   type NewEntry,
   type NewFilm,
   type NewProfile,
+  type NewProfileReport,
+  type ProfileReport,
   type RecruiterList,
   type RecruiterListDetail,
   type SavedSearch,
@@ -47,6 +49,10 @@ import {
   REQUEST_TTL_DAYS,
   canSeeCoachContact,
   canViewProfile,
+  canReportProfile,
+  DAILY_REPORT_CAP,
+  isStaff,
+  REPORT_DETAIL_MAX,
   CURRENT_PASSWORD_MISMATCH,
   isSubstantiveEntryChange,
   MAX_PINNED,
@@ -56,6 +62,7 @@ import {
 } from "../rules";
 import { removeAvatars, writeAvatar } from "./avatars";
 import { filmThumbnailUrl, parseFilmUrl } from "./film";
+import { applySuspension } from "./moderation";
 import { hashPassword, verifyPassword, verifyPasswordConstantTime } from "./password";
 import { generateToken, hashToken } from "../tokens";
 import { searchProfiles } from "./search";
@@ -211,6 +218,10 @@ export class LocalRepository implements Repository {
         (m) => !lists.has(m.list_id) && m.profile_id !== userId,
       );
       db.saved_searches = db.saved_searches.filter((x) => x.owner_id !== userId);
+      // Reports against the account go with it; reports it filed stay, anonymised
+      // (`profile_reports.reporter_id … on delete set null`).
+      db.profile_reports = db.profile_reports.filter((r) => r.profile_id !== userId);
+      for (const r of db.profile_reports) if (r.reporter_id === userId) r.reporter_id = null;
     });
     removeAvatars(userId);
   }
@@ -263,10 +274,14 @@ export class LocalRepository implements Repository {
       const {
         id: _id, handle: _handle, entry_count: _e, verified_count: _v, created_at: _c,
         account_kind: _k, suspended_at: _s, identity_verified_at: _iv,
+        // The onboarding attestation is a record, not a setting (guard_profile_consent, 0021).
+        age_consent: _ac, consent_at: _ca,
         ...safe
       } = patch;
       void _id; void _handle; void _e; void _v; void _c; void _k; void _s; void _iv;
-      Object.assign(profile, safe, { updated_at: now() });
+      // Given once (from null, both together), then fixed.
+      const consent = profile.age_consent === null && _ac ? { age_consent: _ac, consent_at: _ca ?? now() } : {};
+      Object.assign(profile, safe, consent, { updated_at: now() });
       return profile;
     });
   }
@@ -882,6 +897,53 @@ export class LocalRepository implements Repository {
 
   // --- saved searches -----------------------------------------------------
 
+  // --- moderation (0021) ----------------------------------------------------
+
+  async reportProfile(profileId: string, reporterId: string | null, report: NewProfileReport): Promise<void> {
+    await mutate((db) => {
+      const target = db.profiles.find((p) => p.id === profileId);
+      const reporter = reporterId ? db.profiles.find((p) => p.id === reporterId) : null;
+      if (!canReportProfile(target, reporterId, reporter)) throw new DataError("not_found", "That resume was not found.");
+
+      if (reporterId) {
+        const mine = db.profile_reports.filter((r) => r.reporter_id === reporterId);
+        if (mine.some((r) => r.profile_id === profileId && r.status === "open")) return;
+        if (mine.filter((r) => r.created_at.slice(0, 10) === today()).length >= DAILY_REPORT_CAP) {
+          throw new DataError("rate_limited", "You've sent a lot of reports today. Try again tomorrow.");
+        }
+      }
+      db.profile_reports.push({
+        id: randomUUID(),
+        profile_id: profileId,
+        reporter_id: reporterId,
+        reason: report.reason,
+        detail: report.detail?.slice(0, REPORT_DETAIL_MAX) ?? null,
+        status: "open",
+        created_at: now(),
+        resolved_at: null,
+        resolved_by: null,
+      });
+    });
+  }
+
+  async listProfileReports(actorId: string): Promise<ProfileReport[]> {
+    const db = readDb();
+    if (!isStaff(db.profiles.find((p) => p.id === actorId))) throw new DataError("forbidden", "Staff only.");
+    return db.profile_reports
+      .map((r): ProfileReport => ({
+        id: r.id, profile_id: r.profile_id, reporter_id: r.reporter_id, reason: r.reason, detail: r.detail,
+        status: r.status, created_at: r.created_at, resolved_at: r.resolved_at,
+      }))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }
+
+  async setProfileSuspended(actorId: string, profileId: string, suspended: boolean): Promise<Profile> {
+    return mutate((db) => {
+      if (!isStaff(db.profiles.find((p) => p.id === actorId))) throw new DataError("forbidden", "Staff only.");
+      return applySuspension(db, profileId, suspended, actorId);
+    });
+  }
+
   async listSavedSearches(ownerId: string): Promise<SavedSearch[]> {
     return readDb()
       .saved_searches.filter((x) => x.owner_id === ownerId)
@@ -961,6 +1023,8 @@ export function newProfile(input: NewProfile): Profile {
     identity_verified_at: null,
     suspended_at: null,
     viewer_summary_opt_in: false,
+    age_consent: input.age_consent ?? null,
+    consent_at: input.age_consent ? (input.consent_at ?? at) : null,
     created_at: at,
     updated_at: at,
   };

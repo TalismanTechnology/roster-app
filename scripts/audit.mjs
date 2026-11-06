@@ -34,6 +34,8 @@ const ROUTES = [
   { path: "/preview", as: null },
   { path: "/sign-in", as: null },
   { path: "/sign-up", as: null },
+  { path: "/privacy", as: null },
+  { path: "/terms", as: null },
   { path: "/nobody-here", as: null, expectStatus: 404 },
   { path: "/resume", as: "athlete" },
   { path: "/settings", as: "athlete" },
@@ -204,3 +206,6 @@ if (findings.length) {
   process.exit(1);
 }
 process.stdout.write("\nno findings\n");
+// Explicitly, like the smoke: the server child's pipes keep the event loop
+// alive, and its teardown runs on "exit".
+process.exit(0);

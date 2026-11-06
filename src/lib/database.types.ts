@@ -45,6 +45,9 @@ export type VerifierKind = "roster_staff" | "coach" | "organization" | "integrat
 
 export type ProfileVisibility = "private" | "unlisted" | "public";
 
+/** `profiles.age_consent` (0021). */
+export type AgeConsent = "adult" | "guardian";
+
 export type AccountKind = "athlete" | "coach" | "recruiter" | "brand" | "staff";
 
 export type MembershipRole = "athlete" | "captain" | "coach" | "staff" | "admin";
@@ -114,6 +117,10 @@ export type Profile = {
   suspended_at: string | null;
   /** The athlete opted into "viewed by N recruiters this week" (0020). */
   viewer_summary_opt_in: boolean;
+  /** Onboarding attestation (0021): 18 or older, or a parent / guardian agreed. Null for accounts made before it. */
+  age_consent: AgeConsent | null;
+  /** When `age_consent` was given (0021). */
+  consent_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -299,6 +306,19 @@ export type SavedSearchRow = {
   updated_at: string;
 };
 
+/** `profile_reports` (0021). Staff-readable only; written through `report_profile()`. */
+export type ProfileReportRow = {
+  id: string;
+  profile_id: string;
+  reporter_id: string | null;
+  reason: "impersonation" | "false_record" | "inappropriate" | "minor_safety" | "spam" | "other";
+  detail: string | null;
+  status: "open" | "actioned" | "dismissed";
+  created_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+};
+
 export type RecruiterListMember = {
   list_id: string;
   profile_id: string;
@@ -386,6 +406,7 @@ export type Database = {
       recruiter_lists: Row<RecruiterList>;
       recruiter_list_members: Row<RecruiterListMember>;
       saved_searches: Row<SavedSearchRow>;
+      profile_reports: Row<ProfileReportRow>;
       verification_requests: Row<VerificationRequestRecord>;
       /** Not client-accessible since 0015; typed so service-role code can. */
       posts: Row<Post>;
@@ -430,6 +451,10 @@ export type Database = {
       like_literal: { Args: { value: string }; Returns: string };
       /** 0020. Owner only (auth.uid()); distinct recruiter/coach viewers in the last 7 days. Counts, never ids. */
       weekly_viewer_summary: { Args: Record<string, never>; Returns: Json };
+      /** 0021. Anon-callable; files a report against a resume the caller can see. */
+      report_profile: { Args: { p_profile: string; p_reason: string; p_detail: string | null }; Returns: void };
+      /** 0021. Staff only; sets or clears suspended_at and resolves open reports. */
+      set_profile_suspension: { Args: { p_profile: string; p_suspend: boolean }; Returns: Json };
       search_athletes: {
         Args: {
           q?: string | null;

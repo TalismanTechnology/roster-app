@@ -14,7 +14,7 @@ import type {
 } from "@/lib/database.types";
 
 import { hashToken } from "../tokens";
-import type { SavedSearch, VerificationRequest } from "../types";
+import type { ProfileReport, SavedSearch, VerificationRequest } from "../types";
 import { dataDir } from "./paths";
 import { buildSeed } from "./seed";
 
@@ -101,6 +101,9 @@ export type PasswordResetRow = {
   used_at: string | null;
 };
 
+/** `profile_reports` (0021): the report plus who resolved it. */
+export type ProfileReportRow = ProfileReport & { resolved_by: string | null };
+
 export type Db = {
   version: 1;
   users: LocalUser[];
@@ -120,6 +123,8 @@ export type Db = {
   password_resets: PasswordResetRow[];
   /** `saved_searches` (0020). Added by `upgrade` to older files. */
   saved_searches: SavedSearch[];
+  /** `profile_reports` (0021). Added by `upgrade` to older files. */
+  profile_reports: ProfileReportRow[];
 };
 
 export function emptyDb(): Db {
@@ -140,6 +145,7 @@ export function emptyDb(): Db {
     recruiter_list_members: [],
     password_resets: [],
     saved_searches: [],
+    profile_reports: [],
   };
 }
 
@@ -185,6 +191,12 @@ function upgrade(db: Db): Db {
   }
   db.password_resets ??= [];
   db.saved_searches ??= [];
+  db.profile_reports ??= [];
+  // 0021 columns: accounts made before the attestation have none.
+  for (const p of db.profiles) {
+    p.age_consent ??= null;
+    p.consent_at ??= null;
+  }
   // 0020 columns, defaulted the way the migration defaults them.
   for (const p of db.profiles) p.viewer_summary_opt_in ??= false;
   for (const a of db.achievements) a.value_numeric ??= null;

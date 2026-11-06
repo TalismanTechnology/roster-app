@@ -13,6 +13,7 @@
  * Usage:  node scripts/smoke.mjs [--base=http://127.0.0.1:3000] [--shots=dir]
  */
 
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { crc32, deflateSync } from "node:zlib";
@@ -159,6 +160,80 @@ await step("unlisted resume is X-Robots-Tag noindex and carries no JSON-LD", asy
   if ((await unlisted.text()).includes("application/ld+json")) throw new Error("unlisted resume emits structured data");
   const listed = await fetch(`${base}/jordanreyes`);
   if (listed.headers.get("x-robots-tag")) throw new Error(`public resume has X-Robots-Tag ${listed.headers.get("x-robots-tag")}`);
+});
+
+await step("legal pages render and are linked from the footer and sign-up", async () => {
+  for (const [path, heading] of [["/privacy", "Your record. Your call."], ["/terms", "Play it straight."]]) {
+    const res = await page.goto(`${base}${path}`, { waitUntil: "networkidle" });
+    if (res.status() !== 200) throw new Error(`${path} returned ${res.status()}`);
+    await page.getByRole("heading", { level: 1, name: heading }).waitFor({ timeout: 10_000 });
+  }
+  const footer = page.locator("footer");
+  for (const name of ["Privacy", "Terms"]) {
+    if (!(await footer.getByRole("link", { name, exact: true }).count())) throw new Error(`footer has no ${name} link`);
+  }
+  await page.goto(`${base}/sign-up`, { waitUntil: "networkidle" });
+  for (const href of ["/privacy", "/terms"]) {
+    if (!(await page.locator(`main a[href="${href}"]`).count())) throw new Error(`sign-up does not link ${href}`);
+  }
+});
+
+await step("health endpoint reports readiness as JSON", async () => {
+  const res = await fetch(`${base}/api/health`);
+  if (res.status !== 200) throw new Error(`/api/health returned ${res.status}`);
+  if (!/no-store/.test(res.headers.get("cache-control") ?? "")) throw new Error("health is cacheable");
+  const body = await res.json();
+  if (body.service !== "roster" || body.dataMode !== "local") throw new Error(`unexpected body: ${JSON.stringify(body)}`);
+  if (!["ok", "degraded"].includes(body.status)) throw new Error(`status ${body.status}`);
+  for (const check of ["env", "session", "database"]) {
+    if (body.checks?.[check]?.status !== "ok") throw new Error(`check ${check}: ${JSON.stringify(body.checks?.[check])}`);
+  }
+  // `next start` here is production serving local demo data: a warning by design.
+  if (body.checks?.dataMode?.status !== "warn") throw new Error(`check dataMode: ${JSON.stringify(body.checks?.dataMode)}`);
+});
+
+await step("signed out, a resume masks contact details: no mailto, a request-contact gate", async () => {
+  const html = await (await fetch(`${base}/jordanreyes`)).text();
+  if (/mailto:jordanreyes@example\.com/.test(html) || html.includes("jordanreyes@example.com")) throw new Error("raw contact email in signed-out HTML");
+  await page.goto(`${base}/jordanreyes`, { waitUntil: "networkidle" });
+  const gate = page.getByRole("link", { name: "Request contact" });
+  await gate.waitFor({ timeout: 10_000 });
+  if (!/\/sign-in\?next=%2Fjordanreyes/.test((await gate.getAttribute("href")) ?? "")) throw new Error(`gate links to ${await gate.getAttribute("href")}`);
+  await expectText("j••••••••••@example.com");
+});
+
+await step("a visitor reports a profile without an account", async () => {
+  await page.goto(`${base}/devinokafor`, { waitUntil: "networkidle" });
+  await page.getByText("Report this profile", { exact: true }).click();
+  await page.getByLabel(/What's wrong with/).selectOption("impersonation");
+  await page.getByLabel("Details (optional)").fill(`smoke ${stamp}: not the real athlete`);
+  await page.getByRole("button", { name: /send report/i }).click();
+  await expectText("the report is in");
+  if (dataDir) {
+    const db = JSON.parse(readFileSync(path.join(dataDir, "roster.json"), "utf8"));
+    const report = db.profile_reports.find((r) => r.detail === `smoke ${stamp}: not the real athlete`);
+    if (!report || report.reason !== "impersonation" || report.status !== "open") throw new Error(`report not stored: ${JSON.stringify(report)}`);
+  }
+});
+
+await step("a suspended resume 404s and leaves search; reinstating brings it back", async () => {
+  if (!dataDir) return; // needs the store on disk
+  const moderate = (verb) => execFileSync(path.join("node_modules", ".bin", "tsx"), ["--conditions=react-server", "scripts/moderate.ts", verb, "marcusbell"], {
+    env: { ...process.env, ROSTER_DATA: "local", ROSTER_DATA_DIR: dataDir },
+    encoding: "utf8",
+  });
+  moderate("suspend");
+  try {
+    const gone = await page.goto(`${base}/marcusbell`, { waitUntil: "networkidle" });
+    if (gone.status() !== 404) throw new Error(`suspended resume served ${gone.status()}`);
+    if ((await fetch(`${base}/marcusbell/opengraph-image`)).status !== 404) throw new Error("suspended resume still has a share card");
+    await page.goto(`${base}/search?q=Marcus`, { waitUntil: "networkidle" });
+    if (await page.getByText("Marcus Bell").first().isVisible().catch(() => false)) throw new Error("suspended athlete in search");
+  } finally {
+    moderate("reinstate");
+  }
+  const back = await page.goto(`${base}/marcusbell`, { waitUntil: "networkidle" });
+  if (back.status() !== 200) throw new Error(`reinstated resume served ${back.status()}`);
 });
 
 await step("private resume is not found", async () => {
@@ -562,6 +637,14 @@ await step("a recruiter filters by GPA and sort, saves the search, notes a list 
   if (!body.includes("Jordan Reyes") || !body.includes(note)) throw new Error("export is missing the athlete or the note");
 });
 
+await step("a signed-in recruiter can reveal an athlete's contact details", async () => {
+  await page.goto(`${base}/jordanreyes`, { waitUntil: "networkidle" });
+  const contact = page.getByRole("link", { name: "Contact", exact: true });
+  await contact.waitFor({ timeout: 10_000 });
+  if ((await contact.getAttribute("href")) !== "mailto:jordanreyes@example.com") throw new Error(`Contact is ${await contact.getAttribute("href")}`);
+  if (await page.getByRole("link", { name: "Request contact" }).count()) throw new Error("recruiter still sees the gate");
+});
+
 await step("settings: wrong current password is refused, sign out works", async () => {
   await page.goto(`${base}/settings`, { waitUntil: "networkidle" });
   await expectText("recruiter@roster.local");
@@ -603,6 +686,10 @@ await step("sign up → three-step onboarding → editor", async () => {
   // 03 — visibility, then submit
   // The radio input is visually hidden; click the label like a person would.
   await page.getByText("Unlisted", { exact: true }).click();
+  // #44: the age / guardian attestation is required before the resume exists.
+  await page.getByRole("button", { name: /create my resume/i }).click();
+  if (!/\/onboarding$/.test(page.url())) throw new Error("submitted without the age attestation");
+  await page.getByText("I’m 18 or older.", { exact: true }).click();
   await shot("onboarding-03");
   await page.getByRole("button", { name: /create my resume/i }).click();
   await page.waitForURL(/\/resume$/, { timeout: 15_000 });

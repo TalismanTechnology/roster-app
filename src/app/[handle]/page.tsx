@@ -2,10 +2,15 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { after } from "next/server";
 
+import { ReportProfile } from "@/components/record/ReportProfile";
 import { ResumeDocument } from "@/components/record/ResumeDocument";
 import { Site } from "@/components/shell/Site";
+import { contactGate, redactForViewer } from "@/lib/contact";
 import { getRepository } from "@/lib/data";
-import { getCurrentUser } from "@/lib/data/auth";
+import { getCurrentProfile, getCurrentUser } from "@/lib/data/auth";
+import { isStaff } from "@/lib/data/rules";
+import { SAFETY_CONTACT } from "@/lib/legal";
+import { logger } from "@/lib/logger";
 import { profileDescriptor, profileJsonLd, serializeJsonLd } from "@/lib/seo";
 
 /**
@@ -15,6 +20,10 @@ import { profileDescriptor, profileJsonLd, serializeJsonLd } from "@/lib/seo";
  * component never checks permissions itself. A private resume simply comes
  * back null and 404s, which is also the correct answer for privacy: a 403
  * would confirm the handle exists.
+ *
+ * Contact details (#44) are decided here too, once: the profile and the
+ * references are redacted for this viewer before any component sees them
+ * (lib/contact.ts), so a signed-out visitor's HTML never carries an address.
  */
 
 export async function generateMetadata({ params }: PageProps<"/[handle]">): Promise<Metadata> {
@@ -59,21 +68,28 @@ export async function generateMetadata({ params }: PageProps<"/[handle]">): Prom
 
 export default async function ResumePage({ params }: PageProps<"/[handle]">) {
   const { handle } = await params;
-  const [repo, viewer] = await Promise.all([getRepository(), getCurrentUser()]);
+  const [repo, viewer, viewerProfile] = await Promise.all([getRepository(), getCurrentUser(), getCurrentProfile()]);
   const viewerId = viewer?.id ?? null;
   const profile = await repo.getProfileByHandle(handle, viewerId);
 
-  if (!profile) {
+  // The repository already hides a suspended resume (#50) from everyone but
+  // its owner and staff; this says so at the page too, so a regression in
+  // either adapter fails closed.
+  if (!profile || (profile.suspended_at !== null && profile.id !== viewerId && !isStaff(viewerProfile))) {
     notFound();
   }
+  const isOwner = viewerId === profile.id;
 
   // Fetched in parallel — these are independent, and serialising them would
   // add round trips to the page a recruiter judges the product by.
-  const [entries, film, coaches] = await Promise.all([
+  const [entries, film, allCoaches] = await Promise.all([
     repo.listEntries(profile.id),
     repo.listFilm(profile.id),
     repo.listCoaches(profile.id, viewerId),
   ]);
+  const contactViewer = viewerProfile ? { id: viewerProfile.id, account_kind: viewerProfile.account_kind } : null;
+  const contact = contactGate(profile, contactViewer);
+  const shown = redactForViewer(profile, allCoaches, contactViewer);
 
   // After the response: the counter must never delay or fail the render,
   // but it must actually run — a bare un-awaited promise can be dropped
@@ -82,7 +98,7 @@ export default async function ResumePage({ params }: PageProps<"/[handle]">) {
     try {
       await repo.recordView(profile.id, viewerId);
     } catch (error) {
-      console.error("[roster] recordView failed", error);
+      logger.error("profile.record_view.failed", { error, profileId: profile.id });
     }
   });
 
@@ -93,7 +109,25 @@ export default async function ResumePage({ params }: PageProps<"/[handle]">) {
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: serializeJsonLd(profileJsonLd(profile)) }} />
       )}
       <main>
-        <ResumeDocument profile={profile} entries={entries} film={film} coaches={coaches} isOwner={viewerId === profile.id} />
+        {isOwner && profile.suspended_at && (
+          <p role="status" className="border-b border-rule bg-paper-raised/60 py-3 text-sm text-disputed" style={{ paddingInline: "var(--pad-x)" }}>
+            This resume is suspended and hidden from everyone but you. If you think that&rsquo;s a mistake, email{" "}
+            <a href={`mailto:${SAFETY_CONTACT}`} className="underline underline-offset-4">
+              {SAFETY_CONTACT}
+            </a>
+            .
+          </p>
+        )}
+        <ResumeDocument
+          profile={shown.profile}
+          entries={entries}
+          film={film}
+          coaches={shown.coaches}
+          isOwner={isOwner}
+          contact={contact}
+          coachContactHidden={shown.coachContactHidden}
+        />
+        {!isOwner && <ReportProfile profileId={profile.id} name={profile.display_name} />}
       </main>
     </Site>
   );

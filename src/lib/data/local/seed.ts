@@ -208,6 +208,8 @@ function toProfile(id: string, a: SeedAthlete, createdAt: string): Profile {
     identity_verified_at: null,
     suspended_at: null,
     viewer_summary_opt_in: false,
+    age_consent: "adult",
+    consent_at: createdAt,
     created_at: createdAt,
     updated_at: createdAt,
   };

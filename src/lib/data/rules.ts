@@ -351,3 +351,28 @@ export function pickTopMark(
     .sort((a, b) => Number(b.is_pinned) - Number(a.is_pinned) || (b.verified_at ?? "").localeCompare(a.verified_at ?? ""))[0];
   return best ? { title: best.title, value_display: best.value_display, unit: best.unit } : null;
 }
+
+// ---------------------------------------------------------------------------
+// Moderation (0021)
+// ---------------------------------------------------------------------------
+
+/** Reports one signed-in account may file in a UTC day — `report_profile()` enforces the same. */
+export const DAILY_REPORT_CAP = 20;
+
+/** The longest report note kept. `profile_reports_detail_len` (0021). */
+export const REPORT_DETAIL_MAX = 1000;
+
+/**
+ * `report_profile()`: the reporter must be able to see the resume, and
+ * nobody reports their own. Signed-out visitors may report — a recruiter
+ * spotting an impersonation should not need an account to say so.
+ */
+export function canReportProfile(
+  target: Profile | undefined | null,
+  reporterId: string | null,
+  reporter?: Profile | null,
+): boolean {
+  if (!target) return false;
+  if (reporterId !== null && reporterId === target.id) return false;
+  return canViewProfile(target, reporterId, reporter);
+}

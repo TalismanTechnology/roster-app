@@ -5,6 +5,7 @@ import type { CoachContact, FilmClip, Profile, RecordEntry } from "@/lib/databas
 import { entryContext, fullDate, kindLabel, placementLabel, recordDate } from "@/lib/format";
 
 import { posterFor, providerLabel } from "@/lib/film";
+import { signInHref } from "@/lib/safe-next";
 import { formatMeasurable } from "@/lib/sport-events";
 
 import { FilmPlayer } from "./FilmPlayer";
@@ -335,10 +336,13 @@ export function ReferencesSection({
   coaches,
   isOwner,
   profile,
+  contactHidden = false,
 }: {
   coaches: CoachContact[];
   isOwner: boolean;
-  profile: Pick<Profile, "visibility" | "is_recruitable">;
+  profile: Pick<Profile, "visibility" | "is_recruitable" | "handle">;
+  /** Email and phone were withheld from this viewer (lib/contact.ts). */
+  contactHidden?: boolean;
 }) {
   if (coaches.length === 0) return null;
   // Rows arrive only when the viewer may see them, and the owner always
@@ -372,6 +376,14 @@ export function ReferencesSection({
           </li>
         ))}
       </ol>
+      {contactHidden && (
+        <p className="print-hidden label mt-3 text-ink-muted">
+          <Link href={signInHref(`/${profile.handle}`)} className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+            Sign in
+          </Link>{" "}
+          as a recruiter or coach to email or call references.
+        </p>
+      )}
       {isOwnerOnly && (
         <p className="label mt-3 text-ink-muted">
           References appear to recruiters only while this resume is public and you&rsquo;re open to recruiting.

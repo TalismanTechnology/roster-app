@@ -3,9 +3,11 @@
  * address: the handle prefix in the UI, verify links a coach receives,
  * robots and the sitemap.
  *
- * Isomorphic on purpose — Client Components (onboarding's handle prefix)
- * need it too — so it reads `process.env.NEXT_PUBLIC_SITE_URL` literally,
- * which the bundler inlines. `env.ts` validates the same variable on the
+ * Isomorphic, so it reads `process.env.NEXT_PUBLIC_SITE_URL` literally,
+ * which the bundler inlines — at build time in a client bundle, at runtime
+ * on the server. Call it on the server and pass the result down (as the
+ * onboarding page does for its handle prefix), or the two can disagree and
+ * fail hydration. `env.ts` validates the same variable on the
  * server; here a malformed value degrades to the default instead of
  * throwing in someone's browser.
  */

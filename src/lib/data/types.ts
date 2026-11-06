@@ -18,7 +18,9 @@ import type {
 export type AuthUser = { id: string; email: string };
 
 export type NewProfile = Pick<Profile, "id" | "handle" | "display_name" | "level"> &
-  Partial<Pick<Profile, "primary_sport" | "grad_year" | "visibility" | "account_kind" | "title" | "school">>;
+  Partial<
+    Pick<Profile, "primary_sport" | "grad_year" | "visibility" | "account_kind" | "title" | "school" | "age_consent" | "consent_at">
+  >;
 
 export type NewEntry = {
   kind: AchievementKind;
@@ -130,6 +132,27 @@ export type SavedSearch = {
   created_at: string;
   updated_at: string;
 };
+
+/** Why someone reported a resume (#50). Mirrors the `profile_reports.reason` check (0021). */
+export const REPORT_REASONS = ["impersonation", "false_record", "inappropriate", "minor_safety", "spam", "other"] as const;
+export type ReportReason = (typeof REPORT_REASONS)[number];
+
+export type ProfileReportStatus = "open" | "actioned" | "dismissed";
+
+/** `profile_reports` (0021). Readable by staff only. */
+export type ProfileReport = {
+  id: string;
+  profile_id: string;
+  /** The signed-in reporter, or null for a signed-out visitor. */
+  reporter_id: string | null;
+  reason: ReportReason;
+  detail: string | null;
+  status: ProfileReportStatus;
+  created_at: string;
+  resolved_at: string | null;
+};
+
+export type NewProfileReport = { reason: ReportReason; detail: string | null };
 
 /** The order search results come back in (#85). */
 export type SearchSort = "verified_count" | "graduation_year" | "gpa" | "recent";

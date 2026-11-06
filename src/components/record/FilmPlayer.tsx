@@ -62,6 +62,11 @@ export function FilmPlayer({ clip }: { clip: FilmClip }) {
             alt=""
             fill
             sizes="(min-width: 1024px) 60vw, 100vw"
+            // Straight from YouTube, already a sized JPEG, like the clip list's
+            // thumbnails. Through /_next/image the server fetches it itself,
+            // and its SSRF guard 400s whenever the host resolves to a
+            // non-public address (as it does behind a proxy or fake-IP DNS).
+            unoptimized
             className="object-cover opacity-80 transition-opacity duration-(--duration-normal) group-hover:opacity-100"
           />
         )}

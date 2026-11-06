@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 
 import { checkHandle, completeOnboarding, type FormState } from "@/lib/actions/resume";
@@ -10,7 +11,6 @@ import { restoreFormValues } from "@/components/ui/restore-form";
 import { SubmitButton } from "@/components/ui/SubmitButton";
 import { LEVEL_OPTIONS } from "@/lib/format";
 import { HANDLE_PATTERN, isReservedHandle } from "@/lib/handles";
-import { siteHost } from "@/lib/site";
 import { SPORTS } from "@/lib/sports";
 
 const IDLE: FormState = { ok: false, error: null };
@@ -20,7 +20,7 @@ type Availability = "idle" | "checking" | "available" | "taken" | "invalid" | "r
 const STEPS = [
   { n: "01", title: "Claim your handle", fields: ["handle"] },
   { n: "02", title: "Who you are", fields: ["display_name", "primary_sport", "level", "grad_year"] },
-  { n: "03", title: "Who can see it", fields: ["visibility"] },
+  { n: "03", title: "Who can see it", fields: ["visibility", "age_consent"] },
 ];
 
 /** The earliest step holding a field the server refused, or null. */
@@ -42,7 +42,13 @@ const ROLES: { value: OnboardingKind; label: string; body: string }[] = [
  * three-step resume setup below; recruiters and coaches a single short
  * form — they have no resume, so no handle to claim and no sport to pick.
  */
-export function OnboardingForm() {
+/**
+ * `host` comes from the server page: `NEXT_PUBLIC_SITE_URL` is inlined into
+ * the client bundle at build time but read at runtime on the server, so
+ * calling siteHost() here would hydrate a different prefix whenever the two
+ * differ (React #418).
+ */
+export function OnboardingForm({ host }: { host: string }) {
   const [role, setRole] = useState<OnboardingKind>("athlete");
 
   return (
@@ -70,7 +76,7 @@ export function OnboardingForm() {
         </div>
       </fieldset>
 
-      {role === "athlete" ? <AthleteOnboarding /> : <MemberOnboarding kind={role} />}
+      {role === "athlete" ? <AthleteOnboarding host={host} /> : <MemberOnboarding kind={role} />}
     </div>
   );
 }
@@ -117,6 +123,18 @@ function MemberOnboarding({ kind }: { kind: Exclude<OnboardingKind, "athlete"> }
         <SubmitButton pendingLabel="Setting up…">Start searching</SubmitButton>
       </div>
 
+      <p className="label text-ink-muted">
+        By continuing you agree to the{" "}
+        <Link href="/terms" target="_blank" className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+          Terms
+        </Link>{" "}
+        and{" "}
+        <Link href="/privacy" target="_blank" className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+          Privacy Policy
+        </Link>
+        .
+      </p>
+
       <p className="label flex items-center gap-2 text-ink-subtle">
         <Corner d={CORNER.bl} /> No public page is created for {kind === "coach" ? "coach" : "recruiter"} accounts. Lists and saved searches are private to you.
       </p>
@@ -135,8 +153,7 @@ function MemberOnboarding({ kind }: { kind: Exclude<OnboardingKind, "athlete"> }
  * step's heading; finished steps are buttons back; and a disabled Continue
  * says why, in text it is described by.
  */
-function AthleteOnboarding() {
-  const host = siteHost();
+function AthleteOnboarding({ host }: { host: string }) {
   const [state, formAction] = useActionState(completeOnboarding, IDLE);
   const [step, setStep] = useState(0);
   const [handle, setHandle] = useState("");
@@ -366,6 +383,39 @@ function AthleteOnboarding() {
             </label>
           ))}
           <p className="label mt-2 text-ink-muted">You can change this any time from your resume.</p>
+
+          {/* #44: many athletes are minors. Asked once, recorded with a timestamp. */}
+          <fieldset className="mt-4 flex flex-col gap-2 border-t border-rule pt-6">
+            <legend className="label mb-3 text-ink-muted">[ Age &amp; consent ]</legend>
+            {(
+              [
+                ["adult", "I’m 18 or older."],
+                ["guardian", "I’m under 18, and a parent or guardian has agreed to this resume."],
+              ] as const
+            ).map(([value, label]) => (
+              <label
+                key={value}
+                className="relative flex cursor-pointer items-start gap-4 border border-rule p-4 transition-colors has-[:checked]:border-ink has-[:focus-visible]:outline has-[:focus-visible]:outline-2"
+              >
+                <input type="radio" name="age_consent" value={value} required className="peer sr-only" />
+                <span className="mt-1 size-4 shrink-0 rounded-full border border-rule-strong peer-checked:border-[5px] peer-checked:border-ink" aria-hidden />
+                <span className="text-sm">{label}</span>
+              </label>
+            ))}
+            <FieldError name="age_consent" />
+            <p className="label mt-2 text-ink-muted">
+              Under 18? Your contact details are shown only to signed-in recruiters and coaches, and only while you&rsquo;re open to recruiting. By
+              creating your resume you agree to the{" "}
+              <Link href="/terms" target="_blank" className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+                Terms
+              </Link>{" "}
+              and{" "}
+              <Link href="/privacy" target="_blank" className="text-ink underline decoration-rule-strong underline-offset-4 hover:decoration-ink">
+                Privacy Policy
+              </Link>
+              .
+            </p>
+          </fieldset>
         </div>
       </FieldErrors>
 

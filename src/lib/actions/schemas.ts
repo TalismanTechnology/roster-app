@@ -1,6 +1,8 @@
 import { z } from "zod";
 
-import type { AchievementKind, AthleteLevel, ProfileVisibility } from "@/lib/database.types";
+import { REPORT_DETAIL_MAX } from "@/lib/data/rules";
+import { REPORT_REASONS } from "@/lib/data/types";
+import type { AchievementKind, AgeConsent, AthleteLevel, ProfileVisibility } from "@/lib/database.types";
 import { latestToday } from "@/lib/dates";
 import { KIND_OPTIONS, LEVEL_OPTIONS } from "@/lib/format";
 import { HANDLE_PATTERN, isReservedHandle } from "@/lib/handles";
@@ -155,6 +157,22 @@ export const athleteOnboardingSchema = z.object({
   primary_sport: requiredSport,
   grad_year: optionalNumber(z.number().int().min(1950).max(2100)),
   visibility: z.enum(["private", "unlisted", "public"] satisfies ProfileVisibility[]).default("public"),
+  // #44: 18 or older, or a parent or guardian agreed. Required — many
+  // athletes are minors, and the resume publishes their name and school.
+  age_consent: z.enum(["adult", "guardian"] satisfies AgeConsent[], {
+    error: "Confirm you're 18 or older, or that a parent or guardian agreed.",
+  }),
+});
+
+/** Reasons offered by "Report this profile" (#50). */
+export const reportSchema = z.object({
+  profile_id: z.uuid(),
+  reason: z.enum(REPORT_REASONS, { error: "Pick a reason." }),
+  detail: z
+    .string()
+    .trim()
+    .max(REPORT_DETAIL_MAX, `Keep it under ${REPORT_DETAIL_MAX} characters.`)
+    .transform((v) => (v === "" ? null : v)),
 });
 
 /**

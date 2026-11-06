@@ -11,6 +11,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type { Repository } from "../repository";
 import {
   CURRENT_PASSWORD_MISMATCH,
+  DAILY_REPORT_CAP,
   DAILY_REQUEST_CAP,
   emailChangeError,
   ENTRY_WRITE_FIELDS,
@@ -39,6 +40,8 @@ import {
   type NewEntry,
   type NewFilm,
   type NewProfile,
+  type NewProfileReport,
+  type ProfileReport,
   type RecruiterList,
   type RecruiterListDetail,
   type SavedSearch,
@@ -937,6 +940,47 @@ export class SupabaseRepository implements Repository {
     if (error) return out;
     for (const m of data ?? []) out[m.profile_id]?.push(m.list_id);
     return out;
+  }
+
+  // --- moderation (0021; definer functions, staff-only reads) ---------------
+
+  async reportProfile(profileId: string, _reporterId: string | null, report: NewProfileReport): Promise<void> {
+    // The function takes the reporter from auth.uid(), never from the caller.
+    const { error } = await this.client.rpc("report_profile", {
+      p_profile: profileId,
+      p_reason: report.reason,
+      p_detail: report.detail,
+    });
+    if (!error) return;
+    if (error.code === "RS404") throw new DataError("not_found", "That resume was not found.");
+    if (error.code === "RS429") {
+      throw new DataError("rate_limited", `You can send ${DAILY_REPORT_CAP} reports a day. Try again tomorrow.`);
+    }
+    throw new DataError("unavailable", "Could not send the report. Try again.");
+  }
+
+  async listProfileReports(): Promise<ProfileReport[]> {
+    // RLS: profile_reports_select_staff. A non-staff caller reads zero rows,
+    // which would look like "no reports" — so ask first, and say so.
+    const { data: staff } = await this.client.rpc("is_staff");
+    if (!staff) throw new DataError("forbidden", "Staff only.");
+    const { data, error } = await this.client
+      .from("profile_reports")
+      .select("id, profile_id, reporter_id, reason, detail, status, created_at, resolved_at")
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (error) throw new DataError("unavailable", "Could not load reports.");
+    return (data ?? []) as ProfileReport[];
+  }
+
+  async setProfileSuspended(_actorId: string, profileId: string, suspended: boolean): Promise<Profile> {
+    const { data, error } = await this.client.rpc("set_profile_suspension", { p_profile: profileId, p_suspend: suspended });
+    if (error || !data) {
+      if (error?.code === "RS403") throw new DataError("forbidden", "Staff only.");
+      if (error?.code === "RS404") throw new DataError("not_found", "That profile was not found.");
+      throw new DataError("unavailable", "Could not change the suspension. Try again.");
+    }
+    return data as unknown as Profile;
   }
 
   // --- saved searches (0020; owner-only under RLS) -------------------------

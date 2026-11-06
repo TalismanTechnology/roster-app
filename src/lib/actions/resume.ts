@@ -14,7 +14,7 @@ import { emailCoachRequest } from "@/lib/email/verification";
 import { LEVEL_OPTIONS } from "@/lib/format";
 import { handleFromName, isReservedHandle, HANDLE_PATTERN } from "@/lib/handles";
 import { toStateCode } from "@/lib/regions";
-import { hit } from "@/lib/rate-limit";
+import { limitAll } from "@/lib/rate-limit";
 import { revalidateProfile } from "@/lib/revalidate";
 
 import {
@@ -97,12 +97,13 @@ export async function completeOnboarding(_prev: FormState, formData: FormData): 
     primary_sport: str(formData, "primary_sport"),
     grad_year: str(formData, "grad_year"),
     visibility: str(formData, "visibility") || "public",
+    age_consent: str(formData, "age_consent"),
   });
 
   if (!parsed.success) return invalid(parsed.error, formData);
 
   try {
-    await repo.createProfile({ id: user.id, ...parsed.data });
+    await repo.createProfile({ id: user.id, ...parsed.data, consent_at: new Date().toISOString() });
   } catch (error) {
     return failed(error, "Could not create your resume. Try again.", formValues(formData));
   }
@@ -152,6 +153,8 @@ async function completeMemberOnboarding(
  * the namespace to learn who has an account does not.
  */
 const HANDLE_CHECKS_PER_MINUTE = 60;
+/** And per hour, so a patient script pacing itself under the minute budget still runs dry. */
+const HANDLE_CHECKS_PER_HOUR = 600;
 
 /**
  * Live availability for the onboarding form. Read-only, but callable by
@@ -161,7 +164,12 @@ const HANDLE_CHECKS_PER_MINUTE = 60;
 export async function checkHandle(handle: string): Promise<"available" | "taken" | "invalid" | "rate_limited"> {
   const h = String(handle ?? "").trim().toLowerCase();
   if (!HANDLE_PATTERN.test(h) || isReservedHandle(h)) return "invalid";
-  if (!hit("check-handle", await clientKey(), HANDLE_CHECKS_PER_MINUTE, 60_000)) return "rate_limited";
+  const client = await clientKey();
+  const withinBudget = limitAll([
+    { scope: "check-handle", key: client, limit: HANDLE_CHECKS_PER_MINUTE, windowMs: 60_000 },
+    { scope: "check-handle:hour", key: client, limit: HANDLE_CHECKS_PER_HOUR, windowMs: 60 * 60_000 },
+  ]);
+  if (!withinBudget) return "rate_limited";
   const repo = await getRepository();
   return (await repo.isHandleAvailable(h)) ? "available" : "taken";
 }

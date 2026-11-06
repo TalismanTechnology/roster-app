@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { Corner, CORNER } from "@/components/ui/marks";
+import type { ContactGate } from "@/lib/contact";
 import type { CoachContact, FilmClip, Profile, RecordEntry } from "@/lib/database.types";
 
 import { IdentityBand } from "./IdentityBand";
@@ -27,12 +28,18 @@ export function ResumeDocument({
   film,
   coaches,
   isOwner = false,
+  contact,
+  coachContactHidden = false,
 }: {
   profile: Profile;
   entries: RecordEntry[];
   film: FilmClip[];
   coaches: CoachContact[];
   isOwner?: boolean;
+  /** The viewer's contact gate (lib/contact.ts); the page computes it. */
+  contact?: ContactGate;
+  /** References carry contact details this viewer was not sent. */
+  coachContactHidden?: boolean;
 }) {
   const sections = [
     { id: "record", label: "Record", show: true },
@@ -45,7 +52,7 @@ export function ResumeDocument({
     // @container: the document lays itself out by its own width, so it is
     // correct at full page, inside the editor's preview column, and in print.
     <article className="print-resume @container">
-      <IdentityBand profile={profile} entries={entries} film={film} isOwner={isOwner} />
+      <IdentityBand profile={profile} entries={entries} film={film} isOwner={isOwner} contact={contact} />
 
       {sections.length > 1 && (
         <nav
@@ -88,7 +95,7 @@ export function ResumeDocument({
 
         {coaches.length > 0 && (
           <Block id="references" label="References" count={coaches.length}>
-            <ReferencesSection coaches={coaches} isOwner={isOwner} profile={profile} />
+            <ReferencesSection coaches={coaches} isOwner={isOwner} profile={profile} contactHidden={coachContactHidden} />
           </Block>
         )}
 

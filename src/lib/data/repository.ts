@@ -12,6 +12,8 @@ import type {
   NewEntry,
   NewFilm,
   NewProfile,
+  NewProfileReport,
+  ProfileReport,
   RecruiterList,
   RecruiterListDetail,
   SavedSearch,
@@ -208,6 +210,24 @@ export interface Repository {
   listsContaining(ownerId: string, profileId: string): Promise<string[]>;
   /** `listsContaining` for a page of athletes in one read: profile id → list ids. */
   listsContainingMany(ownerId: string, profileIds: string[]): Promise<Record<string, string[]>>;
+
+  // --- moderation (0021) ----------------------------------------------------
+  /**
+   * Files a report against a resume (#50). Anyone who can see the resume
+   * may report it, signed in or not (`reporterId` null); the owner may not
+   * report themselves. `not_found` when the resume is not visible to the
+   * reporter. A signed-in reporter's repeat report on the same resume while
+   * one is still open is accepted and dropped — the answer never says.
+   */
+  reportProfile(profileId: string, reporterId: string | null, report: NewProfileReport): Promise<void>;
+  /** Staff only (`forbidden` otherwise). Newest first. */
+  listProfileReports(actorId: string): Promise<ProfileReport[]>;
+  /**
+   * Staff only. Sets or clears `suspended_at`. Suspending resolves the
+   * resume's open reports as actioned. A suspended resume is gone to everyone
+   * but its owner and staff — `canViewProfile` / `can_view_profile`.
+   */
+  setProfileSuspended(actorId: string, profileId: string, suspended: boolean): Promise<Profile>;
 
   // --- saved searches (0020) ------------------------------------------------
   listSavedSearches(ownerId: string): Promise<SavedSearch[]>;

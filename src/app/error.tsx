@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect } from "react";
 
 import { Corner, CORNER } from "@/components/ui/marks";
+import { reportClientError } from "@/lib/report-client-error";
 
 /**
  * The route-level error boundary. Says what happened in plain words,
@@ -11,11 +12,13 @@ import { Corner, CORNER } from "@/components/ui/marks";
  * server log where they belong. The digest is shown so a report can be
  * matched to that log line; the message only in development, because in
  * production a Server Component's message is redacted anyway and a Client
- * Component's could carry anything.
+ * Component's could carry anything. The error is also reported to
+ * /api/errors (#117) so it reaches the logs and any configured sink.
  */
 export default function ErrorPage({ error, retry }: { error: Error & { digest?: string }; retry: () => void }) {
   useEffect(() => {
     console.error(error);
+    reportClientError(error, "route");
   }, [error]);
 
   return (

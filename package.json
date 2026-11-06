@@ -16,6 +16,7 @@
     "db:types": "supabase gen types typescript --linked > src/lib/database.types.ts",
     "test": "tsx --conditions=react-server --test src/lib/data/__tests__/*.test.ts",
     "seed": "tsx --conditions=react-server scripts/seed.ts",
+    "moderate": "tsx --conditions=react-server scripts/moderate.ts",
     "e2e": "node scripts/smoke.mjs",
     "audit": "node scripts/audit.mjs"
   },

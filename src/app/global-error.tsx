@@ -2,6 +2,10 @@
 
 import "./globals.css";
 
+import { useEffect } from "react";
+
+import { reportClientError } from "@/lib/report-client-error";
+
 /**
  * The last boundary: only reached when the root layout itself fails, and it
  * replaces that layout, so it brings its own document. The stylesheet is
@@ -21,6 +25,11 @@ const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", 
 
 export default function GlobalError({ error, retry }: { error: Error & { digest?: string }; retry: () => void }) {
   const showMessage = process.env.NODE_ENV === "development" && error.message;
+
+  // #117: the root layout failed; tell the logs, not just the console.
+  useEffect(() => {
+    reportClientError(error, "global");
+  }, [error]);
 
   return (
     <html lang="en" style={{ colorScheme: "dark", background: "#000" }}>
